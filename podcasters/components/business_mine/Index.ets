@@ -1,0 +1,1 @@
+export { MinePageBuilder, MinePage } from './src/main/ets/pages/MinePage';

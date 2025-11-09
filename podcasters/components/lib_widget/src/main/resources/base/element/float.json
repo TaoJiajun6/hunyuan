@@ -1,0 +1,20 @@
+{
+  "float": [
+    {
+      "name": "loading_img_size",
+      "value": "72vp"
+    },
+    {
+      "name": "nav_header_height",
+      "value": "56vp"
+    },
+    {
+      "name": "head_icon_width",
+      "value": "40vp"
+    },
+    {
+      "name": "nav_icon_width",
+      "value": "20vp"
+    }
+  ]
+}

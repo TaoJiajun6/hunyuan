@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "app_name",
+      "value": "AI办公写作"
+    },
+    {
+      "name": "agcit_huawei_ai_office",
+      "value": "1.0.0"
+    },
+    {
+      "name": "agcittype_huawei_ai_office",
+      "value": "industryTemplate"
+    }
+  ]
+}
