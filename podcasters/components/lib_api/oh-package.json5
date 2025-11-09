@@ -1,0 +1,13 @@
+{
+  "name": "lib_api",
+  "version": "1.0.0",
+  "description": "Please describe the basic information.",
+  "main": "Index.ets",
+  "author": "",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "dayjs": "^1.11.13",
+    "@hw-agconnect/petal-aegis": "^1.4.11-300",
+    "lib_common": "file:../lib_common"
+  }
+}

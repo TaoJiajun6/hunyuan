@@ -1,0 +1,12 @@
+{
+  "module": {
+    "name": "lib_account_test",
+    "type": "feature",
+    "deviceTypes": [
+      "phone",
+      "tablet"
+    ],
+    "deliveryWithInstall": true,
+    "installationFree": false
+  }
+}

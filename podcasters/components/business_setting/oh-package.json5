@@ -1,0 +1,14 @@
+{
+  "name": "business_setting",
+  "version": "1.0.0",
+  "description": "Please describe the basic information.",
+  "main": "Index.ets",
+  "author": "",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "lib_common": "file:../lib_common",
+    "lib_widget": "file:../lib_widget",
+    "lib_account": "file:../lib_account",
+    "lib_api": "file:../lib_api"
+  }
+}

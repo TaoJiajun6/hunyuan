@@ -1,0 +1,88 @@
+{
+  "app": {
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "storeFile": "D:/Develop/hunyuan/podcasters/key/podcasters.p12",
+          "storePassword": "00000018CAD7AC0592DB0F0C0441C79B2535FFC672F8029C173B21B0ED57190F794D0BBA090BD9F2",
+          "keyAlias": "podcasters",
+          "keyPassword": "00000018DFF312C261DE22B65F4B4A8E0E0FE0D803ED3365657ADDEBC89D5C9E7A25E71F9EF2F1EA",
+          "signAlg": "SHA256withECDSA",
+          "profile": "D:/Develop/hunyuan/podcasters/key/podcastersDebug.p7b",
+          "certpath": "D:/Develop/hunyuan/podcasters/key/podcasters.cer"
+        }
+      }
+    ],
+    "products": [
+      {
+        "name": "default",
+        "signingConfig": "default",
+        "targetSdkVersion": "5.0.5(17)",
+        "compatibleSdkVersion": "5.0.5(17)",
+        "runtimeOS": "HarmonyOS",
+        "buildOption": {
+          "strictMode": {
+            "caseSensitiveCheck": true,
+            "useNormalizedOHMUrl": true
+          }
+        }
+      }
+    ],
+    "buildModeSet": [
+      {
+        "name": "debug"
+      },
+      {
+        "name": "release"
+      }
+    ]
+  },
+  "modules": [
+    {
+      "name": "phone",
+      "srcPath": "./products/phone",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "business_mine",
+      "srcPath": "./components/business_mine"
+    },
+    {
+      "name": "business_setting",
+      "srcPath": "./components/business_setting"
+    },
+    {
+      "name": "lib_account",
+      "srcPath": "./components/lib_account"
+    },
+    {
+      "name": "lib_common",
+      "srcPath": "./components/lib_common"
+    },
+    {
+      "name": "lib_widget",
+      "srcPath": "./components/lib_widget"
+    },
+    {
+      "name": "lib_api",
+      "srcPath": "./components/lib_api"
+    },
+    {
+      "name": "module_feedback",
+      "srcPath": "./components/module_feedback"
+    },
+    {
+      "name": "module_imagepreview",
+      "srcPath": "./components/module_imagepreview"
+    }
+  ]
+}

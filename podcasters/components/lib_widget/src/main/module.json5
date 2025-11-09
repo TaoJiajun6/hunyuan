@@ -1,0 +1,10 @@
+{
+  "module": {
+    "name": "lib_widget",
+    "type": "har",
+    "deviceTypes": [
+      "phone",
+      "tablet"
+    ]
+  }
+}

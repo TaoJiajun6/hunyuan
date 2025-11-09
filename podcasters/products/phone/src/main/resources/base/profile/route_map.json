@@ -1,0 +1,79 @@
+{
+  "routerMap": [
+    {
+      "name": "IndexPage",
+      "pageSourceFile": "src/main/ets/pages/IndexPage.ets",
+      "buildFunction": "IndexPageBuilder"
+    },
+    {
+      "name": "SafePage",
+      "pageSourceFile": "src/main/ets/pages/SafePage.ets",
+      "buildFunction": "SafePageBuilder"
+    },
+    {
+      "name": "ChatHistoryPage",
+      "pageSourceFile": "src/main/ets/pages/chat/ChatHistoryPage.ets",
+      "buildFunction": "ChatHistoryPageBuilder"
+    },
+    {
+      "name": "AISummaryPage",
+      "pageSourceFile": "src/main/ets/pages/office/AISummaryPage.ets",
+      "buildFunction": "AISummaryPageBuilder"
+    },
+    {
+      "name": "PaperWritingPage",
+      "pageSourceFile": "src/main/ets/pages/office/PaperWritingPage.ets",
+      "buildFunction": "PaperWritingPageBuilder"
+    },
+    {
+      "name": "OfficeHistoryPage",
+      "pageSourceFile": "src/main/ets/pages/office/OfficeHistoryPage.ets",
+      "buildFunction": "OfficeHistoryPageBuilder"
+    },
+    {
+      "name": "OfficeResultPage",
+      "pageSourceFile": "src/main/ets/pages/office/OfficeResultPage.ets",
+      "buildFunction": "OfficeResultPageBuilder"
+    },
+    {
+      "name": "PrivacyPage",
+      "pageSourceFile": "src/main/ets/pages/PrivacyPage.ets",
+      "buildFunction": "PrivacyPageBuilder"
+    },
+    {
+      "name": "AgreePrivacyPage",
+      "pageSourceFile": "src/main/ets/pages/AgreeDialogPage.ets",
+      "buildFunction": "AgreePrivacyPageBuilder"
+    },
+    {
+      "name": "SplashPage",
+      "pageSourceFile": "src/main/ets/pages/SplashPage.ets",
+      "buildFunction": "SplashPageBuilder"
+    },
+    {
+      "name": "PodcastPage",
+      "pageSourceFile": "src/main/ets/pages/podcast/PodcastPage.ets",
+      "buildFunction": "PodcastPageBuilder"
+    },
+    {
+      "name": "PodcastMultiRolePage",
+      "pageSourceFile": "src/main/ets/pages/podcast/PodcastMultiRolePage.ets",
+      "buildFunction": "PodcastMultiRolePageBuilder"
+    },
+    {
+      "name": "PodcastCharacterPage",
+      "pageSourceFile": "src/main/ets/pages/podcast/PodcastCharacterPage.ets",
+      "buildFunction": "PodcastCharacterPageBuilder"
+    },
+    {
+      "name": "PodcastDeepPage",
+      "pageSourceFile": "src/main/ets/pages/podcast/PodcastDeepPage.ets",
+      "buildFunction": "PodcastDeepPageBuilder"
+    },
+    {
+      "name": "PodcastResultPage",
+      "pageSourceFile": "src/main/ets/pages/podcast/PodcastResultPage.ets",
+      "buildFunction": "PodcastResultPageBuilder"
+    }
+  ]
+}

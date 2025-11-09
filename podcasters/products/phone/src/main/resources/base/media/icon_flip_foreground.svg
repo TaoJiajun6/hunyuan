@@ -1,0 +1,33 @@
+<svg width="192.000000" height="192.000000" viewBox="0 0 192 192" fill="none" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<desc>
+			Created with Pixso.
+	</desc>
+	<defs>
+		<linearGradient x1="24.760386" y1="145.676422" x2="126.254135" y2="145.968735" id="paint_linear_76_4639_0" gradientUnits="userSpaceOnUse">
+			<stop stop-color="#6CD1FF"/>
+			<stop offset="1.000000" stop-color="#2272F3"/>
+		</linearGradient>
+		<linearGradient x1="0.385370" y1="11.685349" x2="101.879501" y2="11.977707" id="paint_linear_76_4640_0" gradientUnits="userSpaceOnUse">
+			<stop stop-color="#2272F3"/>
+			<stop offset="0.778626" stop-color="#6CD1FF"/>
+		</linearGradient>
+		<linearGradient x1="0.233587" y1="11.685387" x2="61.753986" y2="11.977707" id="paint_linear_76_4641_0" gradientUnits="userSpaceOnUse">
+			<stop stop-color="#6CD1FF"/>
+			<stop offset="1.000000" stop-color="#2272F3"/>
+		</linearGradient>
+		<linearGradient x1="-0.585209" y1="8.320496" x2="78.720795" y2="8.432526" id="paint_linear_76_4642_0" gradientUnits="userSpaceOnUse">
+			<stop stop-color="#2272F3"/>
+			<stop offset="1.000000" stop-color="#6CD1FF"/>
+		</linearGradient>
+		<linearGradient x1="116.250015" y1="59.062527" x2="107.625031" y2="35.250034" id="paint_linear_76_4643_0" gradientUnits="userSpaceOnUse">
+			<stop stop-color="#6CD1FF"/>
+			<stop offset="1.000000" stop-color="#BEEBFF" stop-opacity="0.000000"/>
+		</linearGradient>
+	</defs>
+	<rect id="Foreground" width="192.000000" height="192.000000" fill="#FF4A4A" fill-opacity="0"/>
+	<rect id="矩形 3447" x="24.375015" y="133.991058" rx="11.250000" width="101.694366" height="22.500000" transform="rotate(-60 24.375015 133.991058)" fill="url(#paint_linear_76_4639_0)" fill-opacity="1.000000"/>
+	<rect id="矩形 3448" rx="11.250000" width="101.694740" height="22.500000" transform="matrix(-0.5 -0.866025 -0.866025 0.5 134.261 133.82)" fill="url(#paint_linear_76_4640_0)" fill-opacity="1.000000"/>
+	<rect id="矩形 3451" rx="11.250000" width="61.642002" height="22.500000" transform="matrix(-0.960641 -0.277794 -0.277794 0.960641 132.966 123.436)" fill="url(#paint_linear_76_4641_0)" fill-opacity="1.000000"/>
+	<rect id="矩形 3449" rx="9.187500" width="80.437500" height="18.375000" transform="matrix(-0.5 -0.866025 -0.866025 0.5 166.101 131.083)" fill="url(#paint_linear_76_4642_0)" fill-opacity="1.000000"/>
+	<path id="path" d="M118.04 47.83C117.31 46.36 116.12 45.17 115.16 44.47C115.16 44.47 110.74 39.81 114.86 37.71C114.86 37.71 105.5 36.57 102.32 49.8L102.09 50.56C101.52 52.47 101.54 54.98 102.51 56.94C104.68 61.34 110.02 62.94 114.26 60.45C118.49 57.97 120.21 52.23 118.04 47.83Z" fill="url(#paint_linear_76_4643_0)" fill-opacity="1.000000" fill-rule="nonzero"/>
+</svg>

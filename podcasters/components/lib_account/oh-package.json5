@@ -1,0 +1,14 @@
+{
+  "name": "lib_account",
+  "version": "1.0.0",
+  "description": "Please describe the basic information.",
+  "main": "Index.ets",
+  "author": "",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@tencent/wechat_open_sdk": "^1.0.0",
+    "lib_common": "file:../lib_common",
+    "lib_widget": "file:../lib_widget",
+    "lib_api": "file:../lib_api"
+  }
+}
