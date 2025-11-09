@@ -71,6 +71,7 @@ class PodcastGenerator:
         tts_model_dir: Optional[str] = None,
         use_fp16: bool = False,
         use_cuda_kernel: bool = False,
+        device: Optional[str] = None,
         api_client: Optional[SiliconFlowClient] = None
     ):
         """
@@ -81,6 +82,7 @@ class PodcastGenerator:
             tts_model_dir: IndexTTS-2模型目录
             use_fp16: 是否使用FP16精度
             use_cuda_kernel: 是否使用CUDA内核
+            device: 设备类型 (如 'cuda:0', 'cuda', 'cpu')，如果为None则自动检测
             api_client: API客户端实例，如果为None则创建新实例
         """
         # 保存TTS配置（延迟加载）
@@ -88,6 +90,7 @@ class PodcastGenerator:
         self.tts_model_dir = tts_model_dir or INDEXTTS_MODEL_DIR
         self.use_fp16 = use_fp16
         self.use_cuda_kernel = use_cuda_kernel
+        self.device = device
         
         # TTS模型延迟加载（在需要时才加载）
         self.tts: Optional[IndexTTS2] = None
@@ -108,14 +111,27 @@ class PodcastGenerator:
             print(f"配置文件: {self.tts_config_path}")
             print(f"模型目录: {self.tts_model_dir}")
             
+            # 如果没有指定设备，自动检测GPU
+            device = self.device
+            if device is None:
+                if torch.cuda.is_available():
+                    device = "cuda:0"
+                    print(f"🎯 检测到GPU，将使用设备: {device}")
+                else:
+                    device = None  # 让IndexTTS2自动检测
+                    print("⚠️  未检测到GPU，将使用CPU模式")
+            else:
+                print(f"🎯 使用指定设备: {device}")
+            
             self.tts = IndexTTS2(
                 cfg_path=self.tts_config_path,
                 model_dir=self.tts_model_dir,
                 use_fp16=self.use_fp16,
+                device=device,
                 use_cuda_kernel=self.use_cuda_kernel,
                 use_deepspeed=False
             )
-            print("IndexTTS-2模型加载完成！")
+            print(f"✅ IndexTTS-2模型加载完成！使用设备: {self.tts.device}")
     
     def set_role_voice(self, role: str, voice_file: str) -> None:
         """

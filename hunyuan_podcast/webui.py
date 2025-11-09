@@ -17,21 +17,44 @@ from .text_processor import TextProcessor
 
 # 全局播客生成器实例
 podcast_gen: Optional[PodcastGenerator] = None
+# 全局生成器配置
+_generator_config: Optional[dict] = None
 
 
-def init_generator(use_fp16: bool = False, use_cuda_kernel: bool = False):
-    """初始化播客生成器"""
-    global podcast_gen
+def init_generator(use_fp16: bool = None, use_cuda_kernel: bool = None, device: Optional[str] = None):
+    """
+    初始化播客生成器
+    如果参数为None，则使用全局配置
+    """
+    global podcast_gen, _generator_config
+    
+    # 如果已有配置，使用配置中的值（如果参数为None）
+    if _generator_config is not None:
+        use_fp16 = use_fp16 if use_fp16 is not None else _generator_config.get('use_fp16', False)
+        use_cuda_kernel = use_cuda_kernel if use_cuda_kernel is not None else _generator_config.get('use_cuda_kernel', False)
+        device = device if device is not None else _generator_config.get('device', None)
+    
     if podcast_gen is None:
         print("正在初始化播客生成器...")
         podcast_gen = PodcastGenerator(
             tts_config_path=INDEXTTS_CONFIG_PATH,
             tts_model_dir=INDEXTTS_MODEL_DIR,
-            use_fp16=use_fp16,
-            use_cuda_kernel=use_cuda_kernel
+            use_fp16=use_fp16 or False,
+            use_cuda_kernel=use_cuda_kernel or False,
+            device=device
         )
         print("播客生成器初始化完成！")
     return podcast_gen
+
+
+def set_generator_config(use_fp16: bool = False, use_cuda_kernel: bool = False, device: Optional[str] = None):
+    """设置全局生成器配置"""
+    global _generator_config
+    _generator_config = {
+        'use_fp16': use_fp16,
+        'use_cuda_kernel': use_cuda_kernel,
+        'device': device
+    }
 
 
 def wrap_multi_role_podcast(text, role_a_voice, role_b_voice, role_c_voice, silence_interval, progress=None):
@@ -672,7 +695,34 @@ def create_webui():
     parser.add_argument("--host", type=str, default="0.0.0.0", help="WebUI主机")
     parser.add_argument("--fp16", action="store_true", help="使用FP16精度")
     parser.add_argument("--cuda_kernel", action="store_true", help="使用CUDA内核")
+    parser.add_argument("--device", type=str, default=None, help="设备类型 (如 'cuda:0', 'cuda', 'cpu')，如果未指定则自动检测GPU")
     args = parser.parse_args()
+    
+    # 设备检测和配置
+    import torch
+    device = args.device
+    if device is None:
+        # 自动检测GPU
+        if torch.cuda.is_available():
+            device = "cuda:0"
+            print(f"🚀 检测到GPU可用，将使用设备: {device}")
+            if torch.cuda.device_count() > 1:
+                print(f"   检测到 {torch.cuda.device_count()} 个GPU设备")
+            print(f"   GPU名称: {torch.cuda.get_device_name(0)}")
+            # 如果使用GPU，默认启用fp16和cuda_kernel（如果用户未指定）
+            if not args.fp16:
+                print("   💡 提示：使用GPU时建议启用 --fp16 以加速推理")
+            if not args.cuda_kernel:
+                print("   💡 提示：使用GPU时建议启用 --cuda_kernel 以进一步加速")
+        else:
+            device = None  # 让IndexTTS2自动检测
+            print("⚠️  未检测到GPU，将使用CPU模式")
+            print("   ⚠️  CPU模式运行较慢，建议使用GPU环境")
+    else:
+        print(f"🎯 使用指定设备: {device}")
+        if device.startswith("cuda") and not torch.cuda.is_available():
+            print(f"⚠️  警告：指定了CUDA设备，但CUDA不可用，将回退到CPU模式")
+            device = None
     
     # 检查模型文件（使用绝对路径）
     config_path = os.path.abspath(INDEXTTS_CONFIG_PATH)
@@ -684,6 +734,16 @@ def create_webui():
     if not os.path.exists(model_dir):
         print(f"警告：模型目录不存在 {model_dir}")
         print(f"   请检查路径是否正确，或设置环境变量 INDEXTTS_MODEL_DIR")
+    
+    # 更新args中的device，以便后续使用
+    args.device = device
+    
+    # 设置全局生成器配置
+    set_generator_config(
+        use_fp16=args.fp16,
+        use_cuda_kernel=args.cuda_kernel,
+        device=device
+    )
     
     # 现代化CSS样式
     custom_css = """
