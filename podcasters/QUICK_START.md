@@ -2,7 +2,35 @@
 
 ## 前置条件
 
-1. **后端服务已启动**
+### 方式一：使用Cloud Studio（推荐，支持GPU加速）
+
+1. **在Cloud Studio中部署API服务器**
+   ```bash
+   # 方式1: 直接运行
+   python run_api_server.py --host 0.0.0.0 --port 8000 --fp16 --cuda_kernel
+   
+   # 方式2: 使用启动脚本（推荐）
+   bash start_api_server_cloudstudio.sh
+   ```
+
+2. **获取端口转发地址**
+   - 查看浏览器地址栏，例如：`https://hfrsgm.ap-guangzhou.cloudstudio.work/`
+   - 提取SPACE_KEY（hfrsgm）和REGION（ap-guangzhou）
+   - 构建API地址：`https://hfrsgm--8000.ap-guangzhou.cloudstudio.work/`
+
+3. **配置APP使用Cloud Studio API**
+   - 打开文件：`podcasters/components/lib_api/src/main/ets/services/PodcastService.ets`
+   - 修改API地址：
+   ```typescript
+   export class PodcastConfig {
+     static readonly API_BASE_URL: string = 'https://hfrsgm--8000.ap-guangzhou.cloudstudio.work';
+     static readonly API_TIMEOUT: number = 600000; // 10分钟超时
+   }
+   ```
+
+### 方式二：使用本地服务器
+
+1. **启动后端服务**
    ```bash
    # 在项目根目录下
    python run_api_server.py --host 0.0.0.0 --port 8000
@@ -13,27 +41,31 @@
    - Mac/Linux: `ifconfig` 查看IP地址
    - 确保手机和电脑在同一局域网
 
+3. **配置APP使用本地服务器**
+   - 打开文件：`podcasters/components/lib_api/src/main/ets/services/PodcastService.ets`
+   - 修改API地址：
+   ```typescript
+   export class PodcastConfig {
+     static readonly API_BASE_URL: string = 'http://192.168.1.100:8000'; // 修改为您的IP
+     static readonly API_TIMEOUT: number = 600000; // 10分钟超时
+   }
+   ```
+
 ## 配置步骤
 
 ### 1. 修改API地址
 
 打开文件：`podcasters/components/lib_api/src/main/ets/services/PodcastService.ets`
 
-找到第11行，修改为您的服务器IP地址：
-
-```typescript
-export class PodcastConfig {
-  // 将此处替换为您的实际服务器地址
-  static readonly API_BASE_URL: string = 'http://192.168.1.100:8000'; // 修改这里
-  static readonly API_TIMEOUT: number = 300000;
-}
-```
+根据您选择的部署方式，修改API地址：
+- Cloud Studio: `https://${SPACE_KEY}--8000.${REGION}.cloudstudio.work`
+- 本地服务器: `http://您的IP:8000`
 
 ### 2. 测试连接
 
 启动后端服务后，在浏览器中访问：
-- 健康检查: http://您的IP:8000/health
-- API文档: http://您的IP:8000/docs
+- 健康检查: http://您的地址:8000/health 或 https://您的地址:8000/health
+- API文档: http://您的地址:8000/docs 或 https://您的地址:8000/docs
 
 确保可以正常访问。
 
@@ -90,7 +122,7 @@ export class PodcastConfig {
 - **格式**: WAV格式（推荐）
 - **时长**: 5-30秒
 - **质量**: 清晰、无噪音
-- **大小**: 建议不超过10MB
+- **大小**: 最大10MB（APP会自动检查）
 
 ### 获取音色文件
 1. 使用录音软件录制

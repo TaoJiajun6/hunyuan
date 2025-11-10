@@ -3,7 +3,8 @@
 实现角色标记解析、对话提取等功能
 """
 import re
-from typing import List, Dict, Tuple, Optional
+import json
+from typing import List, Dict, Tuple, Optional, Any
 
 
 class TextProcessor:
@@ -22,14 +23,15 @@ class TextProcessor:
     
     def parse_role_text(self, text: str) -> List[Tuple[str, str]]:
         """
-        解析包含角色标记的文本，支持情绪标注
+        解析包含角色标记的文本，支持情绪标注和音效标注
         
         Args:
             text: 包含角色标记的文本，如 "[角色A]你好" 或 "[角色A]（兴奋地）：你好"
         
         Returns:
             角色对话列表，格式为 [(角色名, 对话内容), ...]
-            对话内容中可能包含情绪信息，但会被提取出来（目前仅提取角色名和内容）
+            对话内容中可能包含情绪信息和音效标注，但会被提取出来（目前仅提取角色名和内容）
+            音效标注（如[音效：xxx]）会被跳过，不包含在对话内容中
         """
         dialogues = []
         current_role = None
@@ -43,12 +45,19 @@ class TextProcessor:
             if not line:
                 continue
             
+            # 跳过纯音效标注行（如 [音效：xxx]）
+            if re.match(r'^\[音效[：:].*\]$', line):
+                continue
+            
             # 首先尝试匹配带情绪标注的格式：[角色名]（情绪地）：内容
             emotion_match = self.ROLE_WITH_EMOTION_PATTERN.match(line)
             if emotion_match:
                 role_name = emotion_match.group(1).strip()
                 emotion = emotion_match.group(2).strip()
                 content = emotion_match.group(3).strip()
+                
+                # 移除内容中的音效标注
+                content = re.sub(r'\[音效[：:][^\]]+\]', '', content).strip()
                 
                 # 如果角色改变，保存之前的对话
                 if current_role and current_role != role_name:
@@ -291,77 +300,163 @@ class TextProcessor:
         self,
         text: str,
         num_characters: int = 2,
-        style: str = "自然互动"
+        podcast_name: Optional[str] = None,
+        topic: Optional[str] = None,
+        character_descriptions: Optional[Dict[str, Dict[str, str]]] = None,
+        scene_types: Optional[List[str]] = None
     ) -> str:
         """
-        构建将普通文本转换为多角色对话的提示词（支持情绪标注）
+        构建将普通文本转换为多角色对话的提示词（支持情绪标注和完整播客结构）
         
         Args:
             text: 原始文本内容
             num_characters: 角色数量（2-3个）
-            style: 对话风格（自然互动、激烈讨论、友好交流等）
+            podcast_name: 播客名称（可选）
+            topic: 本期主题（可选）
+            character_descriptions: 角色设定字典，格式为 {
+                角色名: {
+                    "name": "角色名",
+                    "personality": "性格特点",
+                    "speaking_style": "说话风格"
+                }
+            }
+            scene_types: 互动场景类型列表，如 ["接梗玩梗", "立场冲突"] 等
         
         Returns:
             构建的提示词
         """
-        # 限制文本长度，避免提示词过长
-        text_preview = text[:800] if len(text) > 800 else text
-        if len(text) > 800:
-            text_preview += "..."
         
         role_names = ["角色A", "角色B", "角色C"][:num_characters]
         role_list = "、".join(role_names)
         
-        prompt = f"""【系统指令：角色设定】
+        # 构建播客基本信息部分
+        podcast_info = ""
+        if podcast_name:
+            podcast_info += f"播客名称：{podcast_name}\n"
+        if topic:
+            podcast_info += f"本期主题：{topic}\n"
+        
+        # 构建角色设定部分
+        character_info = ""
+        if character_descriptions:
+            character_info = "\n2. 角色设定（2-3个角色）\n\n"
+            for i, (role, desc) in enumerate(character_descriptions.items(), 1):
+                if i > num_characters:
+                    break
+                name = desc.get("name", role)
+                personality = desc.get("personality", "")
+                speaking_style = desc.get("speaking_style", "")
+                character_info += f"角色{i}名称：{name}\n"
+                if personality:
+                    character_info += f"性格特点：{personality}\n"
+                if speaking_style:
+                    character_info += f"说话风格：{speaking_style}\n"
+                character_info += "\n"
+        else:
+            character_info = f"\n请从提供的文本中识别并定义{num_characters}个核心角色。为每个角色赋予：\n"
+            character_info += "- **姓名与身份**：为每个角色设定具体的姓名和身份\n"
+            character_info += "- **核心性格**：定义每个角色的核心性格特征\n"
+            character_info += "- **说话风格**：定义每个角色的说话风格和习惯\n"
+        
+        # 构建场景类型要求
+        scene_requirements = ""
+        if scene_types:
+            scene_requirements = "\n【特定场景要求】\n\n"
+            if "接梗玩梗" in scene_types:
+                scene_requirements += "- **接梗玩梗**：至少包含3处明显的玩梗互动，形成callback，角色之间要能互相接话、抛梗、造梗\n"
+            if "立场冲突" in scene_types:
+                scene_requirements += "- **立场冲突**：要有明显的观点对立，使用短句、反问、情绪化表达，营造紧张感\n"
+            if "访谈对话" in scene_types or "愉快合作" in scene_types:
+                scene_requirements += "- **访谈场景**：明确区分主持人和嘉宾角色，包含深度提问和回应\n"
+            if "不愉快的质疑访谈" in scene_types:
+                scene_requirements += "- **质疑访谈**：包含质疑、反驳、解释等互动，保持对话的紧张感\n"
+        
+        # 构建文本预览（限制长度）
+        text_preview = text[:1000] if len(text) > 1000 else text
+        if len(text) > 1000:
+            text_preview += "\n\n[文本内容较长，已截取前1000字，请基于此生成完整的播客对话]"
+        
+        # 构建默认播客信息（避免在f-string表达式中使用反斜杠）
+        default_podcast_info = "播客名称：[由文本内容推断]\n本期主题：[由文本内容推断]\n"
+        final_podcast_info = podcast_info if podcast_info else default_podcast_info
+        
+        # 构建完整的提示词
+        prompt = f"""【核心指令】
 
-你是一位资深的播客剧本作家和对话导演。请根据提供的文本素材，将其转化为一段生动、自然的多角色播客对话脚本。
+你是一位专业的播客编剧和对话导演。请根据提供的文本素材，将其转化为一段结构完整、互动自然、符合真人交流方式的多角色播客对话脚本。
 
-【角色信息】
+【用户输入区】
 
-请从提供的文本中识别并定义{num_characters}个核心角色。为每个角色赋予：
+1. 播客基本信息
 
-- **姓名与身份**：为每个角色设定具体的姓名和身份（例如：严谨的科学家李博士、风趣的科技博主小K）
-- **核心性格**：定义每个角色的核心性格特征（例如：角色A理性、谨慎；角色B热情、直接、喜欢开玩笑）
-- **口头禅或说话习惯**：为每个角色设定独特的口头禅或说话习惯（例如：角色A常说"从数据上看..."，角色B喜欢用"好家伙！"、"等等，你的意思是..."）
-- **角色间的关系与动态**：定义角色之间的关系（例如：他们是经常互怼的好友？是立场不同的辩论双方？是采访者与被采访者？）
+{final_podcast_info}
 
-【原始文本】
+{character_info}
+
+3. 文本素材
+
 {text_preview}
 
-【对话生成要求】
+4. 互动场景类型
 
-现在，请基于以上角色设定和提供的文本素材，生成播客对话脚本。请严格遵守以下要求：
+{', '.join(scene_types) if scene_types else "自然互动交流"}
 
-1. **高度拟人化互动**：
-   - **接梗玩梗**：角色之间要能互相接话、抛梗、造梗，形成有趣的callback
-   - **自然反应**：加入"嗯..."、"啊？"、"啧"、"哈哈！"等感叹词和填充词，模拟思考过程
-   - **话题流动**：话题转换要平滑自然。例如，由A提出的一个观点，自然地引发B的疑问或联想，从而引入下一个话题，避免生硬切换
-   - **情绪与冲突**：根据情境，展现"立场冲突"或"激烈交流"。使用短句、反问、重复对方话语等方式营造紧张感。例如："我完全不同意你这个观点！"、"你先别急，听我解释..."。同样，对于愉快场景，要充满笑声和积极的附和
+【生成要求 - 固定部分】
 
-2. **剧本格式**：
-   - 严格使用以下格式，这对后续音频生成至关重要：
-   - 支持两种格式（推荐使用带情绪标注的格式）：
-     * 格式1（带情绪标注）：`[角色名]（情绪地）：发言内容`
-     * 格式2（简洁格式）：`[角色名]发言内容`
-   - 情绪标注示例：兴奋地、疑惑地、严肃地、开玩笑地、激动地、冷静地等
-   - 每行一个角色的发言
+1. 播客结构要求
 
-3. **输出要求**：
-   - 角色名称必须使用：{role_list}（不要使用其他名称）
-   - 每个角色必须发言至少4-5次，总共至少{num_characters * 4}段对话
-   - 对话要自然流畅，符合{style}的风格
-   - 保持原文本的核心信息和观点，可以适当扩展让对话更生动
-   - 角色可以有不同的观点和立场，增加讨论的深度
+[开场音乐响起，渐弱为背景音]
 
-4. **输出格式示例**：
+[角色A]（热情地）：大家好，欢迎收听《{podcast_name if podcast_name else "本期播客"}》！我是[角色A名字]。
+[角色B]（接话）：我是[角色B名字]。今天我们要聊一个很有意思的话题：{topic if topic else "[本期主题]"}。
+[角色A]：没错！说到这个话题，我最近发现...[自然引入主题]
+
+[讨论主体 - 基于文本素材展开]
+
+[角色C]（总结性地）：好了，今天关于{topic if topic else "[本期主题]"}的讨论就到这里。
+[角色A]：感谢大家的收听！如果有什么想法，欢迎在评论区留言。
+[角色B]：我们下期再见！
+
+[结束音乐响起，逐渐增强]
+
+2. 对话互动要求
+
+- **自然对话流**：使用感叹词、思考停顿（用[...]或[停顿]标注）、打断和接话
+- **角色一致性**：每句台词必须符合角色的性格和说话风格
+- **话题过渡**：话题转换要自然平滑，避免生硬切换
+- **情绪表达**：在括号中标注说话时的情绪和动作，如（兴奋地）、（摇头）、（笑着打断）
+
+{scene_requirements}
+
+3. 音频制作备注
+
+- **音效提示**：在[ ]内标注关键音效，如[音效：手机通知声]、[音效：笑声]
+- **背景音乐**：建议使用[类型，如：轻快的电子乐]作为背景音
+- **角色音色建议**：为每个角色提供简要的音色描述，供TTS参考
+
+4. 剧本格式要求
+
+- 严格使用以下格式，这对后续音频生成至关重要：
+- 支持两种格式（推荐使用带情绪标注的格式）：
+  * 格式1（带情绪标注）：`[角色名]（情绪地）：发言内容`
+  * 格式2（简洁格式）：`[角色名]发言内容`
+- 情绪标注示例：兴奋地、疑惑地、严肃地、开玩笑地、激动地、冷静地、思考状等
+- 每行一个角色的发言
+- 角色名称必须使用：{role_list}（不要使用其他名称）
+- 每个角色必须发言至少4-6次，总共至少{num_characters * 4}段对话
+
+5. 输出格式示例
+
 ```
 [角色A]（兴奋地）：嘿，听众朋友们，欢迎回到我们的频道！今天咱们可有个大话题要聊。
 [角色B]（故作神秘地）：没错，是关于AI能否真正理解人类的幽默。你说，它能听懂咱们的梗吗？
 [角色A]（笑着接话）：好家伙，上来就挑战高难度！我觉得吧，它现在可能还在学习为什么"香蕉滑倒了"是个笑话。
 [角色B]（思考状）：嗯...这个问题确实很有意思。从技术角度看，AI理解幽默的关键在于...
+[音效：笑声]
+[角色A]（兴奋地）：哈哈，这个例子太有意思了！
 ```
 
-现在请开始转换，直接输出对话内容，不要添加任何其他说明、注释或解释。"""
+现在请开始生成，直接输出对话内容，不要添加任何其他说明、注释或解释。"""
         return prompt
     
     def build_deep_podcast_prompt(
@@ -476,6 +571,136 @@ class TextProcessor:
 
 现在请开始生成，直接输出对话内容，不要添加任何其他说明、注释或解释。"""
         return prompt
+    
+    def analyze_text_for_podcast(
+        self,
+        text: str,
+        api_client=None
+    ) -> Dict[str, Any]:
+        """
+        使用混元大模型分析文本素材，自动推断播客信息
+        
+        Args:
+            text: 文本素材
+            api_client: API客户端实例，如果为None则创建新实例
+        
+        Returns:
+            分析结果字典，包含：
+            - podcast_name: 播客名称
+            - topic: 本期主题
+            - characters: 角色设定列表，每个角色包含 name, personality, speaking_style
+            - scene_types: 互动场景类型列表
+        """
+        if api_client is None:
+            from .api_client import get_client
+            api_client = get_client()
+        
+        # 限制文本长度
+        text_preview = text[:1000] if len(text) > 1000 else text
+        if len(text) > 1000:
+            text_preview += "..."
+        
+        analysis_prompt = f"""请分析以下文本素材，推断出适合制作播客的信息。请以JSON格式返回结果。
+
+文本素材：
+{text_preview}
+
+请分析并返回以下信息（JSON格式）：
+{{
+    "podcast_name": "播客节目名称（根据文本内容推断，如'科技前沿'、'商业观察'等）",
+    "topic": "本期播客主题（从文本中提取的核心话题）",
+    "characters": [
+        {{
+            "name": "角色1名称",
+            "personality": "性格特点（如：外向幽默、喜欢开玩笑）",
+            "speaking_style": "说话风格（如：语速较快，常用网络流行语）"
+        }},
+        {{
+            "name": "角色2名称",
+            "personality": "性格特点（如：理性严谨、善于分析）",
+            "speaking_style": "说话风格（如：语速平稳，逻辑性强）"
+        }}
+    ],
+    "scene_types": ["互动场景类型（如：接梗玩梗、立场冲突、访谈对话等，可多选）"]
+}}
+
+要求：
+1. 角色数量建议2-3个
+2. 场景类型可以从以下选项中选择：接梗玩梗的轻松交流、立场冲突的激烈辩论、愉快合作的访谈对话、不愉快的质疑访谈
+3. 播客名称要简洁有力，符合文本主题
+4. 主题要准确概括文本核心内容
+
+请直接返回JSON，不要添加其他说明。"""
+        
+        try:
+            response = api_client.generate_text(
+                prompt=analysis_prompt,
+                temperature=0.7,
+                max_tokens=1500
+            )
+            
+            # 尝试提取JSON
+            # 移除可能的markdown代码块标记
+            response = re.sub(r'```json\s*', '', response)
+            response = re.sub(r'```\s*', '', response)
+            response = response.strip()
+            
+            # 尝试找到JSON部分
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                result = json.loads(json_str)
+                
+                # 验证和规范化结果
+                if not isinstance(result, dict):
+                    raise ValueError("分析结果不是字典格式")
+                
+                # 确保所有字段都存在
+                if "podcast_name" not in result:
+                    result["podcast_name"] = "本期播客"
+                if "topic" not in result:
+                    result["topic"] = "讨论主题"
+                if "characters" not in result:
+                    result["characters"] = []
+                if "scene_types" not in result:
+                    result["scene_types"] = ["自然互动交流"]
+                
+                # 确保角色数量在2-3个之间
+                if len(result["characters"]) < 2:
+                    # 如果角色不足，补充默认角色
+                    while len(result["characters"]) < 2:
+                        result["characters"].append({
+                            "name": f"角色{len(result['characters']) + 1}",
+                            "personality": "待定义",
+                            "speaking_style": "待定义"
+                        })
+                elif len(result["characters"]) > 3:
+                    result["characters"] = result["characters"][:3]
+                
+                return result
+            else:
+                # 如果无法解析JSON，返回默认值
+                return {
+                    "podcast_name": "本期播客",
+                    "topic": "讨论主题",
+                    "characters": [
+                        {"name": "角色A", "personality": "待定义", "speaking_style": "待定义"},
+                        {"name": "角色B", "personality": "待定义", "speaking_style": "待定义"}
+                    ],
+                    "scene_types": ["自然互动交流"]
+                }
+        except Exception as e:
+            # 分析失败时返回默认值
+            print(f"自动分析失败: {str(e)}")
+            return {
+                "podcast_name": "本期播客",
+                "topic": "讨论主题",
+                "characters": [
+                    {"name": "角色A", "personality": "待定义", "speaking_style": "待定义"},
+                    {"name": "角色B", "personality": "待定义", "speaking_style": "待定义"}
+                ],
+                "scene_types": ["自然互动交流"]
+            }
     
     def clean_text(self, text: str) -> str:
         """

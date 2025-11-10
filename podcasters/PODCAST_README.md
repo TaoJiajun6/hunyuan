@@ -10,7 +10,62 @@
 
 ## 配置说明
 
-### 方式一：使用华为AGC云函数（推荐）
+### 方式一：使用Cloud Studio（推荐，支持GPU加速）
+
+#### 1. 在Cloud Studio中部署API服务器
+
+1. 登录腾讯云Cloud Studio，创建或打开工作空间
+2. 上传项目代码到Cloud Studio
+3. 安装依赖和模型文件（参考项目根目录的INSTALL.md）
+4. 启动API服务器：
+
+```bash
+# 方式1: 直接运行（前台）
+python run_api_server.py --host 0.0.0.0 --port 8000 --fp16 --cuda_kernel
+
+# 方式2: 使用启动脚本（后台运行，推荐）
+bash start_api_server_cloudstudio.sh
+```
+
+#### 2. 获取端口转发地址
+
+Cloud Studio会自动显示端口转发地址，格式为：
+```
+https://${SPACE_KEY}--8000.${REGION}.cloudstudio.work/
+```
+
+**获取方式**：
+1. 查看浏览器地址栏，找到类似：`https://hfrsgm.ap-guangzhou.cloudstudio.work/`
+2. 提取两部分：
+   - SPACE_KEY: `hfrsgm`（浏览器地址中的第一段）
+   - REGION: `ap-guangzhou`（浏览器地址中的第二段）
+3. 构建预览地址：`https://hfrsgm--8000.ap-guangzhou.cloudstudio.work/`
+
+**示例**：
+- 浏览器地址：`https://hfrsgm.ap-guangzhou.cloudstudio.work/`
+- API地址：`https://hfrsgm--8000.ap-guangzhou.cloudstudio.work/`
+
+#### 3. 配置APP使用Cloud Studio API
+
+在 `podcasters/components/lib_api/src/main/ets/services/PodcastService.ets` 文件中，修改配置：
+
+```typescript
+export class PodcastConfig {
+  // 使用Cloud Studio端口转发地址
+  static readonly API_BASE_URL: string = 'https://hfrsgm--8000.ap-guangzhou.cloudstudio.work';
+  static readonly API_TIMEOUT: number = 600000; // 10分钟超时（考虑大文件上传和生成时间）
+  static readonly USE_CLOUD_FUNCTION: boolean = false; // 使用直接连接模式
+}
+```
+
+**Cloud Studio的优势**：
+- 支持GPU加速，生成速度快
+- 提供HTTPS加密传输
+- 公网访问，手机可直接调用
+- 24/7运行，无需本地服务器
+- 自动端口转发，配置简单
+
+### 方式二：使用华为AGC云函数
 
 #### 1. 部署云函数
 
@@ -18,7 +73,7 @@
 2. 将 `podcast-cloud.js` 和 `package.json` 上传到华为AGC云函数
 3. 安装依赖：在云函数控制台执行 `npm install`，或上传 `node_modules.zip` 并解压
 4. 配置环境变量：
-   - `BACKEND_API_URL`: 后端API服务器地址（例如：`http://10.10.210.52:8000`）
+   - `BACKEND_API_URL`: 后端API服务器地址（例如：`https://hfrsgm--8000.ap-guangzhou.cloudstudio.work`）
 5. 配置HTTP触发器，获取云函数URL
 
 #### 2. 配置APP使用云函数
@@ -29,7 +84,7 @@
 export class PodcastConfig {
   // 使用云函数URL
   static readonly API_BASE_URL: string = 'https://your-cloud-function-url.com';
-  static readonly API_TIMEOUT: number = 300000; // 5分钟超时
+  static readonly API_TIMEOUT: number = 600000; // 10分钟超时
   static readonly USE_CLOUD_FUNCTION: boolean = true; // 启用云函数模式
 }
 ```
@@ -40,7 +95,7 @@ export class PodcastConfig {
 - 客户端无需知道后端服务器地址
 - 支持HTTPS加密传输
 
-### 方式二：直接使用后端API服务器
+### 方式三：直接使用本地/远程API服务器
 
 #### 1. 配置后端API地址
 
@@ -50,7 +105,7 @@ export class PodcastConfig {
 export class PodcastConfig {
   // 将此处替换为您的实际服务器地址
   static readonly API_BASE_URL: string = 'http://10.10.210.52:8000';
-  static readonly API_TIMEOUT: number = 300000; // 5分钟超时
+  static readonly API_TIMEOUT: number = 600000; // 10分钟超时
   static readonly USE_CLOUD_FUNCTION: boolean = false; // 使用直接连接模式
 }
 ```
@@ -65,8 +120,11 @@ export class PodcastConfig {
 在项目根目录下启动后端API服务：
 
 ```bash
-# 启动API服务
+# 启动API服务（CPU模式）
 python run_api_server.py --host 0.0.0.0 --port 8000
+
+# 启动API服务（GPU模式，如果有GPU）
+python run_api_server.py --host 0.0.0.0 --port 8000 --fp16 --cuda_kernel
 ```
 
 确保后端服务正常运行后，访问 http://localhost:8000/health 检查服务状态。
@@ -112,16 +170,26 @@ APP已经配置了必要的网络权限：
 ## 音色文件要求
 
 - **推荐格式**：WAV格式
-- **文件大小**：建议不超过10MB
+- **文件大小**：最大10MB（APP会自动检查文件大小）
 - **音频质量**：清晰、无噪音的音频文件效果更好
 - **时长**：建议5-30秒的音频片段
 
+**文件大小限制**：
+- 客户端限制：10MB（APP会自动检查并提示）
+- 服务器限制：50MB（超过限制会返回错误）
+- Base64编码后文件会增大约33%，请注意实际传输大小
+
 ## 注意事项
 
-1. **网络连接**：确保手机和服务器在同一网络，或者可以访问远程服务器
+1. **网络连接**：
+   - 如果使用Cloud Studio，确保手机可以访问公网
+   - 如果使用本地服务器，确保手机和服务器在同一网络
+   - 如果使用远程服务器，确保服务器地址可以访问
 2. **生成时间**：播客生成可能需要较长时间（通常1-5分钟），请耐心等待
-3. **文件选择**：目前使用PhotoViewPicker选择文件，可能需要根据实际需求调整文件选择方式
-4. **音频播放**：生成的音频使用HarmonyOS的AVPlayer播放，确保设备支持音频播放
+3. **文件大小**：音色文件限制10MB，超过限制会提示错误
+4. **文件选择**：目前使用DocumentViewPicker选择文件
+5. **音频播放**：生成的音频使用HarmonyOS的AVPlayer播放，确保设备支持音频播放
+6. **超时设置**：API超时时间设置为10分钟，如果生成时间较长可能需要等待
 
 ## 故障排查
 

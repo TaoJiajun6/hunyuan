@@ -6,7 +6,7 @@ import os
 import sys
 import argparse
 import re
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
 
 # gradio 将在 create_webui 函数中导入，以便提供更好的错误提示
 
@@ -57,14 +57,90 @@ def set_generator_config(use_fp16: bool = False, use_cuda_kernel: bool = False, 
     }
 
 
-def wrap_multi_role_podcast(text, role_a_voice, role_b_voice, role_c_voice, silence_interval, progress=None):
+def wrap_multi_role_podcast(
+    text, role_a_voice, role_b_voice, role_c_voice, silence_interval,
+    podcast_name, topic,
+    character_1_name, character_1_personality, character_1_speaking_style,
+    character_2_name, character_2_personality, character_2_speaking_style,
+    character_3_name, character_3_personality, character_3_speaking_style,
+    scene_types, progress=None
+):
     """包装函数，格式化脚本输出"""
-    audio_path, status, script = generate_multi_role_podcast(text, role_a_voice, role_b_voice, role_c_voice, silence_interval, progress)
+    audio_path, status, script = generate_multi_role_podcast(
+        text, role_a_voice, role_b_voice, role_c_voice, silence_interval,
+        podcast_name, topic,
+        character_1_name, character_1_personality, character_1_speaking_style,
+        character_2_name, character_2_personality, character_2_speaking_style,
+        character_3_name, character_3_personality, character_3_speaking_style,
+        scene_types, progress
+    )
     if script:
         formatted_script = format_script_for_display(script)
     else:
         formatted_script = "<div style='padding: 20px; color: #666; text-align: center;'>脚本生成失败或为空</div>"
     return audio_path, status, formatted_script
+
+def analyze_text_for_podcast_ui(text, progress=None):
+    """
+    在WebUI中调用自动分析功能
+    
+    Args:
+        text: 文本素材
+        progress: Gradio进度条
+    
+    Returns:
+        分析结果，用于填充UI字段
+    """
+    if not text or not text.strip():
+        return (
+            "",  # podcast_name
+            "",  # topic
+            "", "", "",  # character_1
+            "", "", "",  # character_2
+            "", "", "",  # character_3
+            []   # scene_types
+        )
+    
+    try:
+        from .api_client import get_client
+        from .text_processor import TextProcessor
+        
+        api_client = get_client()
+        processor = TextProcessor()
+        
+        if progress:
+            progress(0.5, desc="正在分析文本素材...")
+        
+        result = processor.analyze_text_for_podcast(text, api_client)
+        
+        if progress:
+            progress(1.0, desc="分析完成！")
+        
+        # 提取角色信息
+        characters = result.get("characters", [])
+        char_1 = characters[0] if len(characters) > 0 else {}
+        char_2 = characters[1] if len(characters) > 1 else {}
+        char_3 = characters[2] if len(characters) > 2 else {}
+        
+        return (
+            result.get("podcast_name", ""),
+            result.get("topic", ""),
+            char_1.get("name", ""),
+            char_1.get("personality", ""),
+            char_1.get("speaking_style", ""),
+            char_2.get("name", ""),
+            char_2.get("personality", ""),
+            char_2.get("speaking_style", ""),
+            char_3.get("name", ""),
+            char_3.get("personality", ""),
+            char_3.get("speaking_style", ""),
+            result.get("scene_types", [])
+        )
+    except Exception as e:
+        print(f"自动分析失败: {str(e)}")
+        return (
+            "", "", "", "", "", "", "", "", "", "", "", []
+        )
 
 def wrap_character_podcast(
     character_a_name, character_a_identity, character_a_personality,
@@ -103,7 +179,7 @@ def wrap_deep_podcast(topic, role_a_voice, role_b_voice, role_c_voice, num_chara
 def format_script_for_display(text: str) -> str:
     """
     格式化脚本文本，用于在WebUI中显示
-    为不同角色分配颜色标记，支持情绪标注
+    为不同角色分配颜色标记，支持情绪标注和音效标注
     
     Args:
         text: 原始脚本文本
@@ -143,6 +219,16 @@ def format_script_for_display(text: str) -> str:
         if not line:
             continue
         
+        # 匹配音效标注：[音效：xxx]
+        sound_effect_match = re.match(r'^\[音效[：:]([^\]]+)\]$', line)
+        if sound_effect_match:
+            sound_name = sound_effect_match.group(1)
+            formatted_lines.append(
+                f'<div style="margin: 6px 0; padding: 6px; background: #fff3cd; border-left: 3px solid #ffc107; border-radius: 4px;">'
+                f'<span style="color: #856404; font-size: 0.9em;">🔊 音效：{sound_name}</span></div>'
+            )
+            continue
+        
         # 匹配带情绪标注的格式：[角色名]（情绪地）：内容
         emotion_match = re.match(r'\[([^\]]+)\]\s*（([^）]+)地）\s*[:：]?\s*(.*)', line)
         if emotion_match:
@@ -150,11 +236,19 @@ def format_script_for_display(text: str) -> str:
             emotion = emotion_match.group(2)
             content = emotion_match.group(3)
             color = role_colors.get(role_name, '#6b7280')
+            
+            # 处理内容中的音效标注
+            content_with_sound = re.sub(
+                r'\[音效[：:]([^\]]+)\]',
+                r'<span style="background: #fff3cd; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; color: #856404;">🔊 \1</span>',
+                content
+            )
+            
             formatted_lines.append(
                 f'<div style="margin: 8px 0; padding: 8px; border-left: 3px solid {color}; background: {color}10;">'
                 f'<span style="color: {color}; font-weight: bold;">●{role_name}</span> '
                 f'<span style="color: #6b7280; font-size: 0.9em;">（{emotion}）</span> '
-                f'<span>{content}</span></div>'
+                f'<span>{content_with_sound}</span></div>'
             )
             continue
         
@@ -164,14 +258,27 @@ def format_script_for_display(text: str) -> str:
             role_name = role_match.group(1)
             content = role_match.group(2)
             color = role_colors.get(role_name, '#6b7280')
+            
+            # 处理内容中的音效标注
+            content_with_sound = re.sub(
+                r'\[音效[：:]([^\]]+)\]',
+                r'<span style="background: #fff3cd; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; color: #856404;">🔊 \1</span>',
+                content
+            )
+            
             formatted_lines.append(
                 f'<div style="margin: 8px 0; padding: 8px; border-left: 3px solid {color}; background: {color}10;">'
                 f'<span style="color: {color}; font-weight: bold;">●{role_name}</span> '
-                f'<span>{content}</span></div>'
+                f'<span>{content_with_sound}</span></div>'
             )
         else:
-            # 普通文本
-            formatted_lines.append(f'<div style="margin: 4px 0; padding: 4px;">{line}</div>')
+            # 普通文本（可能是音乐提示等）
+            if '[音乐' in line or '音乐' in line:
+                formatted_lines.append(
+                    f'<div style="margin: 6px 0; padding: 6px; background: #e7f3ff; border-left: 3px solid #3b82f6; border-radius: 4px; color: #1e40af; font-style: italic;">🎵 {line}</div>'
+                )
+            else:
+                formatted_lines.append(f'<div style="margin: 4px 0; padding: 4px; color: #666;">{line}</div>')
     
     return '<div style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; line-height: 1.6;">' + \
            ''.join(formatted_lines) + '</div>'
@@ -183,6 +290,18 @@ def generate_multi_role_podcast(
     role_b_voice: Optional[str],
     role_c_voice: Optional[str],
     silence_interval: int = 300,
+    podcast_name: Optional[str] = None,
+    topic: Optional[str] = None,
+    character_1_name: Optional[str] = None,
+    character_1_personality: Optional[str] = None,
+    character_1_speaking_style: Optional[str] = None,
+    character_2_name: Optional[str] = None,
+    character_2_personality: Optional[str] = None,
+    character_2_speaking_style: Optional[str] = None,
+    character_3_name: Optional[str] = None,
+    character_3_personality: Optional[str] = None,
+    character_3_speaking_style: Optional[str] = None,
+    scene_types: Optional[List[str]] = None,
     progress=None
 ) -> Tuple[str, str, str]:
     """
@@ -240,12 +359,33 @@ def generate_multi_role_podcast(
             if verbose:
                 print(f"检测到普通文本，将使用混元模型转换为{num_characters}角色对话")
             
+            # 构建角色描述字典
+            character_descriptions = {}
+            characters = [
+                (character_1_name, character_1_personality, character_1_speaking_style),
+                (character_2_name, character_2_personality, character_2_speaking_style),
+                (character_3_name, character_3_personality, character_3_speaking_style),
+            ]
+            
+            role_keys = ["角色A", "角色B", "角色C"]
+            for i, (name, personality, speaking_style) in enumerate(characters[:num_characters]):
+                if name and name.strip():
+                    role_key = role_keys[i] if i < len(role_keys) else f"角色{chr(65+i)}"
+                    character_descriptions[role_key] = {
+                        "name": name.strip(),
+                        "personality": personality.strip() if personality else "",
+                        "speaking_style": speaking_style.strip() if speaking_style else ""
+                    }
+            
             # 调用混元模型将文本转换为多角色对话
             try:
                 prompt = processor.build_text_to_dialogue_prompt(
                     text=text,
                     num_characters=num_characters,
-                    style="自然互动"
+                    podcast_name=podcast_name if podcast_name and podcast_name.strip() else None,
+                    topic=topic if topic and topic.strip() else None,
+                    character_descriptions=character_descriptions if character_descriptions else None,
+                    scene_types=scene_types if scene_types else None
                 )
                 
                 if progress:
@@ -1062,6 +1202,97 @@ def create_webui():
                         elem_classes=["input-group"]
                     )
                     
+                    # 自动分析按钮
+                    analyze_button = gr.Button(
+                        "🤖 自动分析文本",
+                        variant="secondary",
+                        size="sm"
+                    )
+                    analyze_status = gr.Textbox(
+                        label="分析状态",
+                        lines=1,
+                        interactive=False,
+                        visible=False
+                    )
+                    
+                    # 高级设置（折叠面板）
+                    with gr.Accordion("⚙️ 高级设置（可选）", open=False):
+                        podcast_name = gr.Textbox(
+                            label="播客名称",
+                            placeholder="例如：科技前沿、商业观察",
+                            info="留空则自动推断",
+                            lines=1
+                        )
+                        topic = gr.Textbox(
+                            label="本期主题",
+                            placeholder="例如：AI技术的发展",
+                            info="留空则自动推断",
+                            lines=1
+                        )
+                        
+                        scene_types = gr.CheckboxGroup(
+                            label="互动场景类型",
+                            choices=[
+                                "接梗玩梗的轻松交流",
+                                "立场冲突的激烈辩论",
+                                "愉快合作的访谈对话",
+                                "不愉快的质疑访谈"
+                            ],
+                            info="可选择多种场景类型，留空则自动推断",
+                            value=[]
+                        )
+                        
+                        gr.Markdown("### 👤 角色设定（可选）")
+                        with gr.Row():
+                            with gr.Column():
+                                character_1_name = gr.Textbox(
+                                    label="角色1名称",
+                                    placeholder="例如：主持人",
+                                    lines=1
+                                )
+                                character_1_personality = gr.Textbox(
+                                    label="性格特点",
+                                    placeholder="例如：外向幽默、喜欢开玩笑",
+                                    lines=1
+                                )
+                                character_1_speaking_style = gr.Textbox(
+                                    label="说话风格",
+                                    placeholder="例如：语速较快，常用网络流行语",
+                                    lines=1
+                                )
+                            with gr.Column():
+                                character_2_name = gr.Textbox(
+                                    label="角色2名称",
+                                    placeholder="例如：专家",
+                                    lines=1
+                                )
+                                character_2_personality = gr.Textbox(
+                                    label="性格特点",
+                                    placeholder="例如：理性严谨、善于分析",
+                                    lines=1
+                                )
+                                character_2_speaking_style = gr.Textbox(
+                                    label="说话风格",
+                                    placeholder="例如：语速平稳，逻辑性强",
+                                    lines=1
+                                )
+                            with gr.Column():
+                                character_3_name = gr.Textbox(
+                                    label="角色3名称（可选）",
+                                    placeholder="例如：嘉宾",
+                                    lines=1
+                                )
+                                character_3_personality = gr.Textbox(
+                                    label="性格特点",
+                                    placeholder="例如：温和中立、善于调解",
+                                    lines=1
+                                )
+                                character_3_speaking_style = gr.Textbox(
+                                    label="说话风格",
+                                    placeholder="例如：语气柔和，常用提问引导话题",
+                                    lines=1
+                                )
+                    
                     gr.Markdown("### 🎤 角色音色设置")
                     with gr.Row():
                         role_a_voice = gr.Audio(
@@ -1130,9 +1361,48 @@ def create_webui():
                             elem_classes=["script-display"]
                         )
             
+            # 自动分析按钮事件
+            analyze_button.click(
+                fn=analyze_text_for_podcast_ui,
+                inputs=[input_text],
+                outputs=[
+                    podcast_name,
+                    topic,
+                    character_1_name,
+                    character_1_personality,
+                    character_1_speaking_style,
+                    character_2_name,
+                    character_2_personality,
+                    character_2_speaking_style,
+                    character_3_name,
+                    character_3_personality,
+                    character_3_speaking_style,
+                    scene_types
+                ]
+            )
+            
+            # 生成按钮事件
             gen_button_1.click(
                 fn=wrap_multi_role_podcast,
-                inputs=[input_text, role_a_voice, role_b_voice, role_c_voice, silence_interval],
+                inputs=[
+                    input_text,
+                    role_a_voice,
+                    role_b_voice,
+                    role_c_voice,
+                    silence_interval,
+                    podcast_name,
+                    topic,
+                    character_1_name,
+                    character_1_personality,
+                    character_1_speaking_style,
+                    character_2_name,
+                    character_2_personality,
+                    character_2_speaking_style,
+                    character_3_name,
+                    character_3_personality,
+                    character_3_speaking_style,
+                    scene_types
+                ],
                 outputs=[output_audio_1, status_text_1, script_display_1]
             )
         
