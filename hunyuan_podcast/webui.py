@@ -1291,7 +1291,7 @@ def create_webui():
                                     label="说话风格",
                                     placeholder="例如：语气柔和，常用提问引导话题",
                                     lines=1
-                                )
+                    )
                     
                     gr.Markdown("### 🎤 角色音色设置")
                     with gr.Row():

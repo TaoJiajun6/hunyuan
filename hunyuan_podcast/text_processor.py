@@ -128,7 +128,7 @@ class TextProcessor:
     
     def extract_roles(self, text: str) -> List[str]:
         """
-        提取文本中的所有角色名
+        提取文本中的所有角色名（排除音效和音乐标记）
         
         Args:
             text: 包含角色标记的文本
@@ -137,14 +137,42 @@ class TextProcessor:
             角色名列表（去重）
         """
         roles = self.ROLE_PATTERN.findall(text)
-        # 去重并保持顺序
+        # 去重并保持顺序，同时过滤掉音效和音乐标记
         seen = set()
         unique_roles = []
+        
+        # 需要排除的关键词
+        exclude_keywords = ['音效', '音乐', '开场', '结束', '背景']
+        
         for role in roles:
             role = role.strip()
-            if role and role not in seen:
+            if not role:
+                continue
+            
+            # 跳过音效和音乐标记
+            # 检查是否包含排除关键词
+            should_exclude = False
+            for keyword in exclude_keywords:
+                if keyword in role:
+                    should_exclude = True
+                    break
+            
+            # 检查是否是音效格式：[音效：xxx] 或 [音效:xxx]
+            if role.startswith('音效') or '音效' in role:
+                should_exclude = True
+            
+            # 检查是否是音乐格式：[开场音乐...] 或 [结束音乐...] 或 [音乐...]
+            if '音乐' in role:
+                should_exclude = True
+            
+            if should_exclude:
+                continue
+            
+            # 只添加真正的角色标记
+            if role not in seen:
                 seen.add(role)
                 unique_roles.append(role)
+        
         return unique_roles
     
     def format_role_dialogue(self, role: str, content: str) -> str:
@@ -325,6 +353,10 @@ class TextProcessor:
         Returns:
             构建的提示词
         """
+        # 限制文本长度，避免提示词过长
+        text_preview = text[:1200] if len(text) > 1200 else text
+        if len(text) > 1200:
+            text_preview += "..."
         
         role_names = ["角色A", "角色B", "角色C"][:num_characters]
         role_list = "、".join(role_names)
@@ -362,23 +394,14 @@ class TextProcessor:
         scene_requirements = ""
         if scene_types:
             scene_requirements = "\n【特定场景要求】\n\n"
-            if "接梗玩梗" in scene_types:
+            if "接梗玩梗" in scene_types or "接梗玩梗的轻松交流" in scene_types:
                 scene_requirements += "- **接梗玩梗**：至少包含3处明显的玩梗互动，形成callback，角色之间要能互相接话、抛梗、造梗\n"
-            if "立场冲突" in scene_types:
+            if "立场冲突" in scene_types or "立场冲突的激烈辩论" in scene_types:
                 scene_requirements += "- **立场冲突**：要有明显的观点对立，使用短句、反问、情绪化表达，营造紧张感\n"
-            if "访谈对话" in scene_types or "愉快合作" in scene_types:
+            if "访谈对话" in scene_types or "愉快合作" in scene_types or "愉快合作的访谈对话" in scene_types:
                 scene_requirements += "- **访谈场景**：明确区分主持人和嘉宾角色，包含深度提问和回应\n"
             if "不愉快的质疑访谈" in scene_types:
                 scene_requirements += "- **质疑访谈**：包含质疑、反驳、解释等互动，保持对话的紧张感\n"
-        
-        # 构建文本预览（限制长度）
-        text_preview = text[:1000] if len(text) > 1000 else text
-        if len(text) > 1000:
-            text_preview += "\n\n[文本内容较长，已截取前1000字，请基于此生成完整的播客对话]"
-        
-        # 构建默认播客信息（避免在f-string表达式中使用反斜杠）
-        default_podcast_info = "播客名称：[由文本内容推断]\n本期主题：[由文本内容推断]\n"
-        final_podcast_info = podcast_info if podcast_info else default_podcast_info
         
         # 构建完整的提示词
         prompt = f"""【核心指令】
@@ -389,7 +412,7 @@ class TextProcessor:
 
 1. 播客基本信息
 
-{final_podcast_info}
+{podcast_info if podcast_info else "播客名称：[由文本内容推断]\n本期主题：[由文本内容推断]\n"}
 
 {character_info}
 
@@ -742,4 +765,3 @@ class TextProcessor:
             text = '\n'.join(cleaned_lines)
         
         return text
-
