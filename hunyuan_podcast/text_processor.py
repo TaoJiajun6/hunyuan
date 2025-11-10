@@ -403,6 +403,13 @@ class TextProcessor:
             if "不愉快的质疑访谈" in scene_types:
                 scene_requirements += "- **质疑访谈**：包含质疑、反驳、解释等互动，保持对话的紧张感\n"
         
+        # 构建播客基本信息默认值（避免在f-string表达式中使用反斜杠）
+        default_podcast_info = "播客名称：[由文本内容推断]\n本期主题：[由文本内容推断]\n"
+        final_podcast_info = podcast_info if podcast_info else default_podcast_info
+        
+        # 构建场景类型字符串
+        scene_types_str = ', '.join(scene_types) if scene_types else "自然互动交流"
+        
         # 构建完整的提示词
         prompt = f"""【核心指令】
 
@@ -412,7 +419,7 @@ class TextProcessor:
 
 1. 播客基本信息
 
-{podcast_info if podcast_info else "播客名称：[由文本内容推断]\n本期主题：[由文本内容推断]\n"}
+{final_podcast_info}
 
 {character_info}
 
@@ -422,7 +429,7 @@ class TextProcessor:
 
 4. 互动场景类型
 
-{', '.join(scene_types) if scene_types else "自然互动交流"}
+{scene_types_str}
 
 【生成要求 - 固定部分】
 
