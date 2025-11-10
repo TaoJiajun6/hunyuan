@@ -157,3 +157,4 @@ ohpm --version
 - HarmonyOS SDK版本是否正确
 - 项目结构是否完整
 
+
