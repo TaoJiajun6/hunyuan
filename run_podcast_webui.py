@@ -74,15 +74,66 @@ if __name__ == "__main__":
         sys.exit(1)
     
     demo, args = create_webui()
+    
+    # 获取可用的访问地址
+    import socket
+    def get_local_ip():
+        """获取本机IP地址"""
+        try:
+            # 连接到一个远程地址来获取本机IP
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except:
+            return "127.0.0.1"
+    
+    local_ip = get_local_ip()
+    
+    # 检测运行环境
+    is_cloud_studio = any([
+        os.getenv("CLOUD_STUDIO_PORT"),
+        os.getenv("TENCENT_CLOUD_STUDIO"),
+        "cloudstudio" in os.getenv("USER", "").lower(),
+        "cloudstudio" in os.getcwd().lower()
+    ])
+    
+    is_vscode_server = os.getenv("VSCODE_SERVER_PORT") or os.getenv("REMOTE_CONTAINERS")
+    is_codespace = os.getenv("CODESPACE_NAME")
+    
     print(f"\n🚀 混元AI播客生成系统已启动！")
-    print(f"📡 访问地址: http://{args.host}:{args.port}")
-    print(f"💡 按 Ctrl+C 停止服务\n")
+    print(f"\n📡 访问地址：")
+    
+    # 优先显示本地访问地址（最常用）
+    print(f"   ✅ 本地访问: http://127.0.0.1:{args.port}")
+    print(f"   ✅ 或使用: http://localhost:{args.port}")
+    
+    # 如果是Cloud Studio或其他云平台
+    if is_cloud_studio:
+        print(f"\n   🌐 Cloud Studio环境检测到:")
+        print(f"      • 请在Cloud Studio的端口转发功能中查看访问地址")
+        print(f"      • 或使用: http://127.0.0.1:{args.port}")
+        print(f"      • 如果配置了公网访问，请使用Cloud Studio提供的公网地址")
+    elif is_vscode_server or is_codespace:
+        print(f"\n   🌐 云平台环境检测到:")
+        print(f"      • 请在平台的端口转发/预览功能中查看访问地址")
+        print(f"      • 或使用: http://127.0.0.1:{args.port}")
+    elif args.host == "0.0.0.0":
+        print(f"   🌐 局域网访问: http://{local_ip}:{args.port}")
+        print(f"      (同一局域网内的其他设备可以使用此地址访问)")
+    
+    print(f"\n💡 提示:")
+    print(f"   • 如果使用浏览器访问，优先尝试: http://127.0.0.1:{args.port}")
+    print(f"   • 如果在云平台，请查看平台的端口转发或预览功能")
+    print(f"   • 如果无法访问，请检查防火墙或安全组设置")
+    print(f"\n💡 按 Ctrl+C 停止服务\n")
     
     # 添加输出目录到允许的路径列表
     from hunyuan_podcast.config import OUTPUT_DIR
     import os
     output_dir_abs = os.path.abspath(OUTPUT_DIR)
-    print(f"📁 输出目录: {output_dir_abs}")
+    print(f"📁 输出目录: {output_dir_abs}\n")
     
     demo.queue(10)
     demo.launch(
