@@ -10,6 +10,9 @@ import fs from '@ohos.file.fs';
  * 文件工具类
  */
 export class FileUtils {
+  // 文件大小限制（10MB）
+  private static readonly MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
   /**
    * 选择音频文件
    * 使用DocumentViewPicker从文件系统中选择音频文件
@@ -48,13 +51,25 @@ export class FileUtils {
         try {
           file = fs.openSync(fileUri, fs.OpenMode.READ_ONLY);
           const stat = fs.statSync(file.fd);
+          const fileSize = stat.size;
+          const fileSizeMB = fileSize / (1024 * 1024);
+          
+          // 检查文件大小
+          if (fileSize > FileUtils.MAX_FILE_SIZE) {
+            promptAction.showToast({
+              message: `文件过大: ${fileSizeMB.toFixed(2)}MB，最大支持10MB`,
+              duration: 3000
+            });
+            return null;
+          }
+          
           const buffer = new ArrayBuffer(stat.size);
           fs.readSync(file.fd, buffer);
           fs.closeSync(file);
           file = null;
           
           promptAction.showToast({
-            message: `文件选择成功`,
+            message: `文件选择成功 (${fileSizeMB.toFixed(2)}MB)`,
             duration: 1500
           });
           

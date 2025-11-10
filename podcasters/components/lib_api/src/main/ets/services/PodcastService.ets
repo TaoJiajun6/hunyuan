@@ -9,18 +9,26 @@ const TAG = '[PodcastService]';
  */
 export class PodcastConfig {
   // 配置说明：
-  // 1. 使用云函数：设置为华为AGC云函数的HTTP触发器URL
+  // 1. 使用Cloud Studio（推荐）：设置为Cloud Studio端口转发地址
+  //    格式：https://${SPACE_KEY}--8000.${REGION}.cloudstudio.work/
+  //    示例：'https://hfrsgm--8000.ap-guangzhou.cloudstudio.work'
+  //    获取方式：
+  //    - 查看浏览器地址栏：https://hfrsgm.ap-guangzhou.cloudstudio.work/
+  //    - 提取SPACE_KEY（hfrsgm）和REGION（ap-guangzhou）
+  //    - 构建地址：https://hfrsgm--8000.ap-guangzhou.cloudstudio.work
+  // 2. 使用云函数：设置为华为AGC云函数的HTTP触发器URL
   //    例如：'https://your-cloud-function-url.com'
-  // 2. 使用本地服务器：设置为本地服务器的IP地址和端口
+  // 3. 使用本地服务器：设置为本地服务器的IP地址和端口
   //    例如：'http://10.10.210.52:8000'
-  // 3. 使用远程服务器：设置为远程服务器的URL
+  // 4. 使用远程服务器：设置为远程服务器的URL
   //    例如：'https://your-server.com'
-  static readonly API_BASE_URL: string = 'http://10.10.210.52:8000'; // 请替换为实际的服务器地址或云函数URL
-  static readonly API_TIMEOUT: number = 300000; // 5分钟超时（播客生成可能需要较长时间）
+  static readonly API_BASE_URL: string = 'https://hfrsgm--8000.ap-guangzhou.cloudstudio.work'; // 请替换为实际的服务器地址
+  static readonly API_TIMEOUT: number = 600000; // 10分钟超时（考虑大文件上传和播客生成时间）
   
   // 是否使用云函数（如果使用云函数，路径可能不同）
   // 云函数通过HTTP触发器调用，URL格式通常为：https://your-cloud-function-url.com
   // 本地/远程服务器URL格式：http://ip:port 或 https://domain.com
+  // Cloud Studio URL格式：https://${SPACE_KEY}--${PORT}.${REGION}.cloudstudio.work
   static readonly USE_CLOUD_FUNCTION: boolean = false; // 设置为 true 如果使用云函数
 }
 
@@ -44,6 +52,18 @@ export interface MultiRoleRequest {
   text: string;
   role_voices: Record<string, string>; // 角色名 -> base64音频
   silence_interval?: number;
+  podcast_name?: string; // 播客名称（可选）
+  topic?: string; // 本期主题（可选）
+  character_1_name?: string; // 角色1名称（可选）
+  character_1_personality?: string; // 角色1性格特点（可选）
+  character_1_speaking_style?: string; // 角色1说话风格（可选）
+  character_2_name?: string; // 角色2名称（可选）
+  character_2_personality?: string; // 角色2性格特点（可选）
+  character_2_speaking_style?: string; // 角色2说话风格（可选）
+  character_3_name?: string; // 角色3名称（可选）
+  character_3_personality?: string; // 角色3性格特点（可选）
+  character_3_speaking_style?: string; // 角色3说话风格（可选）
+  scene_types?: string[]; // 互动场景类型列表（可选）
 }
 
 /**
@@ -67,17 +87,83 @@ export interface DeepPodcastRequest {
 }
 
 /**
+ * 文本分析请求
+ */
+export interface AnalyzeTextRequest {
+  text: string; // 要分析的文本素材
+}
+
+/**
+ * 分析结果中的角色信息
+ */
+export interface AnalyzedCharacterInfo {
+  name: string; // 角色名称
+  personality: string; // 性格特点
+  speaking_style: string; // 说话风格
+}
+
+/**
+ * 文本分析结果
+ */
+export interface AnalyzeTextResult {
+  podcast_name: string; // 播客名称
+  topic: string; // 本期主题
+  characters: AnalyzedCharacterInfo[]; // 角色设定列表
+  scene_types: string[]; // 互动场景类型列表
+}
+
+/**
  * 多角色播客请求体（API请求用）
  */
 class MultiRoleRequestBody {
   text: string;
   role_voices: Record<string, string>;
   silence_interval: number;
+  podcast_name?: string;
+  topic?: string;
+  character_1_name?: string;
+  character_1_personality?: string;
+  character_1_speaking_style?: string;
+  character_2_name?: string;
+  character_2_personality?: string;
+  character_2_speaking_style?: string;
+  character_3_name?: string;
+  character_3_personality?: string;
+  character_3_speaking_style?: string;
+  scene_types?: string[];
 
-  constructor(text: string, role_voices: Record<string, string>, silence_interval: number) {
+  constructor(
+    text: string,
+    role_voices: Record<string, string>,
+    silence_interval: number,
+    podcast_name?: string,
+    topic?: string,
+    character_1_name?: string,
+    character_1_personality?: string,
+    character_1_speaking_style?: string,
+    character_2_name?: string,
+    character_2_personality?: string,
+    character_2_speaking_style?: string,
+    character_3_name?: string,
+    character_3_personality?: string,
+    character_3_speaking_style?: string,
+    scene_types?: string[]
+  ) {
     this.text = text;
     this.role_voices = role_voices;
     this.silence_interval = silence_interval;
+    this.podcast_name = podcast_name;
+    this.topic = topic;
+    this.character_1_name = character_1_name;
+    this.character_1_personality = character_1_personality;
+    this.character_1_speaking_style = character_1_speaking_style;
+    this.character_2_name = character_2_name;
+    this.character_2_personality = character_2_personality;
+    this.character_2_speaking_style = character_2_speaking_style;
+    this.character_3_name = character_3_name;
+    this.character_3_personality = character_3_personality;
+    this.character_3_speaking_style = character_3_speaking_style;
+    this.scene_types = scene_types;
   }
 }
 
@@ -126,6 +212,15 @@ export interface ApiResponse<T = Record<string, Object>> {
 }
 
 /**
+ * 错误响应（用于错误处理）
+ */
+interface ErrorResponse {
+  success?: boolean;
+  message?: string;
+  error?: string;
+}
+
+/**
  * 播客生成结果
  */
 export interface PodcastResult {
@@ -144,8 +239,12 @@ export interface PodcastResult {
  */
 export class PodcastService {
   private static instance: PodcastService;
+  private baseUrl: string;
 
   private constructor() {
+    // 规范化base URL（移除末尾斜杠）
+    this.baseUrl = PodcastConfig.API_BASE_URL.replace(/\/+$/, '');
+    Logger.info(TAG, `初始化PodcastService，Base URL: ${this.baseUrl}`);
   }
 
   public static getInstance(): PodcastService {
@@ -153,6 +252,79 @@ export class PodcastService {
       PodcastService.instance = new PodcastService();
     }
     return PodcastService.instance;
+  }
+
+  /**
+   * 构建完整的API URL
+   */
+  private buildApiUrl(path: string): string {
+    if (PodcastConfig.USE_CLOUD_FUNCTION) {
+      // 云函数模式：直接使用base URL
+      return this.baseUrl;
+    } else {
+      // 直接API模式：拼接路径
+      const cleanPath = path.startsWith('/') ? path : `/${path}`;
+      return `${this.baseUrl}${cleanPath}`;
+    }
+  }
+
+  /**
+   * 处理HTTP响应
+   */
+  private handleResponse<T>(
+    err: BusinessError | null,
+    data: http.HttpResponse | null,
+    defaultError: string
+  ): ApiResponse<T> {
+    if (err) {
+      Logger.error(TAG, `${defaultError}: ${JSON.stringify(err)}`);
+      return {
+        success: false,
+        message: defaultError,
+        error: err.message || String(err) || '网络请求失败',
+      };
+    }
+
+    if (!data) {
+      Logger.error(TAG, `${defaultError}: 响应数据为空`);
+      return {
+        success: false,
+        message: defaultError,
+        error: '响应数据为空',
+      };
+    }
+
+    // 处理非200状态码
+    if (data.responseCode !== 200) {
+      Logger.error(TAG, `${defaultError}: HTTP ${data.responseCode}`);
+      try {
+        const errorResult = JSON.parse(data.result.toString()) as ErrorResponse;
+        return {
+          success: false,
+          message: errorResult.message || defaultError,
+          error: errorResult.error || `HTTP ${data.responseCode}`,
+        };
+      } catch {
+        return {
+          success: false,
+          message: defaultError,
+          error: `HTTP ${data.responseCode}: ${data.result.toString()}`,
+        };
+      }
+    }
+
+    // 解析响应数据
+    try {
+      const result = JSON.parse(data.result.toString()) as ApiResponse<T>;
+      return result;
+    } catch (parseError) {
+      Logger.error(TAG, `解析响应失败: ${JSON.stringify(parseError)}`);
+      return {
+        success: false,
+        message: '解析响应失败',
+        error: parseError instanceof Error ? parseError.message : String(parseError),
+      };
+    }
   }
 
   /**
@@ -166,24 +338,31 @@ export class PodcastService {
           method: http.RequestMethod.GET,
           connectTimeout: 10000,
           readTimeout: 10000,
+          header: {
+            'Content-Type': 'application/json',
+          },
         };
 
-        // 健康检查路径：云函数使用查询参数，本地服务器使用路径
-        const healthPath = PodcastConfig.USE_CLOUD_FUNCTION 
-          ? `${PodcastConfig.API_BASE_URL}?path=health` 
-          : `${PodcastConfig.API_BASE_URL}/health`;
+        // 健康检查路径
+        const healthUrl = PodcastConfig.USE_CLOUD_FUNCTION
+          ? `${this.baseUrl}?path=health`
+          : this.buildApiUrl('/health');
+
+        Logger.info(TAG, `健康检查请求: ${healthUrl}`);
+
         httpRequest.request(
-          healthPath,
+          healthUrl,
           options,
           (err: BusinessError, data: http.HttpResponse) => {
             httpRequest.destroy();
             if (err) {
               Logger.error(TAG, `健康检查失败: ${JSON.stringify(err)}`);
               resolve(false);
-            } else if (data.responseCode === 200) {
+            } else if (data && data.responseCode === 200) {
               Logger.info(TAG, '健康检查成功');
               resolve(true);
             } else {
+              Logger.warn(TAG, `健康检查返回非200状态码: ${data?.responseCode}`);
               resolve(false);
             }
           }
@@ -201,60 +380,76 @@ export class PodcastService {
   async generateMultiRolePodcast(request: MultiRoleRequest): Promise<ApiResponse<PodcastResult>> {
     return new Promise<ApiResponse<PodcastResult>>((resolve) => {
       try {
+        // 验证请求参数
+        if (!request.text || request.text.trim().length === 0) {
+          resolve({
+            success: false,
+            message: '播客文本不能为空',
+            error: '文本内容为空',
+          });
+          return;
+        }
+
+        if (!request.role_voices || Object.keys(request.role_voices).length === 0) {
+          resolve({
+            success: false,
+            message: '至少需要一个角色的音色文件',
+            error: '角色音色为空',
+          });
+          return;
+        }
+
         const requestBody = new MultiRoleRequestBody(
           request.text,
           request.role_voices,
-          request.silence_interval || 300
+          request.silence_interval || 300,
+          request.podcast_name,
+          request.topic,
+          request.character_1_name,
+          request.character_1_personality,
+          request.character_1_speaking_style,
+          request.character_2_name,
+          request.character_2_personality,
+          request.character_2_speaking_style,
+          request.character_3_name,
+          request.character_3_personality,
+          request.character_3_speaking_style,
+          request.scene_types
         );
 
-        Logger.info(TAG, `开始生成多角色播客: ${JSON.stringify({ text: request.text, roles: Object.keys(request.role_voices) })}`);
+        Logger.info(TAG, `开始生成多角色播客: 文本长度=${request.text.length}, 角色数=${Object.keys(request.role_voices).length}`);
 
         const httpRequest = http.createHttp();
+        const requestData = JSON.stringify(requestBody);
         const options: http.HttpRequestOptions = {
           method: http.RequestMethod.POST,
           header: {
             'Content-Type': 'application/json',
+            'Accept': 'application/json',
           },
-          extraData: JSON.stringify(requestBody),
+          extraData: requestData,
           connectTimeout: PodcastConfig.API_TIMEOUT,
           readTimeout: PodcastConfig.API_TIMEOUT,
         };
 
-        // 多角色播客路径：云函数直接使用根路径，本地服务器使用完整路径
-        const multiRolePath = PodcastConfig.USE_CLOUD_FUNCTION 
-          ? PodcastConfig.API_BASE_URL 
-          : `${PodcastConfig.API_BASE_URL}/api/v1/podcast/multi_role`;
+        const apiUrl = PodcastConfig.USE_CLOUD_FUNCTION
+          ? this.baseUrl
+          : this.buildApiUrl('/api/v1/podcast/multi_role');
+
+        Logger.info(TAG, `请求URL: ${apiUrl}, 请求体大小: ${requestData.length} bytes`);
+
         httpRequest.request(
-          multiRolePath,
+          apiUrl,
           options,
           (err: BusinessError, data: http.HttpResponse) => {
             httpRequest.destroy();
-            if (err) {
-              Logger.error(TAG, `多角色播客生成异常: ${JSON.stringify(err)}`);
-              resolve({
-                success: false,
-                message: '播客生成失败',
-                error: err.message || String(err),
-              });
+            const result = this.handleResponse<PodcastResult>(err, data || null, '多角色播客生成失败');
+            if (result.success) {
+              Logger.info(TAG, '多角色播客生成成功');
             } else {
-              try {
-                const result = JSON.parse(data.result.toString()) as ApiResponse<PodcastResult>;
-                if (data.responseCode === 200 && result.success) {
-                  Logger.info(TAG, '多角色播客生成成功');
-                  resolve(result);
-                } else {
-                  Logger.error(TAG, `多角色播客生成失败: ${result.error || result.message}`);
-                  resolve(result);
-                }
-              } catch (parseError) {
-                Logger.error(TAG, `解析响应失败: ${JSON.stringify(parseError)}`);
-                resolve({
-                  success: false,
-                  message: '解析响应失败',
-                  error: parseError instanceof Error ? parseError.message : String(parseError),
-                });
-              }
+              Logger.error(TAG, `多角色播客生成失败: ${result.error || result.message}`);
             }
+            resolve(result);
           }
         );
       } catch (error) {
@@ -274,60 +469,76 @@ export class PodcastService {
   async generateCharacterPodcast(request: CharacterRequest): Promise<ApiResponse<PodcastResult>> {
     return new Promise<ApiResponse<PodcastResult>>((resolve) => {
       try {
+        // 验证请求参数
+        if (!request.characters || request.characters.length < 2) {
+          resolve({
+            success: false,
+            message: '至少需要2个角色',
+            error: '角色数量不足',
+          });
+          return;
+        }
+
+        if (request.characters.length > 3) {
+          resolve({
+            success: false,
+            message: '最多支持3个角色',
+            error: '角色数量过多',
+          });
+          return;
+        }
+
+        // 验证角色信息
+        for (const char of request.characters) {
+          if (!char.name || !char.voice) {
+            resolve({
+              success: false,
+              message: '角色名称和音色文件不能为空',
+              error: '角色信息不完整',
+            });
+            return;
+          }
+        }
+
         const requestBody = new CharacterRequestBody(
           request.characters,
           request.topic,
           request.silence_interval || 300
         );
 
-        Logger.info(TAG, `开始生成自定义角色播客: ${JSON.stringify({ topic: request.topic, characters: request.characters.map(c => c.name) })}`);
+        Logger.info(TAG, `开始生成自定义角色播客: 主题=${request.topic || '无'}, 角色数=${request.characters.length}`);
 
         const httpRequest = http.createHttp();
+        const requestData = JSON.stringify(requestBody);
         const options: http.HttpRequestOptions = {
           method: http.RequestMethod.POST,
           header: {
             'Content-Type': 'application/json',
+            'Accept': 'application/json',
           },
-          extraData: JSON.stringify(requestBody),
+          extraData: requestData,
           connectTimeout: PodcastConfig.API_TIMEOUT,
           readTimeout: PodcastConfig.API_TIMEOUT,
         };
 
-        // 自定义角色播客路径：云函数直接使用根路径，本地服务器使用完整路径
-        const characterPath = PodcastConfig.USE_CLOUD_FUNCTION 
-          ? PodcastConfig.API_BASE_URL 
-          : `${PodcastConfig.API_BASE_URL}/api/v1/podcast/character`;
+        const apiUrl = PodcastConfig.USE_CLOUD_FUNCTION
+          ? this.baseUrl
+          : this.buildApiUrl('/api/v1/podcast/character');
+
+        Logger.info(TAG, `请求URL: ${apiUrl}, 请求体大小: ${requestData.length} bytes`);
+
         httpRequest.request(
-          characterPath,
+          apiUrl,
           options,
           (err: BusinessError, data: http.HttpResponse) => {
             httpRequest.destroy();
-            if (err) {
-              Logger.error(TAG, `自定义角色播客生成异常: ${JSON.stringify(err)}`);
-              resolve({
-                success: false,
-                message: '播客生成失败',
-                error: err.message || String(err),
-              });
+            const result = this.handleResponse<PodcastResult>(err, data || null, '自定义角色播客生成失败');
+            if (result.success) {
+              Logger.info(TAG, '自定义角色播客生成成功');
             } else {
-              try {
-                const result = JSON.parse(data.result.toString()) as ApiResponse<PodcastResult>;
-                if (data.responseCode === 200 && result.success) {
-                  Logger.info(TAG, '自定义角色播客生成成功');
-                  resolve(result);
-                } else {
-                  Logger.error(TAG, `自定义角色播客生成失败: ${result.error || result.message}`);
-                  resolve(result);
-                }
-              } catch (parseError) {
-                Logger.error(TAG, `解析响应失败: ${JSON.stringify(parseError)}`);
-                resolve({
-                  success: false,
-                  message: '解析响应失败',
-                  error: parseError instanceof Error ? parseError.message : String(parseError),
-                });
-              }
+              Logger.error(TAG, `自定义角色播客生成失败: ${result.error || result.message}`);
             }
+            resolve(result);
           }
         );
       } catch (error) {
@@ -342,67 +553,166 @@ export class PodcastService {
   }
 
   /**
+   * 分析文本素材，自动推断播客信息
+   */
+  async analyzeTextForPodcast(request: AnalyzeTextRequest): Promise<ApiResponse<AnalyzeTextResult>> {
+    return new Promise<ApiResponse<AnalyzeTextResult>>((resolve) => {
+      try {
+        // 验证请求参数
+        if (!request.text || request.text.trim().length === 0) {
+          resolve({
+            success: false,
+            message: '文本内容不能为空',
+            error: '文本内容为空',
+          });
+          return;
+        }
+
+        Logger.info(TAG, `开始分析文本素材: 文本长度=${request.text.length}`);
+
+        const httpRequest = http.createHttp();
+        const requestData = JSON.stringify({ text: request.text });
+        const options: http.HttpRequestOptions = {
+          method: http.RequestMethod.POST,
+          header: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          extraData: requestData,
+          connectTimeout: 30000, // 30秒超时
+          readTimeout: 30000,
+        };
+
+        const apiUrl = PodcastConfig.USE_CLOUD_FUNCTION
+          ? this.baseUrl
+          : this.buildApiUrl('/api/v1/podcast/analyze');
+
+        Logger.info(TAG, `请求URL: ${apiUrl}`);
+
+        httpRequest.request(
+          apiUrl,
+          options,
+          (err: BusinessError, data: http.HttpResponse) => {
+            httpRequest.destroy();
+            const result = this.handleResponse<AnalyzeTextResult>(err, data || null, '文本分析失败');
+            if (result.success) {
+              Logger.info(TAG, '文本分析成功');
+            } else {
+              Logger.error(TAG, `文本分析失败: ${result.error || result.message}`);
+            }
+            resolve(result);
+          }
+        );
+      } catch (error) {
+        Logger.error(TAG, `文本分析异常: ${JSON.stringify(error)}`);
+        resolve({
+          success: false,
+          message: '分析失败',
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    });
+  }
+
+  /**
    * 生成主题深度播客
    */
   async generateDeepPodcast(request: DeepPodcastRequest): Promise<ApiResponse<PodcastResult>> {
     return new Promise<ApiResponse<PodcastResult>>((resolve) => {
       try {
+        // 验证请求参数
+        if (!request.topic || request.topic.trim().length === 0) {
+          resolve({
+            success: false,
+            message: '播客主题不能为空',
+            error: '主题为空',
+          });
+          return;
+        }
+
+        const numCharacters = request.num_characters || 2;
+        if (numCharacters < 2 || numCharacters > 3) {
+          resolve({
+            success: false,
+            message: '角色数量必须在2-3个之间',
+            error: '角色数量无效',
+          });
+          return;
+        }
+
+        const depthLevel = request.depth_level || '深度';
+        if (!['深度', '中等', '浅层'].includes(depthLevel)) {
+          resolve({
+            success: false,
+            message: '深度级别必须是：深度、中等或浅层',
+            error: '深度级别无效',
+          });
+          return;
+        }
+
+        if (!request.role_voices || Object.keys(request.role_voices).length !== numCharacters) {
+          resolve({
+            success: false,
+            message: `角色音色数量必须与角色数量(${numCharacters})一致`,
+            error: '角色音色数量不匹配',
+          });
+          return;
+        }
+
+        // 验证角色音色
+        const roleNames = ['角色A', '角色B', '角色C'].slice(0, numCharacters);
+        for (const roleName of roleNames) {
+          if (!request.role_voices[roleName]) {
+            resolve({
+              success: false,
+              message: `缺少角色 ${roleName} 的音色文件`,
+              error: '角色音色缺失',
+            });
+            return;
+          }
+        }
+
         const requestBody = new DeepPodcastRequestBody(
           request.topic,
           request.role_voices,
-          request.num_characters || 2,
-          request.depth_level || '深度',
+          numCharacters,
+          depthLevel,
           request.silence_interval || 300
         );
 
-        Logger.info(TAG, `开始生成主题深度播客: ${JSON.stringify({ topic: request.topic, depth_level: request.depth_level })}`);
+        Logger.info(TAG, `开始生成主题深度播客: 主题=${request.topic}, 深度=${depthLevel}, 角色数=${numCharacters}`);
 
         const httpRequest = http.createHttp();
+        const requestData = JSON.stringify(requestBody);
         const options: http.HttpRequestOptions = {
           method: http.RequestMethod.POST,
           header: {
             'Content-Type': 'application/json',
+            'Accept': 'application/json',
           },
-          extraData: JSON.stringify(requestBody),
+          extraData: requestData,
           connectTimeout: PodcastConfig.API_TIMEOUT,
           readTimeout: PodcastConfig.API_TIMEOUT,
         };
 
-        // 主题深度播客路径：云函数直接使用根路径，本地服务器使用完整路径
-        const deepPath = PodcastConfig.USE_CLOUD_FUNCTION 
-          ? PodcastConfig.API_BASE_URL 
-          : `${PodcastConfig.API_BASE_URL}/api/v1/podcast/deep`;
+        const apiUrl = PodcastConfig.USE_CLOUD_FUNCTION
+          ? this.baseUrl
+          : this.buildApiUrl('/api/v1/podcast/deep');
+
+        Logger.info(TAG, `请求URL: ${apiUrl}, 请求体大小: ${requestData.length} bytes`);
+
         httpRequest.request(
-          deepPath,
+          apiUrl,
           options,
           (err: BusinessError, data: http.HttpResponse) => {
             httpRequest.destroy();
-            if (err) {
-              Logger.error(TAG, `主题深度播客生成异常: ${JSON.stringify(err)}`);
-              resolve({
-                success: false,
-                message: '播客生成失败',
-                error: err.message || String(err),
-              });
+            const result = this.handleResponse<PodcastResult>(err, data || null, '主题深度播客生成失败');
+            if (result.success) {
+              Logger.info(TAG, '主题深度播客生成成功');
             } else {
-              try {
-                const result = JSON.parse(data.result.toString()) as ApiResponse<PodcastResult>;
-                if (data.responseCode === 200 && result.success) {
-                  Logger.info(TAG, '主题深度播客生成成功');
-                  resolve(result);
-                } else {
-                  Logger.error(TAG, `主题深度播客生成失败: ${result.error || result.message}`);
-                  resolve(result);
-                }
-              } catch (parseError) {
-                Logger.error(TAG, `解析响应失败: ${JSON.stringify(parseError)}`);
-                resolve({
-                  success: false,
-                  message: '解析响应失败',
-                  error: parseError instanceof Error ? parseError.message : String(parseError),
-                });
-              }
+              Logger.error(TAG, `主题深度播客生成失败: ${result.error || result.message}`);
             }
+            resolve(result);
           }
         );
       } catch (error) {
