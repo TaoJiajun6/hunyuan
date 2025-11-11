@@ -22,7 +22,7 @@ export class PodcastConfig {
   //    例如：'http://10.10.210.52:8000'
   // 4. 使用远程服务器：设置为远程服务器的URL
   //    例如：'https://your-server.com'
-  static readonly API_BASE_URL: string = 'https://pexlsj--8000.ap-singapore.cloudstudio.work/'; // 请替换为实际的服务器地址
+  static readonly API_BASE_URL: string = 'http://43.156.78.187:8000/'; // 服务器地址
   static readonly API_TIMEOUT: number = 600000; // 10分钟超时（考虑大文件上传和播客生成时间）
 
   // 是否使用云函数（如果使用云函数，路径可能不同）
