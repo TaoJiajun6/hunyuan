@@ -11,12 +11,28 @@ import time
 import requests
 import json
 from typing import Optional, List, Dict, Any
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request, BackgroundTasks
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field, ValidationError
 import uvicorn
+import glob
+import base64 as _base64
+from typing import Tuple
+
+# 尝试导入我们在 tools 中实现的 AGC 上传工具（可选）
+try:
+    from tools.upload_agc import get_agc_token as agc_get_token, upload_file_to_agc as agc_upload_file
+except Exception:
+    agc_get_token = None
+    agc_upload_file = None
+
+# 尝试导入库级上传客户端（优先使用包内实现）
+try:
+    from .upload_client import upload_generated_podcast as agc_upload_client
+except Exception:
+    agc_upload_client = None
 
 from .podcast_generator import PodcastGenerator
 from .config import INDEXTTS_CONFIG_PATH, INDEXTTS_MODEL_DIR, OUTPUT_DIR
@@ -407,12 +423,60 @@ def download_text_from_url(url: str, timeout: int = 60) -> str:
                 )
         else:
             # 未知文件类型，尝试作为文本处理
-            logger.warning(f"未知文件类型: {file_extension}，尝试作为文本处理")
+            logger.warning(f"未知文件类型: {file_extension}，尝试作为文本处理或Docx解析")
+
+            # 有些情况下，URL 可能返回的是 docx（zip） 文件但扩展名或 content-type 不明确。
+            # 尝试检测 docx 的 zip 文件头（PK）或包含 word/ 路径，以便使用 python-docx 解析。
             try:
-                text = content_bytes.decode('utf-8')
-            except UnicodeDecodeError:
-                text = content_bytes.decode('utf-8', errors='ignore')
-            return text
+                is_docx = False
+                # 快速检查前几个字节是否为 zip 文件头 PK
+                if content_bytes[:4] == b'PK\x03\x04':
+                    is_docx = True
+                # 或者前 2KB 内含有 word/ 路径提示
+                elif b'word/' in content_bytes[:2048]:
+                    is_docx = True
+
+                if is_docx:
+                    try:
+                        import docx
+                        from io import BytesIO
+
+                        doc = docx.Document(BytesIO(content_bytes))
+                        text_parts = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+                        text = '\n'.join(text_parts)
+                        logger.info(f"Docx 文件解析成功，提取文本长度: {len(text)} 字符")
+                        return text
+                    except ImportError:
+                        logger.error("需要安装python-docx库来处理docx文件: pip install python-docx")
+                        raise HTTPException(
+                            status_code=500,
+                            detail="文件可能为docx格式；请安装python-docx库: pip install python-docx"
+                        )
+                    except Exception as e:
+                        logger.warning(f"尝试作为docx解析失败，回退为文本解析: {str(e)}")
+
+                # 回退为文本解析：尝试多种编码并剔除不可打印字符
+                try:
+                    text = content_bytes.decode('utf-8')
+                except UnicodeDecodeError:
+                    try:
+                        text = content_bytes.decode('gbk')
+                    except UnicodeDecodeError:
+                        text = content_bytes.decode('latin-1', errors='ignore')
+
+                # 移除明显的二进制/控制字符，保留换行和制表
+                cleaned = []
+                for ch in text:
+                    if ch in ('\n', '\r', '\t'):
+                        cleaned.append(ch)
+                    elif ch.isprintable():
+                        cleaned.append(ch)
+                text = ''.join(cleaned)
+
+                return text
+            except Exception as e:
+                logger.error(f"处理未知文本文件异常: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"处理文本文件异常: {str(e)}")
             
     except requests.exceptions.HTTPError as e:
         if e.response.status_code == 403:
@@ -454,6 +518,34 @@ def get_audio_file(voice_data: str, voice_url: Optional[str] = None, suffix: str
         return decode_base64_audio(voice_data, suffix)
 
 
+def _find_agc_client_json() -> Optional[str]:
+    """在工作目录或仓库根查找 agc-apiclient-*.json 文件，返回第一个匹配路径"""
+    # 尝试当前工作目录和父目录
+    patterns = ["agc-apiclient-*.json", "./agc-apiclient-*.json", "../agc-apiclient-*.json"]
+    for pat in patterns:
+        matches = glob.glob(pat)
+        if matches:
+            return matches[0]
+    # 尝试项目根下（/workspace/hunyuan 或 repo root）
+    matches = glob.glob(os.path.join(os.getcwd(), "agc-apiclient-*.json"))
+    if matches:
+        return matches[0]
+    return None
+
+
+def _load_agc_credentials_from_file(path: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """从 agc-apiclient JSON 中读取 client_id, client_secret, project_id"""
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            j = json.load(f)
+        client_id = j.get('client_id')
+        client_secret = j.get('client_secret')
+        project_id = j.get('project_id') or j.get('project_id') or j.get('project_id')
+        return client_id, client_secret, project_id
+    except Exception:
+        return None, None, None
+
+
 def encode_file_to_base64(file_path: str) -> str:
     """将文件编码为base64"""
     try:
@@ -461,6 +553,33 @@ def encode_file_to_base64(file_path: str) -> str:
             return base64.b64encode(f.read()).decode("utf-8")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"文件编码失败: {str(e)}")
+
+
+def do_agc_upload(output_path: str, storage_url: str, bucket: str, product_id: Optional[str] = None,
+                  domain: str = 'connect-api.cloud.huawei.com', client_id: Optional[str] = None,
+                  client_secret: Optional[str] = None):
+    """在后台执行 AGC 上传任务的 helper（供 BackgroundTasks 调用）"""
+    try:
+        if not agc_upload_client:
+            logger.debug("未找到内部 agc 上传客户端，跳过后台上传")
+            return
+
+        logger.info(f"后台上传开始: {output_path} -> {bucket} (storage={storage_url})")
+        try:
+            res = agc_upload_client(
+                output_path=output_path,
+                storage_url=storage_url,
+                bucket=bucket,
+                product_id=product_id,
+                domain=domain,
+                client_id=client_id,
+                client_secret=client_secret,
+            )
+            logger.info(f"后台 AGC 上传完成: {res}")
+        except Exception as e:
+            logger.exception(f"后台 AGC 上传失败: {e}")
+    except Exception:
+        logger.exception("do_agc_upload 异常")
 
 
 # ============ API端点 ============
@@ -523,7 +642,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 
 @app.post("/api/v1/podcast/multi_role", response_model=ApiResponse)
-async def generate_multi_role_podcast(request: MultiRoleRequest):
+async def generate_multi_role_podcast(request: MultiRoleRequest, background_tasks: BackgroundTasks):
     """
     生成多角色互动播客（子题目1）
     
@@ -675,25 +794,59 @@ async def generate_multi_role_podcast(request: MultiRoleRequest):
             )
             generation_time = time.time() - generation_start
             logger.info(f"播客音频生成完成，耗时: {generation_time:.2f}s")
-            
+            # 尝试启动后台 AGC 上传任务（不阻塞主请求）
+            agc_result = None
+            try:
+                # 配置来源：优先环境变量，其次仓库中的 agc-apiclient-*.json
+                agc_storage_url = os.getenv('AGC_STORAGE_URL')
+                agc_bucket = os.getenv('AGC_BUCKET')
+                agc_domain = os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
+                agc_client_id = os.getenv('AGC_CLIENT_ID')
+                agc_client_secret = os.getenv('AGC_CLIENT_SECRET')
+                agc_product_id = os.getenv('AGC_PRODUCT_ID')
+
+                # 如果没有显式提供 client_id/secret，尝试在仓库中查找 agc-apiclient-*.json
+                if not agc_client_id or not agc_client_secret:
+                    cfg_path = _find_agc_client_json()
+                    if cfg_path:
+                        cid, csecret, proj = _load_agc_credentials_from_file(cfg_path)
+                        agc_client_id = agc_client_id or cid
+                        agc_client_secret = agc_client_secret or csecret
+                        agc_product_id = agc_product_id or proj
+
+                if agc_storage_url and agc_bucket:
+                    # 使用内部库upload_client以后台任务进行上传（如果可用）
+                    try:
+                        # background_tasks 在函数签名中注入
+                        background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
+                                                  agc_product_id, agc_domain, agc_client_id, agc_client_secret)
+                        logger.info("已在后台启动 AGC 上传任务")
+                        agc_result = {'status': 'started'}
+                    except Exception as e:
+                        logger.warning(f"无法启动后台 AGC 上传任务: {e}")
+                else:
+                    logger.debug("未检测到 AGC 存储配置，跳过后台上传")
+            except Exception as e:
+                logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
+
             # 编码输出音频
             logger.info("编码输出音频文件...")
             audio_base64 = encode_file_to_base64(output_path)
             file_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
             total_time = time.time() - start_time
             logger.info(f"多角色播客生成成功，总耗时: {total_time:.2f}s，输出文件大小: {file_size:.2f} MB")
-            
-            return ApiResponse(
-                success=True,
-                message="播客生成成功",
-                data={
-                    "audio_base64": audio_base64,
-                    "audio_path": output_path,
-                    "file_size_mb": round(file_size, 2),
-                    "script": text_content,
-                    "roles": list(roles)
-                }
-            )
+
+            data = {
+                "audio_base64": audio_base64,
+                "audio_path": output_path,
+                "file_size_mb": round(file_size, 2),
+                "script": text_content,
+                "roles": list(roles)
+            }
+            if agc_result:
+                data['agc_upload_status'] = agc_result
+
+            return ApiResponse(success=True, message="播客生成成功", data=data)
         finally:
             # 清理临时文件
             for temp_file in temp_files:
@@ -720,7 +873,7 @@ async def generate_multi_role_podcast(request: MultiRoleRequest):
 
 
 @app.post("/api/v1/podcast/character", response_model=ApiResponse)
-async def generate_character_podcast(request: CharacterRequest):
+async def generate_character_podcast(request: CharacterRequest, background_tasks: BackgroundTasks):
     """
     生成自定义角色播客（子题目2）
     
@@ -796,18 +949,49 @@ async def generate_character_podcast(request: CharacterRequest):
             file_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
             total_time = time.time() - start_time
             logger.info(f"自定义角色播客生成成功，总耗时: {total_time:.2f}s，输出文件大小: {file_size:.2f} MB")
-            
-            return ApiResponse(
-                success=True,
-                message="播客生成成功",
-                data={
-                    "audio_base64": audio_base64,
-                    "audio_path": output_path,
-                    "file_size_mb": round(file_size, 2),
-                    "script": cleaned_text,
-                    "characters": [char.name for char in request.characters]
-                }
-            )
+
+            # 尝试启动后台 AGC 上传任务（不阻塞主请求）
+            agc_result = None
+            try:
+                agc_storage_url = os.getenv('AGC_STORAGE_URL')
+                agc_bucket = os.getenv('AGC_BUCKET')
+                agc_domain = os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
+                agc_client_id = os.getenv('AGC_CLIENT_ID')
+                agc_client_secret = os.getenv('AGC_CLIENT_SECRET')
+                agc_product_id = os.getenv('AGC_PRODUCT_ID')
+
+                if not agc_client_id or not agc_client_secret:
+                    cfg_path = _find_agc_client_json()
+                    if cfg_path:
+                        cid, csecret, proj = _load_agc_credentials_from_file(cfg_path)
+                        agc_client_id = agc_client_id or cid
+                        agc_client_secret = agc_client_secret or csecret
+                        agc_product_id = agc_product_id or proj
+
+                if agc_storage_url and agc_bucket:
+                    try:
+                        background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
+                                                  agc_product_id, agc_domain, agc_client_id, agc_client_secret)
+                        logger.info("已在后台启动 AGC 上传任务")
+                        agc_result = {'status': 'started'}
+                    except Exception as e:
+                        logger.warning(f"无法启动后台 AGC 上传任务: {e}")
+                else:
+                    logger.debug("未检测到 AGC 存储配置，跳过后台上传")
+            except Exception as e:
+                logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
+
+            data = {
+                "audio_base64": audio_base64,
+                "audio_path": output_path,
+                "file_size_mb": round(file_size, 2),
+                "script": cleaned_text,
+                "characters": [char.name for char in request.characters]
+            }
+            if agc_result:
+                data['agc_upload_status'] = agc_result
+
+            return ApiResponse(success=True, message="播客生成成功", data=data)
         finally:
             # 清理临时文件
             for temp_file in temp_files:
@@ -834,7 +1018,7 @@ async def generate_character_podcast(request: CharacterRequest):
 
 
 @app.post("/api/v1/podcast/deep", response_model=ApiResponse)
-async def generate_deep_podcast(request: DeepPodcastRequest):
+async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: BackgroundTasks):
     """
     生成主题深度播客（子题目3）
     
@@ -914,19 +1098,50 @@ async def generate_deep_podcast(request: DeepPodcastRequest):
             file_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
             total_time = time.time() - start_time
             logger.info(f"主题深度播客生成成功，总耗时: {total_time:.2f}s，输出文件大小: {file_size:.2f} MB")
-            
-            return ApiResponse(
-                success=True,
-                message="播客生成成功",
-                data={
-                    "audio_base64": audio_base64,
-                    "audio_path": output_path,
-                    "file_size_mb": round(file_size, 2),
-                    "script": cleaned_text,
-                    "topic": request.topic,
-                    "depth_level": request.depth_level
-                }
-            )
+
+            # 尝试启动后台 AGC 上传任务（不阻塞主请求）
+            agc_result = None
+            try:
+                agc_storage_url = os.getenv('AGC_STORAGE_URL')
+                agc_bucket = os.getenv('AGC_BUCKET')
+                agc_domain = os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
+                agc_client_id = os.getenv('AGC_CLIENT_ID')
+                agc_client_secret = os.getenv('AGC_CLIENT_SECRET')
+                agc_product_id = os.getenv('AGC_PRODUCT_ID')
+
+                if not agc_client_id or not agc_client_secret:
+                    cfg_path = _find_agc_client_json()
+                    if cfg_path:
+                        cid, csecret, proj = _load_agc_credentials_from_file(cfg_path)
+                        agc_client_id = agc_client_id or cid
+                        agc_client_secret = agc_client_secret or csecret
+                        agc_product_id = agc_product_id or proj
+
+                if agc_storage_url and agc_bucket:
+                    try:
+                        background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
+                                                  agc_product_id, agc_domain, agc_client_id, agc_client_secret)
+                        logger.info("已在后台启动 AGC 上传任务")
+                        agc_result = {'status': 'started'}
+                    except Exception as e:
+                        logger.warning(f"无法启动后台 AGC 上传任务: {e}")
+                else:
+                    logger.debug("未检测到 AGC 存储配置，跳过后台上传")
+            except Exception as e:
+                logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
+
+            data = {
+                "audio_base64": audio_base64,
+                "audio_path": output_path,
+                "file_size_mb": round(file_size, 2),
+                "script": cleaned_text,
+                "topic": request.topic,
+                "depth_level": request.depth_level
+            }
+            if agc_result:
+                data['agc_upload_status'] = agc_result
+
+            return ApiResponse(success=True, message="播客生成成功", data=data)
         finally:
             # 清理临时文件
             for temp_file in temp_files:
