@@ -199,6 +199,10 @@ if __name__ == "__main__":
     else:
         print("ℹ 当前为单进程模式（workers=1）。如需生成时可查询进度，建议设置 --workers 2。")
     
-    uvicorn.run(app, host=args.host, port=args.port, workers=args.workers)
+    # 多进程模式要求以 import string 形式传递 app，单进程可直接传对象
+    if args.workers and args.workers > 1:
+        uvicorn.run("hunyuan_podcast.api_server:app", host=args.host, port=args.port, workers=args.workers)
+    else:
+        uvicorn.run(app, host=args.host, port=args.port, workers=1)
 
 
