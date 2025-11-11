@@ -17,10 +17,12 @@ export struct AudioPlayer {
   @Local audioPlayer?: media.AVPlayer;
   @Local tempFilePath: string = '';
   @Param audioBase64: string = '';
+  // 新增：支持直接播放云存储URL（优先使用此字段）
+  @Param audioUrl: string = '';
   @Param onStateChange: (isPlaying: boolean) => void = () => {};
 
   async aboutToAppear(): Promise<void> {
-    if (this.audioBase64) {
+    if (this.audioUrl || this.audioBase64) {
       await this.initPlayer();
     }
   }
@@ -33,27 +35,27 @@ export struct AudioPlayer {
    * 初始化播放器
    */
   async initPlayer(): Promise<void> {
-    if (!this.audioBase64) {
+    if (!this.audioUrl && !this.audioBase64) {
       return;
     }
 
     try {
-      // 将base64数据转换为Uint8Array
-      const audioData = this.base64ToUint8Array(this.audioBase64);
-
-      // 创建临时文件
-      const context = getContext(this) as common.UIAbilityContext;
-      const tempDir = context.cacheDir;
-      this.tempFilePath = `${tempDir}/temp_audio_${Date.now()}.wav`;
-
-      // 写入临时文件
-      const file = await fileIo.open(this.tempFilePath, fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
-      await fileIo.write(file.fd, audioData.buffer);
-      await fileIo.close(file.fd);
-
       // 创建播放器
       this.audioPlayer = await media.createAVPlayer();
-      this.audioPlayer.url = this.tempFilePath;
+      if (this.audioUrl) {
+        // 直接使用云端URL播放
+        this.audioPlayer.url = this.audioUrl;
+      } else {
+        // 将base64数据保存为临时文件后播放
+        const audioData = this.base64ToUint8Array(this.audioBase64);
+        const context = getContext(this) as common.UIAbilityContext;
+        const tempDir = context.cacheDir;
+        this.tempFilePath = `${tempDir}/temp_audio_${Date.now()}.wav`;
+        const file = await fileIo.open(this.tempFilePath, fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
+        await fileIo.write(file.fd, audioData.buffer);
+        await fileIo.close(file.fd);
+        this.audioPlayer.url = this.tempFilePath;
+      }
 
       // 监听播放状态
       this.audioPlayer.on('stateChange', (state: string) => {

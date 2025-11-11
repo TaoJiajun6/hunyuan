@@ -138,3 +138,5 @@ if (!authSuccess) {
 - [华为认证服务文档](https://developer.huawei.com/consumer/cn/doc/harmonyos-references/cloudfoundation-cloudcommon#section136610231214)
 - [云存储服务文档](https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/cloudfoundation-storage-upload-file)
 
+
+

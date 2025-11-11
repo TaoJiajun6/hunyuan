@@ -24,13 +24,13 @@ export class PodcastConfig {
   //    例如：'https://your-server.com'
   static readonly API_BASE_URL: string = 'https://pexlsj--8000.ap-singapore.cloudstudio.work/'; // 请替换为实际的服务器地址
   static readonly API_TIMEOUT: number = 600000; // 10分钟超时（考虑大文件上传和播客生成时间）
-  
+
   // 是否使用云函数（如果使用云函数，路径可能不同）
   // 云函数通过HTTP触发器调用，URL格式通常为：https://your-cloud-function-url.com
   // 本地/远程服务器URL格式：http://ip:port 或 https://domain.com
   // Cloud Studio URL格式：https://${SPACE_KEY}--${PORT}.${REGION}.cloudstudio.work
   static readonly USE_CLOUD_FUNCTION: boolean = false; // 设置为 true 如果使用云函数
-  
+
   // 是否使用云存储（后端已强制要求使用云存储URL，此配置保留用于兼容性）
   // 注意：后端API现在强制要求使用云存储URL，不再支持base64编码的音频文件
   // 使用云存储的优势：
@@ -51,8 +51,8 @@ export interface CharacterInfo {
   catchphrase?: string;
   speaking_style?: string;
   relationship?: string;
-  voice_url: string; // 云存储URL（必需，后端强制要求）
-  voice?: string; // [已废弃] base64编码的音频数据或URL（已废弃，请使用voice_url）
+  voice_url: string; // 云存储URL
+
 }
 
 /**
@@ -76,6 +76,7 @@ export interface MultiRoleRequest {
   character_3_personality?: string; // 角色3性格特点（可选）
   character_3_speaking_style?: string; // 角色3说话风格（可选）
   scene_types?: string[]; // 互动场景类型列表（可选）
+  job_id?: string; // 可选任务ID，用于轮询进度
 }
 
 /**
@@ -92,8 +93,8 @@ export interface CharacterRequest {
  */
 export interface DeepPodcastRequest {
   topic: string;
-  role_voice_urls: Record<string, string>; // 角色名 -> 云存储URL（必需，后端强制要求）
-  role_voices?: Record<string, string>; // [已废弃] 角色名 -> base64音频（已废弃，请使用role_voice_urls）
+  role_voice_urls: Record<string, string>; // 角色名 -> 云存储URL
+  
   num_characters?: number; // 2-3
   depth_level?: string; // "深度" | "中等" | "浅层"
   silence_interval?: number;
@@ -126,6 +127,19 @@ export interface AnalyzeTextResult {
 }
 
 /**
+ * 进度状态
+ */
+export interface ProgressStatus {
+  job_id: string;
+  phase: string;
+  percent: number; // 0-100
+  message: string;
+  done: boolean;
+  error?: string;
+  ts?: number;
+}
+
+/**
  * 多角色播客请求体（API请求用）
  */
 class MultiRoleRequestBody {
@@ -146,6 +160,7 @@ class MultiRoleRequestBody {
   character_3_personality?: string;
   character_3_speaking_style?: string;
   scene_types?: string[];
+  job_id?: string;
 
   constructor(
     text: string | undefined,
@@ -164,7 +179,8 @@ class MultiRoleRequestBody {
     character_3_name?: string,
     character_3_personality?: string,
     character_3_speaking_style?: string,
-    scene_types?: string[]
+    scene_types?: string[],
+    job_id?: string
   ) {
     this.text = text;
     this.text_file_url = text_file_url;
@@ -183,6 +199,7 @@ class MultiRoleRequestBody {
     this.character_3_personality = character_3_personality;
     this.character_3_speaking_style = character_3_speaking_style;
     this.scene_types = scene_types;
+    this.job_id = job_id;
   }
 }
 
@@ -253,6 +270,16 @@ interface ErrorResponse {
 /**
  * 播客生成结果
  */
+interface UploadStatus {
+  status: string;
+  bucket?: string;
+  object?: string;
+  url?: string;
+  http_status?: number;
+  response_text?: string;
+  reason?: string;
+}
+
 export interface PodcastResult {
   audio_base64: string;
   audio_path: string;
@@ -262,6 +289,12 @@ export interface PodcastResult {
   characters?: string[];
   topic?: string;
   depth_level?: string;
+
+  // 新增：云存储直链（后端返回 agc_upload_status.url 时同时回填）
+  audio_url?: string;
+
+  // 新增：上传状态信息（可用于前端展示）
+  agc_upload_status?: UploadStatus;
 }
 
 /**
@@ -296,6 +329,37 @@ export class PodcastService {
       const cleanPath = path.startsWith('/') ? path : `/${path}`;
       return `${this.baseUrl}${cleanPath}`;
     }
+  }
+
+  /**
+   * 获取任务进度
+   */
+  async getProgress(jobId: string): Promise<ProgressStatus | null> {
+    return new Promise<ProgressStatus | null>((resolve) => {
+      try {
+        const httpRequest = http.createHttp();
+        const url = this.buildApiUrl(`/api/v1/podcast/progress/${jobId}`);
+        const options: http.HttpRequestOptions = {
+          method: http.RequestMethod.GET,
+          connectTimeout: 10000,
+          readTimeout: 10000
+        };
+        httpRequest.request(url, options, (err: BusinessError, data: http.HttpResponse) => {
+          httpRequest.destroy();
+          if (err || !data || data.responseCode !== 200) {
+            resolve(null);
+            return;
+          }
+          try {
+            resolve(JSON.parse(data.result.toString()) as ProgressStatus);
+          } catch {
+            resolve(null);
+          }
+        });
+      } catch {
+        resolve(null);
+      }
+    });
   }
 
   /**
@@ -413,7 +477,7 @@ export class PodcastService {
         // 验证请求参数（text或text_file_url至少有一个）
         const hasText = request.text && request.text.trim().length > 0;
         //const hasTextFile = request.text_file_url && request.text_file_url.trim().length > 0;
-        
+
         if (!hasText) {
           resolve({
             success: false,
@@ -425,7 +489,7 @@ export class PodcastService {
 
         // 强制使用云存储URL（后端已强制要求）
         const roleVoiceUrls = request.role_voice_urls;
-        
+
         // 验证音色数据
         if (!roleVoiceUrls || Object.keys(roleVoiceUrls).length === 0) {
           resolve({
@@ -453,13 +517,15 @@ export class PodcastService {
           request.character_3_name,
           request.character_3_personality,
           request.character_3_speaking_style,
-          request.scene_types
+          request.scene_types,
+          request.job_id
         );
 
         const roleCount = Object.keys(roleVoiceUrls).length;
         const textLength = request.text ? request.text.length : 0;
         const hasTextFile = request.text_file_url ? '是' : '否';
-        Logger.info(TAG, `开始生成多角色播客: 文本长度=${textLength}, 文本文件=${hasTextFile}, 角色数=${roleCount}, 使用云存储`);
+        Logger.info(TAG,
+          `开始生成多角色播客: 文本长度=${textLength}, 文本文件=${hasTextFile}, 角色数=${roleCount}, 使用云存储`);
 
         const httpRequest = http.createHttp();
         const requestData = JSON.stringify(requestBody);
@@ -556,7 +622,8 @@ export class PodcastService {
           request.silence_interval || 300
         );
 
-        Logger.info(TAG, `开始生成自定义角色播客: 主题=${request.topic || '无'}, 角色数=${request.characters.length}, 使用云存储`);
+        Logger.info(TAG,
+          `开始生成自定义角色播客: 主题=${request.topic || '无'}, 角色数=${request.characters.length}, 使用云存储`);
 
         const httpRequest = http.createHttp();
         const requestData = JSON.stringify(requestBody);
@@ -703,7 +770,7 @@ export class PodcastService {
         // 强制使用云存储URL（后端已强制要求）
         const roleVoiceUrls = request.role_voice_urls;
         const roleNames = ['角色A', '角色B', '角色C'].slice(0, numCharacters);
-        
+
         // 验证音色数据
         if (!roleVoiceUrls || Object.keys(roleVoiceUrls).length !== numCharacters) {
           resolve({
@@ -734,7 +801,8 @@ export class PodcastService {
           request.silence_interval || 300
         );
 
-        Logger.info(TAG, `开始生成主题深度播客: 主题=${request.topic}, 深度=${depthLevel}, 角色数=${numCharacters}, 使用云存储`);
+        Logger.info(TAG,
+          `开始生成主题深度播客: 主题=${request.topic}, 深度=${depthLevel}, 角色数=${numCharacters}, 使用云存储`);
 
         const httpRequest = http.createHttp();
         const requestData = JSON.stringify(requestBody);

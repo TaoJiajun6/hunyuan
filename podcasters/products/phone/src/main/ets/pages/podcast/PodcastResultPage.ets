@@ -78,7 +78,7 @@ export struct PodcastResultPage {
         Scroll() {
           Column({ space: 16 }) {
             // 音频播放器
-            if (this.result?.audio_base64) {
+            if (this.result?.audio_url || this.result?.audio_base64) {
               Column({ space: 8 }) {
                 Text('生成的播客音频')
                   .fontSize($r('sys.float.Subtitle_L'))
@@ -87,8 +87,17 @@ export struct PodcastResultPage {
                   .alignSelf(ItemAlign.Start)
 
                 AudioPlayer({
-                  audioBase64: this.result.audio_base64
+                  audioUrl: this.result?.audio_url,
+                  audioBase64: this.result?.audio_base64
                 })
+
+                // 如果上传仍在后台进行，可提示用户云端地址可用性
+                if (this.result?.agc_upload_status && this.result.agc_upload_status.status === 'started') {
+                  Text('正在后台上传到云存储，您也可先使用本地音频播放')
+                    .fontSize($r('sys.float.Body_S'))
+                    .fontColor($r('sys.color.font_secondary'))
+                    .alignSelf(ItemAlign.Start)
+                }
               }
               .width('100%')
               .padding(16)
