@@ -1,155 +1,156 @@
-import { loginComponentManager, LoginWithHuaweiIDButton } from '@kit.AccountKit';
-import { CommonConstants, GridRowColSetting } from 'lib_common';
-import { NavHeaderBar } from 'lib_widget';
-import { AgreePrivacyBox } from '../components/AgreePrivacyBox';
-import { Constants } from '../constants/Constants';
-import { LoginRouterParams } from '../constants/Types';
-import { LoginVM } from '../viewmodels/LoginVM'
+import auth from '@hw-agconnect/auth';
+import { promptAction, router } from '@kit.ArkUI';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+import { BusinessError } from '@kit.BasicServicesKit';
+import { HuaweiAuth } from '../utils/HuaweiAuth';
+import { AuthService } from '../services/AuthService';
 
 @Builder
 export function HuaweiLoginPageBuilder() {
   HuaweiLoginPage()
 }
+// 定义 SignInResult 接口
+interface SignInResult {
+  getUser(): AuthUser;
+}
 
-@ComponentV2
-struct HuaweiLoginPage {
-  @Local vm: LoginVM = LoginVM.getInstance(false);
+// 定义 AuthUser 接口 对象类型
+interface AuthUser {
+  getUid(): string;
+
+  getDisplayName(): string;
+
+  getPhotoUrl(): string;
+}
+
+interface HuaweiProfile {
+  avatarUri?: string;
+  nickName?: string;
+}
+
+
+@Component
+export struct HuaweiLoginPage {
+  //@Link isLoading: boolean
+
+  signInWithHuawei(huaweiProfile?: HuaweiProfile) {
+    auth.signIn({
+      autoCreateUser: true,
+      "credentialInfo": {
+        "kind": 'hwid'
+      }
+    }).then((signInResult: SignInResult) => {
+      hilog.info(0x0000, 'testTag', '%{public}s', `signInHwid success. result: ${signInResult.getUser().getUid()}`);
+      // 登录成功后的处理逻辑
+      this.handleLoginSuccess(signInResult, huaweiProfile); // <--- 必须传递 huaweiProfile
+    })
+      .catch((error: BusinessError) => {
+        hilog.error(0x0000, 'testTag', '%{public}s',
+          `signInHwid error, Code: ${error.code}, message: ${error.message}`);
+        // 登录失败后的处理逻辑
+        this.handleLoginError(error);
+      });
+  }
+
+  // 处理登录成功
+  handleLoginSuccess(signInResult: SignInResult, huaweiProfile?: HuaweiProfile) {
+    const user: AuthUser = signInResult.getUser();
+    const uid: string = user.getUid();
+    const displayName: string = user.getDisplayName();
+    const userPhotoUrl: string = user.getPhotoUrl();
+
+    // 保存用户信息到本地存储
+    AppStorage.setOrCreate('userUid', uid);
+    AppStorage.setOrCreate('userDisplayName', huaweiProfile?.nickName || displayName);
+    AppStorage.setOrCreate('userPhotoUrl', huaweiProfile?.avatarUri || userPhotoUrl);
+    AppStorage.setOrCreate('isLoggedIn', true);
+
+    console.log('存储后的 userPhotoUrl:', AppStorage.get('userPhotoUrl'));
+
+
+    // 跳转到主页面
+    router.replaceUrl({ url: 'pages/Index' });
+  }
+
+  // 处理登录失败
+  handleLoginError(error: BusinessError) {
+    // 显示错误信息给用户
+    AlertDialog.show({
+      title: '登录失败',
+      message: `错误代码: ${error.code}, 错误信息: ${error.message}`,
+      confirm: {
+        value: '确定',
+        action: () => {
+          // 用户确认后的处理
+        }
+      }
+    });
+  }
+
+  // 检查登录状态
+  checkLoginStatus(): Promise<boolean> {
+    return auth.getCurrentUser().then((user: AuthUser | null) => {
+      return user !== null;
+    }).catch((error: Error) => {
+      return false;
+    });
+  }
 
   build() {
-    NavDestination() {
+    NavDestination(){
       Column() {
-        if (!this.vm.isSheet) {
-          NavHeaderBar({
-            onBack: () => {
-              this.vm.handleClose();
-            },
-          })
-        }
-        if (this.vm.isSheet) {
-          this.mainBody()
-        } else {
-          GridRow(GridRowColSetting.DEFAULT_GRID_ROW_OPTIONS) {
-            GridCol({
-              span: GridRowColSetting.SMALL_CENTER_COL_SPAN,
-              offset: GridRowColSetting.SMALL_CENTER_COL_OFFSET,
-            }) {
-              this.mainBody()
+        Stack() {
+          Column() {
+            Button() {
+              Row() {
+                // 华为Logo
+                Image($r('app.media.ic_huawei'))
+                  .width(30)
+                  .height(30)
+
+                Text('华为账号登录')
+                  .fontSize(16)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(Color.White)
+                  .margin({ left: 10 })
+              }
+              .justifyContent(FlexAlign.Center)
+              .alignItems(VerticalAlign.Center)
             }
-          }
-          .layoutWeight(1)
-          .padding({
-            left: this.vm.breakPointModel.pagePadding,
-            right: this.vm.breakPointModel.pagePadding,
-          })
+            .width(320)
+            .height(56)
+            .backgroundColor('#CE0E2D')
+            .borderRadius(28)
+            .width(300)
+            .height(50)
+            .onClick(async () => {
+              //this.isLoading = !this.isLoading
+              // 1. 获取华为账号头像和昵称
+              let huaweiProfile: HuaweiProfile | null = null
+              try {
+                huaweiProfile = await HuaweiAuth.authRequest(this.getUIContext()) as HuaweiProfile
+                // this.isLoading = !this.isLoading
+                console.log('huaweiProfile', JSON.stringify(huaweiProfile))
+              } catch (e) {
+                //this.isLoading = !this.isLoading
+                promptAction.showToast({ message: '获取华为账号信息失败' })
+                return
+              }
+
+              // 2. 云端登录
+              this.signInWithHuawei(huaweiProfile)
+              //this.isLoading = false
+
+            })
+          }.width('100%')
+
         }
+
       }
-      .height(CommonConstants.FULL_PERCENT)
-      .width(CommonConstants.FULL_PERCENT)
+      .width('100%')
+      .height('100%')
+      //.backgroundColor('#F5F5F5')
     }
-    .hideTitleBar(true)
-    .backgroundColor(this.vm.pageBgColor())
-    .onReady((context) => {
-      const param = context.pathInfo.param as LoginRouterParams
-      if (!param || !param?.keepVM) {
-        this.vm = LoginVM.getInstance(true);
-        this.vm.isSheet = param?.isSheet ?? false;
-      } else {
-        this.vm.resetInput();
-      }
-      this.vm.stack = context.pathStack;
-      if (param?.sheetParams) {
-        this.vm.sheetParams = param.sheetParams;
-      }
-    })
-    .onBackPressed(() => {
-      this.vm.handleClose();
-      return true;
-    })
-  }
 
-  @Builder
-  mainBody() {
-    Column() {
-      Scroll() {
-        Column() {
-          if (this.vm.isSheet) {
-            Column().height(Constants.SHEET_TITLE_H)
-          } else {
-            Column().layoutWeight(1)
-          }
-          this.coreInfo()
-          Column().layoutWeight(4)
-        }
-      }
-      .layoutWeight(1)
-      .align(Alignment.Top)
-      .scrollBar(BarState.Off)
-
-      AgreePrivacyBox()
-    }
-    .layoutWeight(1)
-    .padding({
-      left: this.vm.isSheet ? CommonConstants.PADDING_L : 0,
-      right: this.vm.isSheet ? CommonConstants.PADDING_L : 0,
-      bottom: this.vm.getPagePaddingBottom(),
-    })
-  }
-
-  @Builder
-  coreInfo() {
-    Column() {
-      Image($r('app.media.startIcon'))
-        .width(Constants.START_ICON_WIDTH)
-        .aspectRatio(1)
-        .draggable(false)
-        .borderRadius($r('app.float.large_radius'))
-      Text(this.vm.anonymousPhone)
-        .fontSize($r('sys.float.Title_L'))
-        .fontColor($r('sys.color.font_primary'))
-        .fontWeight(FontWeight.Bold)
-        .margin({
-          top: Constants.PADDING_40,
-        })
-      Text('华为账号绑定号码')
-        .fontSize($r('sys.float.Body_S'))
-        .fontColor($r('sys.color.font_secondary'))
-        .margin({
-          top: CommonConstants.PADDING_XS,
-        })
-      Column() {
-        LoginWithHuaweiIDButton({
-          params: {
-            style: loginComponentManager.Style.BUTTON_CUSTOM,
-            extraStyle: {
-              buttonStyle: new loginComponentManager.ButtonStyle().loadingStyle({
-                show: true,
-              }).backgroundColor($r('sys.color.icon_emphasize')),
-            },
-            loginType: loginComponentManager.LoginType.QUICK_LOGIN,
-            supportDarkMode: false,
-          },
-          controller: this.vm.controller,
-        }).id('login_with_huaweiId_button')
-      }
-      .height(Constants.BTN_HEIGHT)
-      .margin({
-        top: Constants.PADDING_40 + CommonConstants.PADDING_S,
-      })
-
-      Button('其他方式登录')
-        .width(CommonConstants.FULL_PERCENT)
-        .height(Constants.BTN_HEIGHT)
-        .fontSize($r('sys.float.Body_L'))
-        .fontColor($r('sys.color.font_primary'))
-        .fontWeight(FontWeight.Medium)
-        .backgroundColor($r('sys.color.comp_background_tertiary'))
-        .margin({
-          top: CommonConstants.PADDING_M,
-          bottom: CommonConstants.PADDING_S,
-        })
-        .onClick(() => {
-          this.vm.jumpOtherLogin();
-        })
-    }
   }
 }

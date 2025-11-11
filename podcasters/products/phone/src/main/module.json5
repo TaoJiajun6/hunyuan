@@ -14,8 +14,11 @@
     "metadata": [
       {
         "name": "client_id",
-//TODO: 替换client_id值
-        "value": "******"
+        "value": "6917589177789044307"
+      },
+      {
+        "name": "app_id",
+        "value": "6917589177789044307"
       }
     ],
     "abilities": [

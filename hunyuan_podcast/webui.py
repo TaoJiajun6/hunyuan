@@ -63,7 +63,8 @@ def wrap_multi_role_podcast(
     character_1_name, character_1_personality, character_1_speaking_style,
     character_2_name, character_2_personality, character_2_speaking_style,
     character_3_name, character_3_personality, character_3_speaking_style,
-    scene_types, progress=None
+    scene_types, intro_music, outro_music, background_music, background_volume,
+    progress=None
 ):
     """包装函数，格式化脚本输出"""
     audio_path, status, script = generate_multi_role_podcast(
@@ -72,7 +73,8 @@ def wrap_multi_role_podcast(
         character_1_name, character_1_personality, character_1_speaking_style,
         character_2_name, character_2_personality, character_2_speaking_style,
         character_3_name, character_3_personality, character_3_speaking_style,
-        scene_types, progress
+        scene_types, intro_music, outro_music, background_music, background_volume,
+        progress
     )
     if script:
         formatted_script = format_script_for_display(script)
@@ -302,6 +304,10 @@ def generate_multi_role_podcast(
     character_3_personality: Optional[str] = None,
     character_3_speaking_style: Optional[str] = None,
     scene_types: Optional[List[str]] = None,
+    intro_music: Optional[str] = None,
+    outro_music: Optional[str] = None,
+    background_music: Optional[str] = None,
+    background_volume: float = 0.3,
     progress=None
 ) -> Tuple[str, str, str]:
     """
@@ -538,6 +544,10 @@ def generate_multi_role_podcast(
                 text=text,
                 role_voices=role_voices,
                 silence_interval=silence_interval,
+                intro_music=intro_music,
+                outro_music=outro_music,
+                background_music=background_music,
+                background_volume=background_volume,
                 verbose=True
             )
             
@@ -1324,6 +1334,38 @@ def create_webui():
                         info="调整角色之间的静音间隔，建议范围：200-500毫秒"
                     )
                     
+                    # 音效设置（折叠面板）
+                    with gr.Accordion("🎵 音效设置（可选）", open=False):
+                        intro_music = gr.Audio(
+                            label="🎵 开场音乐",
+                            sources=["upload"],
+                            type="filepath",
+                            info="上传开场音乐文件（WAV/MP3格式），会在播客开始时播放",
+                            elem_classes=["audio-container"]
+                        )
+                        outro_music = gr.Audio(
+                            label="🎵 结尾音乐",
+                            sources=["upload"],
+                            type="filepath",
+                            info="上传结尾音乐文件（WAV/MP3格式），会在播客结束时播放",
+                            elem_classes=["audio-container"]
+                        )
+                        background_music = gr.Audio(
+                            label="🎵 背景音乐",
+                            sources=["upload"],
+                            type="filepath",
+                            info="上传背景音乐文件（WAV/MP3格式），会在整个播客过程中作为背景音播放",
+                            elem_classes=["audio-container"]
+                        )
+                        background_volume = gr.Slider(
+                            label="🔊 背景音乐音量",
+                            minimum=0.0,
+                            maximum=1.0,
+                            value=0.3,
+                            step=0.1,
+                            info="调整背景音乐音量（0.0-1.0），建议范围：0.2-0.4，避免盖过对话声音"
+                        )
+                    
                     gen_button_1 = gr.Button(
                         "🚀 生成播客",
                         variant="primary",
@@ -1401,7 +1443,11 @@ def create_webui():
                     character_3_name,
                     character_3_personality,
                     character_3_speaking_style,
-                    scene_types
+                    scene_types,
+                    intro_music,
+                    outro_music,
+                    background_music,
+                    background_volume
                 ],
                 outputs=[output_audio_1, status_text_1, script_display_1]
             )

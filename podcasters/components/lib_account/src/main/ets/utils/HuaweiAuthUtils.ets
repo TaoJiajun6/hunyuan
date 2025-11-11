@@ -27,9 +27,9 @@ export class HuaweiAuthUtils {
       Logger.info(TAG,
         `Succeeded in authorizing. unionID is ${unionID}, quickLoginAnonymousPhone is ${quickLoginAnonymousPhone}`);
       return quickLoginAnonymousPhone;
-    } catch (error) {
+    } catch (e) {
       Logger.error(TAG,
-        `Failed to authorize. errCode is ${error.code}, message is ${error.message}`);
+        `Failed to authorize. errCode is ${e.code}, message is ${e.message}`);
       return quickLoginAnonymousPhone;
     }
   }

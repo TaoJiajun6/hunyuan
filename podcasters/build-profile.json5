@@ -6,9 +6,9 @@
         "type": "HarmonyOS",
         "material": {
           "storeFile": "D:/Develop/hunyuan/podcasters/key/podcasters.p12",
-          "storePassword": "00000018CAD7AC0592DB0F0C0441C79B2535FFC672F8029C173B21B0ED57190F794D0BBA090BD9F2",
+          "storePassword": "0000001828298070F61F105FA24B2E4639E62F786626D6BD6DEB334A906D29BBB889A0EB85D6FFA0",
           "keyAlias": "podcasters",
-          "keyPassword": "00000018DFF312C261DE22B65F4B4A8E0E0FE0D803ED3365657ADDEBC89D5C9E7A25E71F9EF2F1EA",
+          "keyPassword": "0000001885F985EB7017B4B534AD8BB008FB066657D85BBB37B1A9BEBF6659F33EF83CD14EB41324",
           "signAlg": "SHA256withECDSA",
           "profile": "D:/Develop/hunyuan/podcasters/key/podcastersDebug.p7b",
           "certpath": "D:/Develop/hunyuan/podcasters/key/podcasters.cer"
@@ -19,7 +19,6 @@
       {
         "name": "default",
         "signingConfig": "default",
-        "targetSdkVersion": "5.0.5(17)",
         "compatibleSdkVersion": "5.0.5(17)",
         "runtimeOS": "HarmonyOS",
         "buildOption": {
@@ -27,7 +26,8 @@
             "caseSensitiveCheck": true,
             "useNormalizedOHMUrl": true
           }
-        }
+        },
+        "targetSdkVersion": "5.0.5(17)"
       }
     ],
     "buildModeSet": [

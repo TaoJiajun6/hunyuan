@@ -21,6 +21,40 @@ class TextProcessor:
         """初始化文本处理器"""
         pass
     
+    def clean_dialogue_content(self, content: str) -> str:
+        """
+        清理对话内容，移除可能误包含的情绪描述词
+        
+        Args:
+            content: 原始对话内容
+        
+        Returns:
+            清理后的对话内容
+        """
+        if not content:
+            return content
+        
+        # 移除内容中的音效标注
+        content = re.sub(r'\[音效[：:][^\]]+\]', '', content).strip()
+        
+        # 移除内容中可能误包含的情绪描述词（防止模型错误生成）
+        # 移除类似"我兴奋地说"、"他疑惑地说"等模式
+        content = re.sub(r'[我他她它]+\s*[兴奋疑惑严肃激动冷静思考]+[地]?\s*[说讲道]', '', content).strip()
+        
+        # 移除单独的情绪词（如果出现在句子开头）
+        emotion_words = ['兴奋地', '疑惑地', '严肃地', '激动地', '冷静地', '思考状', '笑着', '故作神秘地', 
+                        '热情地', '接话', '点头', '摇头', '打断', '总结性地']
+        for word in emotion_words:
+            if content.startswith(word):
+                content = content[len(word):].strip()
+                # 移除可能的标点
+                content = re.sub(r'^[，,：:]\s*', '', content)
+        
+        # 移除开头的"我"、"他"、"她"等代词后跟情绪词的模式
+        content = re.sub(r'^[我他她它]\s*[兴奋疑惑严肃激动冷静思考]+[地]?\s*[，,：:]?\s*', '', content)
+        
+        return content.strip()
+    
     def parse_role_text(self, text: str) -> List[Tuple[str, str]]:
         """
         解析包含角色标记的文本，支持情绪标注和音效标注
@@ -56,8 +90,8 @@ class TextProcessor:
                 emotion = emotion_match.group(2).strip()
                 content = emotion_match.group(3).strip()
                 
-                # 移除内容中的音效标注
-                content = re.sub(r'\[音效[：:][^\]]+\]', '', content).strip()
+                # 清理对话内容，移除可能误包含的情绪描述词和音效标注
+                content = self.clean_dialogue_content(content)
                 
                 # 如果角色改变，保存之前的对话
                 if current_role and current_role != role_name:
@@ -118,7 +152,10 @@ class TextProcessor:
             if last_end < len(line):
                 content_after = line[last_end:].strip()
                 if content_after:
-                    current_content.append(content_after)
+                    # 清理对话内容
+                    content_after = self.clean_dialogue_content(content_after)
+                    if content_after:
+                        current_content.append(content_after)
         
         # 保存最后一个角色的对话
         if current_role and current_content:
@@ -475,6 +512,14 @@ class TextProcessor:
 - 角色名称必须使用：{role_list}（不要使用其他名称）
 - 每个角色必须发言至少4-6次，总共至少{num_characters * 4}段对话
 
+**重要提示 - 格式规范**：
+- 格式为：`[角色名]（情绪地）：对话内容`
+- **冒号之前的内容（包括角色名和情绪标注）只是标记，不会用于TTS生成**
+- **TTS只会生成对话内容**
+- ❌ 错误示例：[角色A]（兴奋地）：[角色A]（兴奋地）今天天气真好！
+- ✅ 正确示例：[角色A]（兴奋地）：今天天气真好！
+- 对话内容应该是角色实际说的话，不要重复包含角色名或情绪标注
+
 5. 输出格式示例
 
 ```
@@ -485,6 +530,8 @@ class TextProcessor:
 [音效：笑声]
 [角色A]（兴奋地）：哈哈，这个例子太有意思了！
 ```
+
+**再次强调**：注意示例中，冒号之前的内容（`[角色名]（情绪地）`）只是标记，不会用于TTS生成。TTS只会生成冒号后面的对话内容。生成时请确保对话内容中不包含角色名或情绪标注。
 
 现在请开始生成，直接输出对话内容，不要添加任何其他说明、注释或解释。"""
         return prompt

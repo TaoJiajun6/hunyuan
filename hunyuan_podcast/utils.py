@@ -205,3 +205,152 @@ def trim_silence(audio: torch.Tensor, sr: int = AUDIO_SAMPLING_RATE, threshold: 
         return torch.from_numpy(audio_np)
     return audio_np
 
+
+def mix_audio_with_background(
+    foreground: torch.Tensor,
+    background: torch.Tensor,
+    background_volume: float = 0.3,
+    fade_in_ms: int = 500,
+    fade_out_ms: int = 500
+) -> torch.Tensor:
+    """
+    将前景音频与背景音频混合
+    
+    Args:
+        foreground: 前景音频（主音频）
+        background: 背景音频（如背景音乐）
+        background_volume: 背景音量（0.0-1.0），默认0.3
+        fade_in_ms: 淡入时长（毫秒）
+        fade_out_ms: 淡出时长（毫秒）
+    
+    Returns:
+        混合后的音频张量
+    """
+    # 确保都是单声道
+    if foreground.dim() > 1 and foreground.shape[0] > 1:
+        foreground = torch.mean(foreground, dim=0, keepdim=True)
+    if background.dim() > 1 and background.shape[0] > 1:
+        background = torch.mean(background, dim=0, keepdim=True)
+    
+    # 确保都是2D张量 (1, samples)
+    if foreground.dim() == 1:
+        foreground = foreground.unsqueeze(0)
+    if background.dim() == 1:
+        background = background.unsqueeze(0)
+    
+    foreground_len = foreground.shape[1]
+    background_len = background.shape[1]
+    
+    # 如果背景音频比前景短，循环播放
+    if background_len < foreground_len:
+        repeat_times = (foreground_len // background_len) + 1
+        background = background.repeat(1, repeat_times)
+    
+    # 裁剪背景音频到前景长度
+    background = background[:, :foreground_len]
+    
+    # 应用淡入淡出效果
+    sr = AUDIO_SAMPLING_RATE
+    fade_in_samples = int(sr * fade_in_ms / 1000.0)
+    fade_out_samples = int(sr * fade_out_ms / 1000.0)
+    
+    # 创建淡入淡出曲线
+    fade_in_curve = torch.linspace(0, 1, fade_in_samples).unsqueeze(0)
+    fade_out_curve = torch.linspace(1, 0, fade_out_samples).unsqueeze(0)
+    
+    # 应用淡入
+    if fade_in_samples > 0 and fade_in_samples < foreground_len:
+        background[:, :fade_in_samples] *= fade_in_curve
+    
+    # 应用淡出
+    if fade_out_samples > 0 and fade_out_samples < foreground_len:
+        start_fade_out = foreground_len - fade_out_samples
+        background[:, start_fade_out:] *= fade_out_curve
+    
+    # 调整背景音量
+    background = background * background_volume
+    
+    # 混合音频（简单相加，然后归一化避免削波）
+    mixed = foreground + background
+    
+    # 归一化到[-1, 1]范围
+    max_val = torch.abs(mixed).max()
+    if max_val > 1.0:
+        mixed = mixed / max_val
+    
+    return mixed
+
+
+def add_intro_outro_music(
+    main_audio: torch.Tensor,
+    intro_music: Optional[torch.Tensor] = None,
+    outro_music: Optional[torch.Tensor] = None,
+    intro_fade_out_ms: int = 1000,
+    outro_fade_in_ms: int = 1000,
+    sr: int = AUDIO_SAMPLING_RATE
+) -> torch.Tensor:
+    """
+    为主音频添加开场和结尾音乐
+    
+    Args:
+        main_audio: 主音频（播客对话内容）
+        intro_music: 开场音乐（可选）
+        outro_music: 结尾音乐（可选）
+        intro_fade_out_ms: 开场音乐淡出时长（毫秒）
+        outro_fade_in_ms: 结尾音乐淡入时长（毫秒）
+        sr: 采样率
+    
+    Returns:
+        添加了开场和结尾音乐的完整音频
+    """
+    audio_segments = []
+    
+    # 添加开场音乐
+    if intro_music is not None:
+        # 确保开场音乐是单声道
+        if intro_music.dim() > 1 and intro_music.shape[0] > 1:
+            intro_music = torch.mean(intro_music, dim=0, keepdim=True)
+        if intro_music.dim() == 1:
+            intro_music = intro_music.unsqueeze(0)
+        
+        # 应用淡出效果
+        if intro_fade_out_ms > 0:
+            fade_out_samples = int(sr * intro_fade_out_ms / 1000.0)
+            if fade_out_samples < intro_music.shape[1]:
+                fade_out_curve = torch.linspace(1, 0, fade_out_samples).unsqueeze(0)
+                intro_music[:, -fade_out_samples:] *= fade_out_curve
+        
+        audio_segments.append(intro_music)
+        # 开场音乐后添加短暂静音
+        audio_segments.append(create_silence(500, sr))
+    
+    # 添加主音频
+    audio_segments.append(main_audio)
+    
+    # 添加结尾音乐
+    if outro_music is not None:
+        # 确保结尾音乐是单声道
+        if outro_music.dim() > 1 and outro_music.shape[0] > 1:
+            outro_music = torch.mean(outro_music, dim=0, keepdim=True)
+        if outro_music.dim() == 1:
+            outro_music = outro_music.unsqueeze(0)
+        
+        # 主音频后添加短暂静音
+        audio_segments.append(create_silence(500, sr))
+        
+        # 应用淡入效果
+        if outro_fade_in_ms > 0:
+            fade_in_samples = int(sr * outro_fade_in_ms / 1000.0)
+            if fade_in_samples < outro_music.shape[1]:
+                fade_in_curve = torch.linspace(0, 1, fade_in_samples).unsqueeze(0)
+                outro_music[:, :fade_in_samples] *= fade_in_curve
+        
+        audio_segments.append(outro_music)
+    
+    # 拼接所有音频
+    if len(audio_segments) == 1:
+        return audio_segments[0]
+    
+    final_audio = torch.cat(audio_segments, dim=1)
+    return final_audio
+
