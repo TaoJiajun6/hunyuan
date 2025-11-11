@@ -258,6 +258,10 @@ export interface ApiResponse<T = Record<string, Object>> {
   error?: string;
 }
 
+export interface JobQueued {
+  job_id: string;
+}
+
 /**
  * 错误响应（用于错误处理）
  */
@@ -358,6 +362,115 @@ export class PodcastService {
         });
       } catch {
         resolve(null);
+      }
+    });
+  }
+
+  /**
+   * 提交异步多角色任务，立即返回 job_id
+   */
+  async generateMultiRolePodcastAsync(request: MultiRoleRequest): Promise<ApiResponse<JobQueued>> {
+    return new Promise<ApiResponse<JobQueued>>((resolve) => {
+      try {
+        // 验证请求参数（与同步接口一致的基本校验）
+        const hasText = (request.text && request.text.trim().length > 0) || false;
+        const hasTextFile = (request.text_file_url && request.text_file_url.trim().length > 0) || false;
+        if (!hasText && !hasTextFile) {
+          resolve({
+            success: false,
+            message: '播客文本不能为空，请上传文本文件或输入文本',
+            error: '文本内容为空',
+          });
+          return;
+        }
+        const roleVoiceUrls = request.role_voice_urls;
+        if (!roleVoiceUrls || Object.keys(roleVoiceUrls).length === 0) {
+          resolve({
+            success: false,
+            message: '至少需要一个角色的音色文件URL',
+            error: '角色音色URL为空',
+          });
+          return;
+        }
+
+        const requestBody = new MultiRoleRequestBody(
+          request.text,
+          request.text_file_url,
+          undefined,
+          roleVoiceUrls,
+          request.silence_interval || 300,
+          request.podcast_name,
+          request.topic,
+          request.character_1_name,
+          request.character_1_personality,
+          request.character_1_speaking_style,
+          request.character_2_name,
+          request.character_2_personality,
+          request.character_2_speaking_style,
+          request.character_3_name,
+          request.character_3_personality,
+          request.character_3_speaking_style,
+          request.scene_types,
+          request.job_id
+        );
+
+        const httpRequest = http.createHttp();
+        const requestData = JSON.stringify(requestBody);
+        const options: http.HttpRequestOptions = {
+          method: http.RequestMethod.POST,
+          header: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          extraData: requestData,
+          connectTimeout: 30000,
+          readTimeout: 30000,
+        };
+
+        const apiUrl = this.buildApiUrl('/api/v1/podcast/multi_role_async');
+        httpRequest.request(
+          apiUrl,
+          options,
+          (err: BusinessError, data: http.HttpResponse) => {
+            httpRequest.destroy();
+            const result = this.handleResponse<JobQueued>(err, data || null, '任务提交失败');
+            resolve(result);
+          }
+        );
+      } catch (error) {
+        resolve({
+          success: false,
+          message: '任务提交失败',
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    });
+  }
+
+  /**
+   * 获取异步任务结果
+   */
+  async getAsyncResult(jobId: string): Promise<ApiResponse<PodcastResult>> {
+    return new Promise<ApiResponse<PodcastResult>>((resolve) => {
+      try {
+        const httpRequest = http.createHttp();
+        const url = this.buildApiUrl(`/api/v1/podcast/result/${jobId}`);
+        const options: http.HttpRequestOptions = {
+          method: http.RequestMethod.GET,
+          connectTimeout: 20000,
+          readTimeout: 20000,
+        };
+        httpRequest.request(url, options, (err: BusinessError, data: http.HttpResponse) => {
+          httpRequest.destroy();
+          const result = this.handleResponse<PodcastResult>(err, data || null, '获取结果失败');
+          resolve(result);
+        });
+      } catch (error) {
+        resolve({
+          success: false,
+          message: '获取结果失败',
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     });
   }
