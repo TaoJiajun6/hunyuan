@@ -39,11 +39,11 @@ struct IndexPage {
             PodcastPageBuilder()
           }.tabBar(this.tabBarBuilder(0, 'AI播客', $r('app.media.icon_ai_office_on'), $r('app.media.icon_ai_office_off')))
 
-          TabContent() {
+          /*TabContent() {
             OfficePage()
           }
           .tabBar(this.tabBarBuilder(1, 'AI办公', $r('app.media.icon_ai_office_on'),
-            $r('app.media.icon_ai_office_off')))
+            $r('app.media.icon_ai_office_off')))*/
 
           TabContent() {
             MinePageBuilder()
