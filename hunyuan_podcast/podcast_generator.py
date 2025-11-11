@@ -4,6 +4,7 @@
 """
 import os
 import sys
+import logging
 import torch
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
@@ -189,12 +190,29 @@ class PodcastGenerator:
         """
         if role_voices:
             self.set_role_voices(role_voices)
-        
+
         # 解析角色对话
         dialogues = self.text_processor.parse_role_text(text)
-        
+
+        # 创建模块级日志器（延迟创建，防止重复）
+        logger = logging.getLogger(__name__)
+
         if not dialogues:
             raise ValueError("未能从文本中解析出角色对话")
+
+        # 过滤掉那些没有提供音色文件的角色，避免因为误识别的角色（例如来自错误解析的Content_Types）导致整个生成失败
+        provided_roles = set(self.role_voices.keys())
+        filtered_dialogues = [d for d in dialogues if d[0] in provided_roles]
+        missing_roles = sorted({d[0] for d in dialogues} - provided_roles)
+        if missing_roles:
+            logger.warning(f"以下角色未提供音色文件，将被跳过: {missing_roles}")
+
+        # 如果所有对话都被过滤掉，抛出错误
+        if not filtered_dialogues:
+            raise ValueError(f"未能找到任何已提供音色的角色对话。检测到的角色: {[d[0] for d in dialogues]}，已提供的角色: {list(provided_roles)}")
+
+        # 替换为过滤后的对话列表继续生成
+        dialogues = filtered_dialogues
         
         if verbose:
             print(f"解析到 {len(dialogues)} 段对话")
