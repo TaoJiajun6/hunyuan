@@ -10,7 +10,7 @@ from pathlib import Path
 if "HF_ENDPOINT" not in os.environ:
     os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
     print(f"已自动设置 HuggingFace 镜像: {os.environ['HF_ENDPOINT']}")
-    print(f"   如需使用其他镜像，请设置环境变量: HF_ENDPOINT")
+    print(f" 如需使用其他镜像，请设置环境变量: HF_ENDPOINT")
 
 def _load_dotenv_if_exists():
     """
