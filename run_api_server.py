@@ -4,18 +4,43 @@
 import os
 import sys
 import socket
+from pathlib import Path
 
 # 设置HuggingFace镜像
 if "HF_ENDPOINT" not in os.environ:
     os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-    print(f"💡 已自动设置 HuggingFace 镜像: {os.environ['HF_ENDPOINT']}")
+    print(f"已自动设置 HuggingFace 镜像: {os.environ['HF_ENDPOINT']}")
     print(f"   如需使用其他镜像，请设置环境变量: HF_ENDPOINT")
+
+def _load_dotenv_if_exists():
+    """
+    读取项目根目录下的 .env（可选），用于持久化 AGC_* 等环境变量。
+    支持的格式：KEY=VALUE 或 KEY="VALUE"
+    """
+    try:
+        env_path = Path(__file__).parent / ".env"
+        if not env_path.exists():
+            return
+        print(f"检测到 .env 文件，正在加载环境变量: {env_path}")
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            if k and v and k not in os.environ:
+                os.environ[k] = v
+    except Exception as e:
+        print(f"加载 .env 失败: {e}")
+
+_load_dotenv_if_exists()
 
 try:
     from hunyuan_podcast.api_server import app
     import uvicorn
 except ImportError as e:
-    print(f"❌ 导入错误: {e}")
+    print(f"导入错误: {e}")
     print("\n解决方案：")
     print("1. 安装FastAPI和uvicorn：")
     print("   pip install fastapi uvicorn python-multipart")
@@ -91,17 +116,17 @@ def detect_gpu_and_print_info():
     try:
         import torch
         if torch.cuda.is_available():
-            print(f"🚀 检测到GPU可用:")
-            print(f"   GPU设备数量: {torch.cuda.device_count()}")
+            print(f"检测到GPU可用:")
+            print(f"GPU设备数量: {torch.cuda.device_count()}")
             for i in range(torch.cuda.device_count()):
                 print(f"   GPU {i}: {torch.cuda.get_device_name(i)}")
-            print(f"   💡 建议使用 --fp16 和 --cuda_kernel 参数以加速推理")
+            print(f"建议使用 --fp16 和 --cuda_kernel 参数以加速推理")
             return True
         else:
-            print("⚠️  未检测到GPU，将使用CPU模式（速度较慢）")
+            print("未检测到GPU，将使用CPU模式（速度较慢）")
             return False
     except ImportError:
-        print("⚠️  PyTorch未安装，无法检测GPU")
+        print("PyTorch未安装，无法检测GPU")
         return False
 
 
@@ -121,7 +146,7 @@ if __name__ == "__main__":
     # 设置GPU配置环境变量（传递给api_server.py）
     if args.fp16:
         os.environ["USE_FP16"] = "true"
-        print("✅ 已启用FP16精度")
+        print("已启用FP16精度")
     else:
         os.environ["USE_FP16"] = "false"
         if has_gpu:
@@ -129,7 +154,7 @@ if __name__ == "__main__":
     
     if args.cuda_kernel:
         os.environ["USE_CUDA_KERNEL"] = "true"
-        print("✅ 已启用CUDA内核加速")
+        print("已启用CUDA内核加速")
     else:
         os.environ["USE_CUDA_KERNEL"] = "false"
         if has_gpu:
@@ -138,7 +163,7 @@ if __name__ == "__main__":
     # 自动检测设备（如果未指定）
     if has_gpu and not os.getenv("DEVICE"):
         os.environ["DEVICE"] = "cuda:0"
-        print(f"✅ 自动设置设备: cuda:0")
+        print(f"自动设置设备: cuda:0")
     
     # 检测Cloud Studio环境
     is_cloud_studio = any([

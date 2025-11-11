@@ -136,18 +136,21 @@ export struct PodcastMultiRolePage {
         job_id: this.jobId
       };
 
-      // 改为异步任务提交
-      const queued = await podcastService.generateMultiRolePodcastAsync(request);
-      if (!queued.success || !queued.data?.job_id) {
+      const response = await podcastService.generateMultiRolePodcast(request);
+
+      if (response.success && response.data) {
+        const params = new PodcastResultPageParams(
+          response.data,
+          '多角色互动播客',
+          response.data.script
+        );
+        RouterUtils.pushPathByName(RouterMap.PODCAST_RESULT_PAGE, params);
+      } else {
         promptAction.showToast({
-          message: queued.error || queued.message || '提交任务失败',
+          message: response.error || response.message || '生成失败',
           duration: 3000
         });
-        return;
       }
-      this.jobId = queued.data.job_id;
-      // 继续轮询，等进度完成后主动获取结果
-      // 此处不再立即跳转，等待 done 后获取结果再跳转
     } catch (error) {
       promptAction.showToast({
         message: `生成失败: ${error}`,
@@ -172,21 +175,6 @@ export struct PodcastMultiRolePage {
       this.progressMessage = status.message || '';
       if (status.done) {
         this.stopProgressPolling();
-        // 获取最终结果并跳转
-        const res = await podcastService.getAsyncResult(this.jobId);
-        if (res.success && res.data) {
-          const params = new PodcastResultPageParams(
-            res.data,
-            '多角色互动播客',
-            res.data.script
-          );
-          RouterUtils.pushPathByName(RouterMap.PODCAST_RESULT_PAGE, params);
-        } else {
-          promptAction.showToast({
-            message: res.error || res.message || '结果获取失败',
-            duration: 3000
-          });
-        }
       }
     }, 1000);
   }

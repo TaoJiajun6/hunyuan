@@ -52,8 +52,6 @@ logger = logging.getLogger(__name__)
 _PROGRESS_DIR = os.path.join(os.getcwd(), 'outputs', 'progress')
 os.makedirs(_PROGRESS_DIR, exist_ok=True)
 _PROGRESS_CACHE: Dict[str, Dict[str, Any]] = {}
-_JOB_RESULT_DIR = os.path.join(os.getcwd(), 'outputs', 'jobs')
-os.makedirs(_JOB_RESULT_DIR, exist_ok=True)
 
 def _progress_path(job_id: str) -> str:
     return os.path.join(_PROGRESS_DIR, f"{job_id}.json")
@@ -85,25 +83,6 @@ def _get_progress(job_id: str) -> Dict[str, Any]:
             return json.load(f)
     except Exception:
         return {"job_id": job_id, "phase": "unknown", "percent": 0, "message": "未开始或任务ID不存在", "done": False}
-
-def _job_result_path(job_id: str) -> str:
-    return os.path.join(_JOB_RESULT_DIR, f"{job_id}.json")
-
-def _save_job_result(job_id: Optional[str], data: Dict[str, Any]) -> None:
-    if not job_id:
-        return
-    try:
-        with open(_job_result_path(job_id), 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False)
-    except Exception:
-        logger.warning("保存任务结果失败", exc_info=True)
-
-def _get_job_result(job_id: str) -> Optional[Dict[str, Any]]:
-    try:
-        with open(_job_result_path(job_id), 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception:
-        return None
 
 # 文件大小限制（字节）
 MAX_AUDIO_FILE_SIZE = 50 * 1024 * 1024  # 50MB
@@ -660,13 +639,10 @@ async def root():
             "version": "1.0.0",
             "endpoints": {
                 "multi_role": "/api/v1/podcast/multi_role",
-                "multi_role_async": "/api/v1/podcast/multi_role_async",
                 "character": "/api/v1/podcast/character",
                 "deep": "/api/v1/podcast/deep",
                 "analyze": "/api/v1/podcast/analyze",
                 "health": "/health",
-                "progress": "/api/v1/podcast/progress/{job_id}",
-                "result": "/api/v1/podcast/result/{job_id}",
                 "docs": "/docs"
             }
         }
@@ -1447,184 +1423,6 @@ async def get_progress(job_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/podcast/result/{job_id}", response_model=ApiResponse)
-async def get_podcast_result(job_id: str):
-    """
-    获取异步任务的最终结果
-    """
-    try:
-        data = _get_job_result(job_id)
-        if not data:
-            return ApiResponse(success=False, message="结果尚不可用", error="not_ready")
-        return ApiResponse(success=True, message="ok", data=data)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-def _run_multi_role_job(request_dict: Dict[str, Any], job_id: str):
-    """
-    后台线程执行多角色播客生成任务，将结果写入 job 结果文件中
-    """
-    try:
-        # 将请求字典映射到模型
-        req = MultiRoleRequest(**request_dict)
-        # 直接调用现有的生成流程，但在本函数内复用主要逻辑代码片段
-        # 为避免重复，调用生成端点的核心流程：复制必要片段（较短化）
-        start_time = time.time()
-        _update_progress(job_id, "queued", 1, "任务已排队")
-
-        has_text = req.text and req.text.strip()
-        has_text_file = req.text_file_url and req.text_file_url.strip()
-        if not has_text and not has_text_file:
-            raise ValueError("text或text_file_url至少需要提供一个")
-
-        if has_text_file:
-            text_content = download_text_from_url(req.text_file_url)
-        else:
-            text_content = req.text
-
-        has_voice_urls = req.role_voice_urls and len(req.role_voice_urls) > 0
-        has_voices = req.role_voices and len(req.role_voices) > 0
-        if not has_voice_urls and not has_voices:
-            raise ValueError("至少需要提供一个角色的音色文件（role_voice_urls或role_voices）")
-
-        use_cloud_storage = has_voice_urls
-        role_voice_data = req.role_voice_urls if use_cloud_storage else req.role_voices
-
-        gen = get_generator()
-        processor = TextProcessor()
-
-        temp_files = []
-        role_voices = {}
-        try:
-            _update_progress(job_id, "downloading_voices", 5, "正在下载角色音色文件")
-            for role, voice_data in role_voice_data.items():
-                if use_cloud_storage:
-                    temp_file = download_audio_from_url(voice_data)
-                else:
-                    temp_file = decode_base64_audio(voice_data)
-                temp_files.append(temp_file)
-                role_voices[role] = temp_file
-
-            roles = processor.extract_roles(text_content)
-            if not roles:
-                api_client = get_client()
-                num_characters = min(len(role_voices), 3)
-                character_descriptions = {}
-                characters = [
-                    (req.character_1_name, req.character_1_personality, req.character_1_speaking_style),
-                    (req.character_2_name, req.character_2_personality, req.character_2_speaking_style),
-                    (req.character_3_name, req.character_3_personality, req.character_3_speaking_style),
-                ]
-                role_keys = ["角色A", "角色B", "角色C"]
-                for i, (name, personality, speaking_style) in enumerate(characters[:num_characters]):
-                    if name and name.strip():
-                        role_key = role_keys[i] if i < len(role_keys) else f"角色{chr(65+i)}"
-                        character_descriptions[role_key] = {
-                            "name": name.strip(),
-                            "personality": personality.strip() if personality else "",
-                            "speaking_style": speaking_style.strip() if speaking_style else ""
-                        }
-                prompt = processor.build_text_to_dialogue_prompt(
-                    text=text_content,
-                    num_characters=num_characters,
-                    podcast_name=req.podcast_name if req.podcast_name else None,
-                    topic=req.topic if req.topic else None,
-                    character_descriptions=character_descriptions if character_descriptions else None,
-                    scene_types=req.scene_types if req.scene_types else None
-                )
-                generated_text = get_client().generate_text(prompt=prompt, temperature=0.8, max_tokens=2500)
-                text_content = processor.clean_text(generated_text)
-                roles = processor.extract_roles(text_content)
-
-            _update_progress(job_id, "generating", 25, "正在生成语音与合成音频")
-            output_path = gen.generate_from_text(
-                text=text_content,
-                role_voices=role_voices,
-                silence_interval=req.silence_interval,
-                background_volume=req.background_volume,
-                verbose=True
-            )
-            _update_progress(job_id, "saving", 85, "保存音频文件")
-
-            # 上传
-            agc_result = None
-            try:
-                agc_storage_url = os.getenv('AGC_STORAGE_URL')
-                agc_bucket = os.getenv('AGC_BUCKET')
-                agc_domain = os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
-                agc_client_id = os.getenv('AGC_CLIENT_ID')
-                agc_client_secret = os.getenv('AGC_CLIENT_SECRET')
-                agc_product_id = os.getenv('AGC_PRODUCT_ID')
-                if not agc_client_id or not agc_client_secret:
-                    cfg_path = _find_agc_client_json()
-                    if cfg_path:
-                        cid, csecret, proj = _load_agc_credentials_from_file(cfg_path)
-                        agc_client_id = agc_client_id or cid
-                        agc_client_secret = agc_client_secret or csecret
-                        agc_product_id = agc_product_id or proj
-                if agc_storage_url and agc_bucket and agc_upload_client:
-                    object_name = os.path.join('outputs', 'podcasts', os.path.basename(output_path))
-                    # 异步任务采用后台上传（不阻塞）
-                    try:
-                        res = agc_upload_client(
-                            output_path=output_path,
-                            storage_url=agc_storage_url,
-                            bucket=agc_bucket,
-                            product_id=agc_product_id,
-                            domain=agc_domain,
-                            client_id=agc_client_id,
-                            client_secret=agc_client_secret,
-                        )
-                        agc_result = {
-                            'status': 'uploaded',
-                            'bucket': agc_bucket,
-                            'object': object_name,
-                            'http_status': res.get('http_status'),
-                            'response_text': res.get('response_text'),
-                            'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
-                        }
-                    except Exception as e:
-                        agc_result = {'status': 'failed', 'reason': str(e)}
-            except Exception:
-                pass
-
-            audio_base64 = encode_file_to_base64(output_path)
-            file_size = os.path.getsize(output_path) / (1024 * 1024)
-            data = {
-                "audio_base64": audio_base64,
-                "audio_path": output_path,
-                "file_size_mb": round(file_size, 2),
-                "script": text_content,
-                "roles": list(roles)
-            }
-            if agc_result:
-                data['agc_upload_status'] = agc_result
-                if isinstance(agc_result, dict) and agc_result.get('url'):
-                    data['audio_url'] = agc_result['url']
-
-            _save_job_result(job_id, data)
-            _update_progress(job_id, "completed", 100, "生成完成", done=True)
-        finally:
-            for temp_file in temp_files:
-                try:
-                    if os.path.exists(temp_file):
-                        os.remove(temp_file)
-                except:
-                    pass
-    except Exception as e:
-        _update_progress(job_id, "failed", 100, f"生成失败: {str(e)}", done=True, error=str(e))
-
-@app.post("/api/v1/podcast/multi_role_async")
-async def generate_multi_role_podcast_async(request: MultiRoleRequest, background_tasks: BackgroundTasks):
-    """
-    异步版本：立即返回 job_id，后台执行生成流程
-    """
-    # 创建/使用 job_id
-    job_id = request.job_id or f"job_{int(time.time()*1000)}"
-    _update_progress(job_id, "queued", 1, "任务已排队")
-    # 入队后台任务
-    background_tasks.add_task(_run_multi_role_job, request.model_dump(), job_id)
-    return {"success": True, "message": "queued", "data": {"job_id": job_id}}
 
 if __name__ == "__main__":
     import argparse
