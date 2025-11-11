@@ -139,17 +139,28 @@ export struct PodcastMultiRolePage {
       const response = await podcastService.generateMultiRolePodcast(request);
 
       if (response.success && response.data) {
+        // 保存 script，以便在响应失败时也能使用
+        if (response.data.script) {
+          this.savedScript = response.data.script;
+        }
         const params = new PodcastResultPageParams(
           response.data,
           '多角色互动播客',
           response.data.script
         );
         RouterUtils.pushPathByName(RouterMap.PODCAST_RESULT_PAGE, params);
+        // 清除保存的 URL（已成功获取响应）
+        this.savedAudioUrl = '';
+        this.savedScript = '';
       } else {
+        // 响应失败，但如果进度中有 URL，会在进度轮询中处理
+        // 这里只显示错误提示，不阻止使用进度中的 URL
+        if (!this.savedAudioUrl) {
         promptAction.showToast({
-          message: response.error || response.message || '生成失败',
+            message: response.error || response.message || '生成失败，请检查进度',
           duration: 3000
         });
+        }
       }
     } catch (error) {
       promptAction.showToast({
@@ -165,6 +176,9 @@ export struct PodcastMultiRolePage {
     }
   }
 
+  @Local savedAudioUrl: string = '';
+  @Local savedScript: string = '';
+
   private startProgressPolling(): void {
     if (!this.jobId) return;
     // 每 1 秒轮询一次
@@ -173,8 +187,37 @@ export struct PodcastMultiRolePage {
       if (!status) return;
       this.progressPercent = status.percent || 0;
       this.progressMessage = status.message || '';
+      
+      // 如果进度中包含 audio_url，保存它（即使最终响应失败也能使用）
+      if (status.audio_url) {
+        this.savedAudioUrl = status.audio_url;
+      }
+      
       if (status.done) {
         this.stopProgressPolling();
+        // 如果最终响应失败，但进度中有 URL，尝试使用进度中的 URL
+        if (!this.isLoading && this.savedAudioUrl) {
+          // 延迟一下，等待最终响应处理完成
+          setTimeout(() => {
+            if (this.savedAudioUrl) {
+              // 使用进度中的 URL 创建结果并跳转
+              const result: PodcastResult = {
+                audio_url: this.savedAudioUrl,
+                audio_path: '',
+                file_size_mb: 0,
+                script: this.savedScript || '脚本内容请从进度中查看'
+              };
+              const params = new PodcastResultPageParams(
+                result,
+                '多角色互动播客',
+                this.savedScript || ''
+              );
+              RouterUtils.pushPathByName(RouterMap.PODCAST_RESULT_PAGE, params);
+              this.savedAudioUrl = '';
+              this.savedScript = '';
+            }
+          }, 500);
+        }
       }
     }, 1000);
   }
