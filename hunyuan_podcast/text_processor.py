@@ -185,7 +185,17 @@ class TextProcessor:
             role = role.strip()
             if not role:
                 continue
-            
+
+            # 过滤掉明显的二进制或不可打印字符串（例如直接把 docx 二进制解码为字符串的情况）
+            # 如果包含不可打印字符或过长，则视为无效角色
+            if not role.isprintable():
+                continue
+            if '\x00' in role:
+                continue
+            if len(role) > 64:
+                # 过长的角色名通常不是有效的角色标识，跳过
+                continue
+
             # 跳过音效和音乐标记
             # 检查是否包含排除关键词
             should_exclude = False
@@ -193,18 +203,18 @@ class TextProcessor:
                 if keyword in role:
                     should_exclude = True
                     break
-            
+
             # 检查是否是音效格式：[音效：xxx] 或 [音效:xxx]
             if role.startswith('音效') or '音效' in role:
                 should_exclude = True
-            
+
             # 检查是否是音乐格式：[开场音乐...] 或 [结束音乐...] 或 [音乐...]
             if '音乐' in role:
                 should_exclude = True
-            
+
             if should_exclude:
                 continue
-            
+
             # 只添加真正的角色标记
             if role not in seen:
                 seen.add(role)
