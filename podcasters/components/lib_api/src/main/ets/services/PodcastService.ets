@@ -412,9 +412,9 @@ export class PodcastService {
       try {
         // 验证请求参数（text或text_file_url至少有一个）
         const hasText = request.text && request.text.trim().length > 0;
-        const hasTextFile = request.text_file_url && request.text_file_url.trim().length > 0;
+        //const hasTextFile = request.text_file_url && request.text_file_url.trim().length > 0;
         
-        if (!hasText && !hasTextFile) {
+        if (!hasText) {
           resolve({
             success: false,
             message: '播客文本不能为空，请上传文本文件或输入文本',

@@ -15,6 +15,13 @@ import argparse
 import json
 import os
 import sys
+
+# Ensure project root is on sys.path so we can import hunyuan_podcast when script
+# is executed from /workspace or other working directories.
+repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
+
 from hunyuan_podcast.upload_client import upload_generated_podcast
 
 
