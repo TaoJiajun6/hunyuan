@@ -112,6 +112,7 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8000, help="API服务端口")
     parser.add_argument("--fp16", action="store_true", help="使用FP16精度（GPU加速）")
     parser.add_argument("--cuda_kernel", action="store_true", help="使用CUDA内核加速")
+    parser.add_argument("--workers", type=int, default=1, help="UVicorn工作进程数（>=2 可并发处理进度查询）")
     args = parser.parse_args()
     
     # 检测GPU
@@ -157,41 +158,47 @@ if __name__ == "__main__":
     # 尝试获取Cloud Studio预览地址
     preview_url, space_key, region = get_cloud_studio_preview_url(args.port)
     
-    print(f"\n🚀 启动混元AI播客生成API服务")
-    print(f"\n📡 访问地址：")
-    print(f"   ✅ 本地访问: http://127.0.0.1:{args.port}")
-    print(f"   ✅ 或使用: http://localhost:{args.port}")
+    print(f"\n 启动混元AI播客生成API服务")
+    print(f"\n 访问地址：")
+    print(f"   本地访问: http://127.0.0.1:{args.port}")
+    print(f"   或使用: http://localhost:{args.port}")
     
     if args.host == "0.0.0.0":
-        print(f"   🌐 局域网访问: http://{local_ip}:{args.port}")
+        print(f" 局域网访问: http://{local_ip}:{args.port}")
     
     # 如果是Cloud Studio环境
     if is_cloud_studio:
-        print(f"\n   🌐 Cloud Studio环境检测到:")
+        print(f"\n  Cloud Studio环境检测到:")
         if preview_url:
-            print(f"      🎉 HTTPS预览地址（外部访问）:")
+            print(f"      HTTPS预览地址（外部访问）:")
             print(f"         {preview_url}")
-            print(f"\n      💡 配置说明:")
+            print(f"\n      配置说明:")
             print(f"         • 在鸿蒙应用中配置此地址: {preview_url}")
             print(f"         • Space Key: {space_key}")
             print(f"         • Region: {region}")
             print(f"         • 端口: {args.port}")
         else:
-            print(f"      📝 手动构建预览地址:")
+            print(f"      手动构建预览地址:")
             print(f"         1. 查看浏览器地址栏: https://XXXXX.ap-guangzhou.cloudstudio.work/")
             print(f"         2. 提取 Space Key (XXXXX) 和 Region (ap-guangzhou)")
             print(f"         3. 构建地址: https://XXXXX--{args.port}.ap-guangzhou.cloudstudio.work/")
             print(f"         4. 在鸿蒙应用中配置此地址")
     
-    print(f"\n📚 API文档: http://127.0.0.1:{args.port}/docs")
-    print(f"💡 健康检查: http://127.0.0.1:{args.port}/health")
-    print(f"🔄 API端点:")
+    print(f"\n API文档: https://pexlsj--{args.port}.ap-singapore.cloudstudio.work/docs")
+    print(f" 健康检查: https://pexlsj--{args.port}.ap-singapore.cloudstudio.work/health")
+    print(f" API端点:")
     print(f"   • 多角色播客: POST /api/v1/podcast/multi_role")
     print(f"   • 自定义角色: POST /api/v1/podcast/character")
     print(f"   • 主题深度播客: POST /api/v1/podcast/deep")
     print(f"   • 文本分析: POST /api/v1/podcast/analyze")
     print()
     
-    uvicorn.run(app, host=args.host, port=args.port)
+    # 提示并发建议
+    if args.workers and args.workers >= 2:
+        print(f" 并发已启用：workers={args.workers}（可在生成时同时响应进度查询）")
+    else:
+        print("ℹ 当前为单进程模式（workers=1）。如需生成时可查询进度，建议设置 --workers 2。")
+    
+    uvicorn.run(app, host=args.host, port=args.port, workers=args.workers)
 
 
