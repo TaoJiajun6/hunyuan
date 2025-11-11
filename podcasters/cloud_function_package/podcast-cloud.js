@@ -1,6 +1,7 @@
 "use strict";
 
 const axios = require('axios');
+const https = require('https');
 
 // 安全 stringify，避免循环引用
 var stringifySafe = function (obj) {
@@ -19,25 +20,41 @@ var stringifySafe = function (obj) {
 };
 
 // 后端API服务器地址（从环境变量读取，如果没有则使用默认值）
-const BACKEND_API_URL = process.env.BACKEND_API_URL || 'http://10.10.210.52:8000';
-const API_TIMEOUT = 300000; // 5分钟超时（播客生成可能需要较长时间）
+// 支持 Cloud Studio 端口转发地址格式：https://${SPACE_KEY}--${PORT}.${REGION}.cloudstudio.work
+const BACKEND_API_URL = process.env.BACKEND_API_URL || 'https://pexlsj--8000.ap-singapore.cloudstudio.work';
+const API_TIMEOUT = 600000; // 10分钟超时（考虑大文件上传和播客生成时间）
 
 /**
  * 转发请求到后端API服务器
  */
 async function forwardToBackend(endpoint, requestData) {
   try {
-    const url = `${BACKEND_API_URL}${endpoint}`;
+    // 确保URL格式正确（移除末尾斜杠，添加路径）
+    const baseUrl = BACKEND_API_URL.replace(/\/+$/, '');
+    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+    const url = `${baseUrl}${cleanEndpoint}`;
+    
     console.log(`转发请求到: ${url}`);
-    console.log(`请求数据: ${JSON.stringify({ ...requestData, role_voices: Object.keys(requestData.role_voices || {}) })}`);
+    console.log(`请求数据大小: ${JSON.stringify(requestData).length} bytes`);
+    // 记录角色信息，但不记录完整的base64数据（避免日志过大）
+    if (requestData.role_voices) {
+      console.log(`角色数量: ${Object.keys(requestData.role_voices).length}, 角色名称: ${Object.keys(requestData.role_voices).join(', ')}`);
+    }
+    if (requestData.characters) {
+      console.log(`角色数量: ${requestData.characters.length}, 角色名称: ${requestData.characters.map(c => c.name).join(', ')}`);
+    }
     
     const response = await axios.post(url, requestData, {
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
       },
       timeout: API_TIMEOUT,
       maxContentLength: Infinity,
-      maxBodyLength: Infinity
+      maxBodyLength: Infinity,
+      // 对于HTTPS，确保不验证证书（如果Cloud Studio使用自签名证书）
+      httpsAgent: process.env.SKIP_SSL_VERIFY === 'true' ? 
+        new https.Agent({ rejectUnauthorized: false }) : undefined
     });
 
     return {
@@ -46,21 +63,41 @@ async function forwardToBackend(endpoint, requestData) {
     };
   } catch (error) {
     console.error('后端API请求失败:', error.message);
-    if (error.response) {
+    if (error.code === 'ECONNABORTED') {
+      console.error('请求超时');
+      return {
+        success: false,
+        error: `请求超时（${API_TIMEOUT / 1000}秒），播客生成可能需要更长时间，请稍后重试`,
+        statusCode: 504
+      };
+    } else if (error.response) {
       console.error('响应状态:', error.response.status);
       console.error('响应数据:', error.response.data);
-      return {
-        success: false,
-        error: error.response.data?.error || error.response.data?.message || error.message,
-        statusCode: error.response.status
-      };
+      // 处理后端返回的错误响应
+      const errorData = error.response.data;
+      if (errorData && typeof errorData === 'object') {
+        return {
+          success: false,
+          error: errorData.error || errorData.message || error.message,
+          statusCode: error.response.status,
+          data: errorData
+        };
+      } else {
+        return {
+          success: false,
+          error: errorData || error.message || `HTTP ${error.response.status}`,
+          statusCode: error.response.status
+        };
+      }
     } else if (error.request) {
+      console.error('请求发送失败，未收到响应');
       return {
         success: false,
-        error: '无法连接到后端服务器，请检查服务器是否正常运行',
+        error: '无法连接到后端服务器，请检查服务器地址和网络连接',
         statusCode: 503
       };
     } else {
+      console.error('请求配置错误:', error.message);
       return {
         success: false,
         error: error.message || '请求失败',
@@ -75,19 +112,42 @@ async function forwardToBackend(endpoint, requestData) {
  */
 async function healthCheck() {
   try {
-    const url = `${BACKEND_API_URL}/health`;
+    // 确保URL格式正确
+    const baseUrl = BACKEND_API_URL.replace(/\/+$/, '');
+    const url = `${baseUrl}/health`;
+    console.log(`健康检查请求: ${url}`);
+    
     const response = await axios.get(url, {
-      timeout: 10000
+      timeout: 10000,
+      headers: {
+        'Accept': 'application/json'
+      },
+      // 对于HTTPS，确保不验证证书（如果Cloud Studio使用自签名证书）
+      httpsAgent: process.env.SKIP_SSL_VERIFY === 'true' ? 
+        new https.Agent({ rejectUnauthorized: false }) : undefined
     });
     return {
       success: true,
       data: response.data
     };
   } catch (error) {
-    return {
-      success: false,
-      error: error.message || '健康检查失败'
-    };
+    console.error('健康检查失败:', error.message);
+    if (error.response) {
+      return {
+        success: false,
+        error: `健康检查失败: HTTP ${error.response.status} - ${error.response.statusText}`
+      };
+    } else if (error.request) {
+      return {
+        success: false,
+        error: '无法连接到后端服务器，请检查服务器地址和网络连接'
+      };
+    } else {
+      return {
+        success: false,
+        error: error.message || '健康检查失败'
+      };
+    }
   }
 }
 
@@ -119,12 +179,19 @@ var myHandler = async function (event, context, callback) {
     let queryParams = event.queryStringParameters || event.queryParameters || {};
     
     // 如果是GET请求且路径为/health，执行健康检查
-    if (httpMethod === 'GET' && (path === '/health' || path === 'health' || queryParams.path === 'health' || !path)) {
+    if (httpMethod === 'GET' && (path === '/health' || path === 'health' || queryParams.path === 'health' || !path || path === '/')) {
       const result = await healthCheck();
       callback({
         statusCode: result.success ? 200 : 503,
         headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
-        body: stringifySafe(result)
+        body: stringifySafe(result.success ? {
+          success: true,
+          data: result.data
+        } : {
+          success: false,
+          message: '健康检查失败',
+          error: result.error
+        })
       });
       return;
     }

@@ -22,7 +22,7 @@ export class PodcastConfig {
   //    例如：'http://10.10.210.52:8000'
   // 4. 使用远程服务器：设置为远程服务器的URL
   //    例如：'https://your-server.com'
-  static readonly API_BASE_URL: string = 'https://hfrsgm--8000.ap-guangzhou.cloudstudio.work'; // 请替换为实际的服务器地址
+  static readonly API_BASE_URL: string = 'https://pexlsj--8000.ap-singapore.cloudstudio.work/'; // 请替换为实际的服务器地址
   static readonly API_TIMEOUT: number = 600000; // 10分钟超时（考虑大文件上传和播客生成时间）
   
   // 是否使用云函数（如果使用云函数，路径可能不同）
@@ -30,6 +30,15 @@ export class PodcastConfig {
   // 本地/远程服务器URL格式：http://ip:port 或 https://domain.com
   // Cloud Studio URL格式：https://${SPACE_KEY}--${PORT}.${REGION}.cloudstudio.work
   static readonly USE_CLOUD_FUNCTION: boolean = false; // 设置为 true 如果使用云函数
+  
+  // 是否使用云存储（后端已强制要求使用云存储URL，此配置保留用于兼容性）
+  // 注意：后端API现在强制要求使用云存储URL，不再支持base64编码的音频文件
+  // 使用云存储的优势：
+  // - 减少请求体大小
+  // - 提高传输效率
+  // - 支持大文件
+  // - 文件可重复使用
+  static readonly USE_CLOUD_STORAGE: boolean = true; // 必须为 true（后端强制要求）
 }
 
 /**
@@ -42,15 +51,18 @@ export interface CharacterInfo {
   catchphrase?: string;
   speaking_style?: string;
   relationship?: string;
-  voice: string; // base64编码的音频数据
+  voice_url: string; // 云存储URL（必需，后端强制要求）
+  voice?: string; // [已废弃] base64编码的音频数据或URL（已废弃，请使用voice_url）
 }
 
 /**
  * 多角色播客请求
  */
 export interface MultiRoleRequest {
-  text: string;
-  role_voices: Record<string, string>; // 角色名 -> base64音频
+  text?: string; // 播客文本（如果使用text_file_url，此字段可为空）
+  text_file_url?: string; // 文本文件云存储URL（.txt或Word文件，如果提供，优先使用）
+  role_voice_urls: Record<string, string>; // 角色名 -> 云存储URL（必需，后端强制要求）
+  role_voices?: Record<string, string>; // [已废弃] 角色名 -> base64音频（已废弃，请使用role_voice_urls）
   silence_interval?: number;
   podcast_name?: string; // 播客名称（可选）
   topic?: string; // 本期主题（可选）
@@ -80,7 +92,8 @@ export interface CharacterRequest {
  */
 export interface DeepPodcastRequest {
   topic: string;
-  role_voices: Record<string, string>; // 角色名 -> base64音频
+  role_voice_urls: Record<string, string>; // 角色名 -> 云存储URL（必需，后端强制要求）
+  role_voices?: Record<string, string>; // [已废弃] 角色名 -> base64音频（已废弃，请使用role_voice_urls）
   num_characters?: number; // 2-3
   depth_level?: string; // "深度" | "中等" | "浅层"
   silence_interval?: number;
@@ -116,8 +129,10 @@ export interface AnalyzeTextResult {
  * 多角色播客请求体（API请求用）
  */
 class MultiRoleRequestBody {
-  text: string;
-  role_voices: Record<string, string>;
+  text?: string; // 播客文本（如果使用text_file_url，此字段可为空）
+  text_file_url?: string; // 文本文件云存储URL
+  role_voices?: Record<string, string>; // base64音频（如果不使用云存储）
+  role_voice_urls?: Record<string, string>; // 云存储URL（如果使用云存储）
   silence_interval: number;
   podcast_name?: string;
   topic?: string;
@@ -133,8 +148,10 @@ class MultiRoleRequestBody {
   scene_types?: string[];
 
   constructor(
-    text: string,
-    role_voices: Record<string, string>,
+    text: string | undefined,
+    text_file_url: string | undefined,
+    role_voices: Record<string, string> | undefined,
+    role_voice_urls: Record<string, string> | undefined,
     silence_interval: number,
     podcast_name?: string,
     topic?: string,
@@ -150,7 +167,9 @@ class MultiRoleRequestBody {
     scene_types?: string[]
   ) {
     this.text = text;
+    this.text_file_url = text_file_url;
     this.role_voices = role_voices;
+    this.role_voice_urls = role_voice_urls;
     this.silence_interval = silence_interval;
     this.podcast_name = podcast_name;
     this.topic = topic;
@@ -176,6 +195,8 @@ class CharacterRequestBody {
   silence_interval: number;
 
   constructor(characters: CharacterInfo[], topic: string | undefined, silence_interval: number) {
+    // 后端强制要求使用voice_url（云存储URL）
+    // characters中的voice_url字段会被后端直接使用
     this.characters = characters;
     this.topic = topic;
     this.silence_interval = silence_interval;
@@ -187,14 +208,23 @@ class CharacterRequestBody {
  */
 class DeepPodcastRequestBody {
   topic: string;
-  role_voices: Record<string, string>;
+  role_voices?: Record<string, string>; // base64音频（如果不使用云存储）
+  role_voice_urls?: Record<string, string>; // 云存储URL（如果使用云存储）
   num_characters: number;
   depth_level: string;
   silence_interval: number;
 
-  constructor(topic: string, role_voices: Record<string, string>, num_characters: number, depth_level: string, silence_interval: number) {
+  constructor(
+    topic: string,
+    role_voices: Record<string, string> | undefined,
+    role_voice_urls: Record<string, string> | undefined,
+    num_characters: number,
+    depth_level: string,
+    silence_interval: number
+  ) {
     this.topic = topic;
     this.role_voices = role_voices;
+    this.role_voice_urls = role_voice_urls;
     this.num_characters = num_characters;
     this.depth_level = depth_level;
     this.silence_interval = silence_interval;
@@ -380,29 +410,38 @@ export class PodcastService {
   async generateMultiRolePodcast(request: MultiRoleRequest): Promise<ApiResponse<PodcastResult>> {
     return new Promise<ApiResponse<PodcastResult>>((resolve) => {
       try {
-        // 验证请求参数
-        if (!request.text || request.text.trim().length === 0) {
+        // 验证请求参数（text或text_file_url至少有一个）
+        const hasText = request.text && request.text.trim().length > 0;
+        //const hasTextFile = request.text_file_url && request.text_file_url.trim().length > 0;
+        
+        if (!hasText) {
           resolve({
             success: false,
-            message: '播客文本不能为空',
+            message: '播客文本不能为空，请上传文本文件或输入文本',
             error: '文本内容为空',
           });
           return;
         }
 
-        if (!request.role_voices || Object.keys(request.role_voices).length === 0) {
+        // 强制使用云存储URL（后端已强制要求）
+        const roleVoiceUrls = request.role_voice_urls;
+        
+        // 验证音色数据
+        if (!roleVoiceUrls || Object.keys(roleVoiceUrls).length === 0) {
           resolve({
             success: false,
-            message: '至少需要一个角色的音色文件',
-            error: '角色音色为空',
+            message: '至少需要一个角色的音色文件URL',
+            error: '角色音色URL为空',
           });
           return;
         }
 
         const requestBody = new MultiRoleRequestBody(
-          request.text,
-          request.role_voices,
-          request.silence_interval || 300,
+          request.text, // text
+          request.text_file_url, // text_file_url
+          undefined, // role_voices已废弃
+          roleVoiceUrls, // role_voice_urls - 使用云存储URL
+          request.silence_interval || 300, // silence_interval
           request.podcast_name,
           request.topic,
           request.character_1_name,
@@ -417,7 +456,10 @@ export class PodcastService {
           request.scene_types
         );
 
-        Logger.info(TAG, `开始生成多角色播客: 文本长度=${request.text.length}, 角色数=${Object.keys(request.role_voices).length}`);
+        const roleCount = Object.keys(roleVoiceUrls).length;
+        const textLength = request.text ? request.text.length : 0;
+        const hasTextFile = request.text_file_url ? '是' : '否';
+        Logger.info(TAG, `开始生成多角色播客: 文本长度=${textLength}, 文本文件=${hasTextFile}, 角色数=${roleCount}, 使用云存储`);
 
         const httpRequest = http.createHttp();
         const requestData = JSON.stringify(requestBody);
@@ -488,13 +530,21 @@ export class PodcastService {
           return;
         }
 
-        // 验证角色信息
+        // 验证角色信息（强制使用云存储URL）
         for (const char of request.characters) {
-          if (!char.name || !char.voice) {
+          if (!char.name) {
             resolve({
               success: false,
-              message: '角色名称和音色文件不能为空',
+              message: '角色名称不能为空',
               error: '角色信息不完整',
+            });
+            return;
+          }
+          if (!char.voice_url) {
+            resolve({
+              success: false,
+              message: `角色 ${char.name} 的音色文件URL不能为空`,
+              error: '角色音色URL缺失',
             });
             return;
           }
@@ -506,7 +556,7 @@ export class PodcastService {
           request.silence_interval || 300
         );
 
-        Logger.info(TAG, `开始生成自定义角色播客: 主题=${request.topic || '无'}, 角色数=${request.characters.length}`);
+        Logger.info(TAG, `开始生成自定义角色播客: 主题=${request.topic || '无'}, 角色数=${request.characters.length}, 使用云存储`);
 
         const httpRequest = http.createHttp();
         const requestData = JSON.stringify(requestBody);
@@ -650,23 +700,26 @@ export class PodcastService {
           return;
         }
 
-        if (!request.role_voices || Object.keys(request.role_voices).length !== numCharacters) {
+        // 强制使用云存储URL（后端已强制要求）
+        const roleVoiceUrls = request.role_voice_urls;
+        const roleNames = ['角色A', '角色B', '角色C'].slice(0, numCharacters);
+        
+        // 验证音色数据
+        if (!roleVoiceUrls || Object.keys(roleVoiceUrls).length !== numCharacters) {
           resolve({
             success: false,
-            message: `角色音色数量必须与角色数量(${numCharacters})一致`,
-            error: '角色音色数量不匹配',
+            message: `角色音色URL数量必须与角色数量(${numCharacters})一致`,
+            error: '角色音色URL数量不匹配',
           });
           return;
         }
-
-        // 验证角色音色
-        const roleNames = ['角色A', '角色B', '角色C'].slice(0, numCharacters);
+        // 验证每个角色都有音色URL
         for (const roleName of roleNames) {
-          if (!request.role_voices[roleName]) {
+          if (!roleVoiceUrls[roleName]) {
             resolve({
               success: false,
-              message: `缺少角色 ${roleName} 的音色文件`,
-              error: '角色音色缺失',
+              message: `缺少角色 ${roleName} 的音色文件URL`,
+              error: '角色音色URL缺失',
             });
             return;
           }
@@ -674,13 +727,14 @@ export class PodcastService {
 
         const requestBody = new DeepPodcastRequestBody(
           request.topic,
-          request.role_voices,
+          undefined, // role_voices已废弃
+          roleVoiceUrls, // 使用云存储URL
           numCharacters,
           depthLevel,
           request.silence_interval || 300
         );
 
-        Logger.info(TAG, `开始生成主题深度播客: 主题=${request.topic}, 深度=${depthLevel}, 角色数=${numCharacters}`);
+        Logger.info(TAG, `开始生成主题深度播客: 主题=${request.topic}, 深度=${depthLevel}, 角色数=${numCharacters}, 使用云存储`);
 
         const httpRequest = http.createHttp();
         const requestData = JSON.stringify(requestBody);

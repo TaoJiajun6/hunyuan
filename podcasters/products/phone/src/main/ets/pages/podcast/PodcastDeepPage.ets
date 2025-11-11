@@ -14,7 +14,7 @@ export function PodcastDeepPageBuilder() {
 @ComponentV2
 export struct PodcastDeepPage {
   @Local topic: string = '';
-  @Local roleAVoices: Record<string, string> = {}; // 角色名 -> base64音频
+  @Local roleVoiceUrls: Record<string, string> = {}; // 角色名 -> 云存储URL（必需）
   @Local numCharacters: number = 2;
   @Local depthLevel: string = '深度';
   @Local isLoading: boolean = false;
@@ -30,12 +30,22 @@ export struct PodcastDeepPage {
     try {
       // 获取UIAbility上下文
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      const audioData = await FileUtils.pickAudioFile(context);
-      if (audioData) {
-        const base64 = FileUtils.uint8ArrayToBase64(audioData);
-        this.roleAVoices[roleName] = base64;
+      // 强制使用云存储上传（后端要求）
+      const audioFileInfo = await FileUtils.pickAudioFile(context, true);
+      if (audioFileInfo && audioFileInfo.cloudUrl) {
+        // 保存云存储URL
+        if (!this.roleVoiceUrls) {
+          this.roleVoiceUrls = {};
+        }
+        this.roleVoiceUrls[roleName] = audioFileInfo.cloudUrl;
         promptAction.showToast({
-          message: `${roleName}音色已选择`,
+          message: `${roleName}音色已选择并上传到云存储`,
+          duration: 2000
+        });
+      } else {
+        // 上传失败或未获取到URL
+        promptAction.showToast({
+          message: `${roleName}音色上传失败，请重试`,
           duration: 2000
         });
       }
@@ -60,7 +70,7 @@ export struct PodcastDeepPage {
     }
 
     const currentRoleNames = this.roleNames.slice(0, this.numCharacters);
-    const hasAllVoices = currentRoleNames.every(role => this.roleAVoices[role]);
+    const hasAllVoices = currentRoleNames.every(role => this.roleVoiceUrls[role]);
     if (!hasAllVoices) {
       promptAction.showToast({
         message: `请为所有${this.numCharacters}个角色选择音色文件`,
@@ -73,7 +83,7 @@ export struct PodcastDeepPage {
     try {
       const request: DeepPodcastRequest = {
         topic: this.topic,
-        role_voices: this.roleAVoices,
+        role_voice_urls: this.roleVoiceUrls, // 强制使用云存储URL
         num_characters: this.numCharacters,
         depth_level: this.depthLevel,
         silence_interval: 300
@@ -234,13 +244,13 @@ export struct PodcastDeepPage {
                     .fontColor($r('sys.color.font_primary'))
                     .layoutWeight(1)
 
-                  Button(this.roleAVoices[roleName] ? '已选择' : '选择音色')
+                  Button(this.roleVoiceUrls[roleName] ? '已选择' : '选择音色')
                     .fontSize($r('sys.float.Body_S'))
                     .type(ButtonType.Normal)
-                    .backgroundColor(this.roleAVoices[roleName] ?
+                    .backgroundColor(this.roleVoiceUrls[roleName] ?
                       $r('sys.color.icon_emphasize') :
                       $r('sys.color.comp_background_tertiary'))
-                    .fontColor(this.roleAVoices[roleName] ?
+                    .fontColor(this.roleVoiceUrls[roleName] ?
                       $r('sys.color.font_on_primary') :
                       $r('sys.color.font_primary'))
                     .onClick(() => {
@@ -267,7 +277,7 @@ export struct PodcastDeepPage {
             .width('100%')
             .height(40)
             .enabled(!this.isLoading && this.topic.trim().length > 0 &&
-              this.roleNames.slice(0, this.numCharacters).every(role => this.roleAVoices[role]))
+              this.roleNames.slice(0, this.numCharacters).every(role => this.roleVoiceUrls[role]))
             .onClick(() => {
               this.generatePodcast();
             })

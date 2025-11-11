@@ -56,6 +56,8 @@ from .utils import (
     save_audio,
     load_audio,
     get_output_path,
+    add_intro_outro_music,
+    mix_audio_with_background,
     AUDIO_SAMPLING_RATE,
     AUDIO_SILENCE_INTERVAL
 )
@@ -162,6 +164,10 @@ class PodcastGenerator:
         role_voices: Optional[Dict[str, str]] = None,
         output_path: Optional[str] = None,
         silence_interval: int = AUDIO_SILENCE_INTERVAL,
+        intro_music: Optional[str] = None,
+        outro_music: Optional[str] = None,
+        background_music: Optional[str] = None,
+        background_volume: float = 0.3,
         verbose: bool = False
     ) -> str:
         """
@@ -172,6 +178,10 @@ class PodcastGenerator:
             role_voices: 角色音色映射，如果为None则使用已设置的映射
             output_path: 输出文件路径
             silence_interval: 角色切换时的静音间隔（毫秒）
+            intro_music: 开场音乐文件路径（可选）
+            outro_music: 结尾音乐文件路径（可选）
+            background_music: 背景音乐文件路径（可选）
+            background_volume: 背景音乐音量（0.0-1.0），默认0.3
             verbose: 是否输出详细信息
         
         Returns:
@@ -240,11 +250,50 @@ class PodcastGenerator:
         if verbose:
             print(f"正在合成 {len(audio_segments)} 个音频片段...")
         
-        final_audio = concatenate_audios(
+        # 合成所有对话音频
+        main_audio = concatenate_audios(
             audio_segments,
             silence_intervals=[silence_interval] * (len(audio_segments) - 1),
             sr=AUDIO_SAMPLING_RATE
         )
+        
+        # 如果有背景音乐，混合背景音乐
+        if background_music and os.path.exists(background_music):
+            if verbose:
+                print(f"正在加载并混合背景音乐: {background_music}")
+            background_audio, _ = load_audio(background_music, AUDIO_SAMPLING_RATE)
+            main_audio = mix_audio_with_background(
+                main_audio,
+                background_audio,
+                background_volume=background_volume
+            )
+        
+        # 加载开场和结尾音乐
+        intro_audio = None
+        outro_audio = None
+        
+        if intro_music and os.path.exists(intro_music):
+            if verbose:
+                print(f"正在加载开场音乐: {intro_music}")
+            intro_audio, _ = load_audio(intro_music, AUDIO_SAMPLING_RATE)
+        
+        if outro_music and os.path.exists(outro_music):
+            if verbose:
+                print(f"正在加载结尾音乐: {outro_music}")
+            outro_audio, _ = load_audio(outro_music, AUDIO_SAMPLING_RATE)
+        
+        # 添加开场和结尾音乐
+        if intro_audio is not None or outro_audio is not None:
+            if verbose:
+                print("正在添加开场和结尾音乐...")
+            final_audio = add_intro_outro_music(
+                main_audio,
+                intro_music=intro_audio,
+                outro_music=outro_audio,
+                sr=AUDIO_SAMPLING_RATE
+            )
+        else:
+            final_audio = main_audio
         
         if verbose:
             print(f"正在保存音频到: {output_path}")

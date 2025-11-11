@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "@hw-agconnect/auth-ohos": "^1.0.9",
+    "@hw-agconnect/core-ohos": "^1.0.9"
+  }
+}

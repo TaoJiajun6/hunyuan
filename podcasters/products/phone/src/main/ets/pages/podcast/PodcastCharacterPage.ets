@@ -15,8 +15,8 @@ export function PodcastCharacterPageBuilder() {
 export struct PodcastCharacterPage {
   @Local topic: string = '';
   @Local characters: CharacterInfo[] = [
-    { name: '角色A', voice: '' },
-    { name: '角色B', voice: '' }
+    { name: '角色A', voice_url: '' },
+    { name: '角色B', voice_url: '' }
   ];
   @Local isLoading: boolean = false;
   @Local windowModel: WindowModel = AppStorageV2.connect(WindowModel, () => new WindowModel())!;
@@ -32,7 +32,7 @@ export struct PodcastCharacterPage {
       catchphrase: updates.catchphrase !== undefined ? updates.catchphrase : character.catchphrase,
       speaking_style: updates.speaking_style !== undefined ? updates.speaking_style : character.speaking_style,
       relationship: updates.relationship !== undefined ? updates.relationship : character.relationship,
-      voice: updates.voice !== undefined ? updates.voice : character.voice
+      voice_url: updates.voice_url !== undefined ? updates.voice_url : character.voice_url
     };
   }
 
@@ -43,21 +43,27 @@ export struct PodcastCharacterPage {
     try {
       // 获取UIAbility上下文
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      const audioData = await FileUtils.pickAudioFile(context);
-      if (audioData) {
-        const base64 = FileUtils.uint8ArrayToBase64(audioData);
+      // 强制使用云存储上传（后端要求）
+      const audioFileInfo = await FileUtils.pickAudioFile(context, true);
+      if (audioFileInfo && audioFileInfo.cloudUrl) {
         // 创建新数组以触发状态更新
         const newCharacters: CharacterInfo[] = [];
         for (let i = 0; i < this.characters.length; i++) {
           if (i === index) {
-            newCharacters.push(this.copyCharacterInfo(this.characters[i], { voice: base64 }));
+            newCharacters.push(this.copyCharacterInfo(this.characters[i], { voice_url: audioFileInfo.cloudUrl }));
           } else {
             newCharacters.push(this.characters[i]);
           }
         }
         this.characters = newCharacters;
         promptAction.showToast({
-          message: `${this.characters[index].name}音色已选择`,
+          message: `${this.characters[index].name}音色已选择并上传到云存储`,
+          duration: 2000
+        });
+      } else {
+        // 上传失败或未获取到URL
+        promptAction.showToast({
+          message: `${this.characters[index].name}音色上传失败，请重试`,
           duration: 2000
         });
       }
@@ -73,8 +79,8 @@ export struct PodcastCharacterPage {
    * 生成播客
    */
   async generatePodcast(): Promise<void> {
-    // 检查所有角色是否都有音色
-    const hasAllVoices = this.characters.every(char => char.voice);
+    // 检查所有角色是否都有音色URL（必须使用云存储）
+    const hasAllVoices = this.characters.every(char => char.voice_url);
     if (!hasAllVoices) {
       promptAction.showToast({
         message: '请为所有角色选择音色文件',
@@ -237,14 +243,14 @@ export struct PodcastCharacterPage {
                       this.characters = newCharacters;
                     })
 
-                  Button(character.voice ? '已选择音色' : '选择音色文件')
+                  Button(character.voice_url ? '已选择音色' : '选择音色文件')
                     .width('100%')
                     .fontSize($r('sys.float.Body_S'))
                     .type(ButtonType.Normal)
-                    .backgroundColor(character.voice ?
+                    .backgroundColor(character.voice_url ?
                       $r('sys.color.icon_emphasize') :
                       $r('sys.color.comp_background_tertiary'))
-                    .fontColor(character.voice ?
+                    .fontColor(character.voice_url ?
                       $r('sys.color.font_on_primary') :
                       $r('sys.color.font_primary'))
                     .onClick(() => {
@@ -270,7 +276,7 @@ export struct PodcastCharacterPage {
           Button(this.isLoading ? '生成中...' : '开始生成')
             .width('100%')
             .height(40)
-            .enabled(!this.isLoading && this.characters.every(char => char.voice))
+            .enabled(!this.isLoading && this.characters.every(char => char.voice_url))
             .onClick(() => {
               this.generatePodcast();
             })

@@ -12,6 +12,7 @@ import { OnWXResp, wxApi, wxEventHandler } from '../utils/WXApiUtils';
 import { Constants } from '../constants/Constants';
 import { LoginRouterParams, LoginSheetParams } from '../constants/Types';
 import { getAccountErrorMsg } from '../utils/ErrorCodeHelper';
+import { AuthService } from '../services/AuthService';
 
 const TAG = '[LoginVM]';
 
@@ -153,6 +154,7 @@ export class LoginVM extends BaseViewModel {
 
   huaweiLogin() {
     this.accountInstance.huaweiLogin(this.anonymousPhone);
+      
     this.handleClose();
   }
 

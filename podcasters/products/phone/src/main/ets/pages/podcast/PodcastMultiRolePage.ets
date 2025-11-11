@@ -1,7 +1,7 @@
 import { RouterMap, RouterUtils, WindowModel } from 'lib_common';
 import { NavHeaderBar } from 'lib_widget';
 import { podcastService, MultiRoleRequest, PodcastResult } from 'lib_api';
-import { FileUtils } from '../../utils/FileUtils';
+import { FileUtils, TextFileInfo } from '../../utils/FileUtils';
 import { promptAction, AppStorageV2 } from '@kit.ArkUI';
 import { PodcastResultPageParams } from './PodcastResultPage';
 import { common } from '@kit.AbilityKit';
@@ -13,8 +13,10 @@ export function PodcastMultiRolePageBuilder() {
 
 @ComponentV2
 export struct PodcastMultiRolePage {
-  @Local text: string = '';
-  @Local roleAVoices: Record<string, string> = {}; // 角色名 -> base64音频
+  @Local text: string = ''; // 保留用于兼容，但优先使用textFileUrl
+  @Local textFileUrl: string = ''; // 文本文件云存储URL
+  @Local textFileName: string = ''; // 文本文件名
+  @Local roleVoiceUrls: Record<string, string> = {}; // 角色名 -> 云存储URL（必需）
   @Local roleNames: string[] = ['角色A', '角色B'];
   @Local isLoading: boolean = false;
   @Local windowModel: WindowModel = AppStorageV2.connect(WindowModel, () => new WindowModel())!;
@@ -26,12 +28,58 @@ export struct PodcastMultiRolePage {
     try {
       // 获取UIAbility上下文
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      const audioData = await FileUtils.pickAudioFile(context);
-      if (audioData) {
-        const base64 = FileUtils.uint8ArrayToBase64(audioData);
-        this.roleAVoices[roleName] = base64;
+      // 强制使用云存储上传（后端要求）
+      const audioFileInfo = await FileUtils.pickAudioFile(context, true);
+      if (audioFileInfo && audioFileInfo.cloudUrl) {
+        // 保存云存储URL
+        if (!this.roleVoiceUrls) {
+          this.roleVoiceUrls = {};
+        }
+        this.roleVoiceUrls[roleName] = audioFileInfo.cloudUrl;
         promptAction.showToast({
-          message: `${roleName}音色已选择`,
+          message: `${roleName}音色已选择并上传到云存储`,
+          duration: 2000
+        });
+      } else {
+        // 上传失败或未获取到URL
+        promptAction.showToast({
+          message: `${roleName}音色上传失败，请重试`,
+          duration: 2000
+        });
+      }
+    } catch (error) {
+      promptAction.showToast({
+        message: `选择文件失败: ${error}`,
+        duration: 2000
+      });
+    }
+  }
+
+  /**
+   * 选择播客文本文件
+   */
+  async selectTextFile(): Promise<void> {
+    try {
+      // 获取UIAbility上下文
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      // 使用云存储上传
+      const textFileInfo = await FileUtils.pickTextFile(context, true);
+      if (textFileInfo && textFileInfo.cloudUrl) {
+        // 保存云存储URL
+        this.textFileUrl = textFileInfo.cloudUrl;
+        this.textFileName = textFileInfo.fileName;
+        // 如果文件已读取内容，也保存到text字段（用于兼容）
+        if (textFileInfo.content) {
+          this.text = textFileInfo.content;
+        }
+        promptAction.showToast({
+          message: `文本文件已选择并上传到云存储: ${textFileInfo.fileName}`,
+          duration: 2000
+        });
+      } else {
+        // 上传失败或未获取到URL
+        promptAction.showToast({
+          message: '文本文件上传失败，请重试',
           duration: 2000
         });
       }
@@ -47,15 +95,20 @@ export struct PodcastMultiRolePage {
    * 生成播客
    */
   async generatePodcast(): Promise<void> {
-    if (!this.text.trim()) {
+    // 检查文本输入（text或textFileUrl至少有一个）
+    const hasText = this.text.trim().length > 0;
+    const hasTextFile = this.textFileUrl.trim().length > 0;
+    
+    if (!hasText && !hasTextFile) {
       promptAction.showToast({
-        message: '请输入播客文本',
+        message: '请上传播客文本文件或输入文本',
         duration: 2000
       });
       return;
     }
 
-    if (Object.keys(this.roleAVoices).length < 2) {
+    // 检查音色文件（必须使用云存储URL）
+    if (!this.roleVoiceUrls || Object.keys(this.roleVoiceUrls).length < 2) {
       promptAction.showToast({
         message: '请至少为2个角色选择音色文件',
         duration: 2000
@@ -66,8 +119,9 @@ export struct PodcastMultiRolePage {
     this.isLoading = true;
     try {
       const request: MultiRoleRequest = {
-        text: this.text,
-        role_voices: this.roleAVoices,
+        text: hasText ? this.text : '', // 如果使用文件，text可以为空
+        text_file_url: hasTextFile ? this.textFileUrl : undefined, // 文本文件云存储URL
+        role_voice_urls: this.roleVoiceUrls, // 强制使用云存储URL
         silence_interval: 300
       };
 
@@ -105,16 +159,51 @@ export struct PodcastMultiRolePage {
 
         Scroll() {
           Column({ space: 16 }) {
-            // 文本输入
+            // 文本文件上传
             Column({ space: 12 }) {
-              Text('播客文本')
+              Text('播客文本文件')
                 .fontSize($r('sys.float.Subtitle_L'))
                 .fontColor($r('sys.color.font_primary'))
                 .fontWeight(FontWeight.Bold)
                 .alignSelf(ItemAlign.Start)
 
+              Row({ space: 12 }) {
+                Column({ space: 4 }) {
+                  Text(this.textFileName || '未选择文件')
+                    .fontSize($r('sys.float.Body_M'))
+                    .fontColor(this.textFileUrl ? $r('sys.color.font_primary') : $r('sys.color.font_secondary'))
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    .layoutWeight(1)
+
+                  Text('支持.txt、.doc、.docx格式，最大10MB')
+                    .fontSize($r('sys.float.Body_S'))
+                    .fontColor($r('sys.color.font_secondary'))
+                }
+                .layoutWeight(1)
+                .alignItems(HorizontalAlign.Start)
+
+                Button(this.textFileUrl ? '已选择' : '选择文件')
+                  .fontSize($r('sys.float.Body_S'))
+                  .type(ButtonType.Normal)
+                  .backgroundColor(this.textFileUrl ?
+                    $r('sys.color.icon_emphasize') :
+                    $r('sys.color.comp_background_tertiary'))
+                  .fontColor(this.textFileUrl ?
+                    $r('sys.color.font_on_primary') :
+                    $r('sys.color.font_primary'))
+                  .onClick(() => {
+                    this.selectTextFile();
+                  })
+              }
+              .width('100%')
+              .padding(12)
+              .borderRadius(8)
+              .backgroundColor($r('sys.color.comp_background_tertiary'))
+
+              // 保留文本输入框作为备选（可选）
               TextArea({
-                placeholder: '请输入播客文本，支持角色标记（如[角色A]你好 [角色B]你好啊）或普通文本',
+                placeholder: '或直接输入播客文本（可选）',
                 text: $$this.text
               })
                 .placeholderColor($r('sys.color.font_secondary'))
@@ -127,7 +216,7 @@ export struct PodcastMultiRolePage {
                 .fontWeight(FontWeight.Regular)
                 .borderRadius(8)
                 .padding({ left: 12, top: 8 })
-                .constraintSize({ minHeight: 120 })
+                .constraintSize({ minHeight: 80 })
             }
             .width('100%')
             .alignItems(HorizontalAlign.Start)
@@ -147,13 +236,13 @@ export struct PodcastMultiRolePage {
                     .fontColor($r('sys.color.font_primary'))
                     .layoutWeight(1)
 
-                  Button(this.roleAVoices[roleName] ? '已选择' : '选择音色')
+                  Button(this.roleVoiceUrls[roleName] ? '已选择' : '选择音色')
                     .fontSize($r('sys.float.Body_S'))
                     .type(ButtonType.Normal)
-                    .backgroundColor(this.roleAVoices[roleName] ?
+                    .backgroundColor(this.roleVoiceUrls[roleName] ?
                       $r('sys.color.icon_emphasize') :
                       $r('sys.color.comp_background_tertiary'))
-                    .fontColor(this.roleAVoices[roleName] ?
+                    .fontColor(this.roleVoiceUrls[roleName] ?
                       $r('sys.color.font_on_primary') :
                       $r('sys.color.font_primary'))
                     .onClick(() => {
@@ -179,7 +268,9 @@ export struct PodcastMultiRolePage {
           Button(this.isLoading ? '生成中...' : '开始生成')
             .width('100%')
             .height(40)
-            .enabled(!this.isLoading && this.text.trim().length > 0 && Object.keys(this.roleAVoices).length >= 2)
+            .enabled(!this.isLoading && 
+              (this.text.trim().length > 0 || this.textFileUrl.length > 0) && 
+              Object.keys(this.roleVoiceUrls).length >= 2)
             .onClick(() => {
               this.generatePodcast();
             })

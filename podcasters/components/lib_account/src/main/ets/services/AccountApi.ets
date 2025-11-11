@@ -2,6 +2,7 @@ import { PersistenceV2 } from '@kit.ArkUI';
 import { UserInfoModel } from 'lib_common';
 import { AuthorResponse, MineServiceApi } from 'lib_api';
 import { ProtocolData } from './mockdata/ProtocolData';
+import { AuthService } from './AuthService';
 
 /**
  * 账号类
@@ -41,6 +42,8 @@ export class AccountApi {
     if (user) {
       this.userInfoModel.loginChannel = 'hw';
       this.handleUserInfo(user);
+      
+
     }
   }
 

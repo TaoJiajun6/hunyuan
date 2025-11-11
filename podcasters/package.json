@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@hw-agconnect/cloudstorage-ohos": "^1.0.9"
+  }
+}
