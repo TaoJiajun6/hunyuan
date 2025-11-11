@@ -2,9 +2,10 @@
   "modelVersion": "5.0.5",
   "description": "Please describe the basic information.",
   "dependencies": {
+    "@yunkss/ef_audio": "^1.1.1"
   },
   "devDependencies": {
-    "@ohos/hypium": "1.0.21",
+    "@ohos/hypium": "1.0.21"
   },
   "dynamicDependencies": {}
 }

@@ -56,7 +56,7 @@ _PROGRESS_CACHE: Dict[str, Dict[str, Any]] = {}
 def _progress_path(job_id: str) -> str:
     return os.path.join(_PROGRESS_DIR, f"{job_id}.json")
 
-def _update_progress(job_id: Optional[str], phase: str, percent: int, message: str, done: bool = False, error: Optional[str] = None):
+def _update_progress(job_id: Optional[str], phase: str, percent: int, message: str, done: bool = False, error: Optional[str] = None, audio_url: Optional[str] = None):
     if not job_id:
         return
     data = {
@@ -68,6 +68,8 @@ def _update_progress(job_id: Optional[str], phase: str, percent: int, message: s
         "error": error,
         "ts": int(time.time())
     }
+    if audio_url:
+        data["audio_url"] = audio_url
     _PROGRESS_CACHE[job_id] = data
     try:
         with open(_progress_path(job_id), 'w', encoding='utf-8') as f:
@@ -845,6 +847,9 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
             _update_progress(request.job_id, "saving", 85, "保存音频文件")
             # 尝试启动 AGC 上传任务
             agc_result = None
+            # 在外部作用域定义，确保后续可以使用
+            agc_storage_url = None
+            agc_bucket = None
             try:
                 # 配置来源：优先环境变量，其次仓库中的 agc-apiclient-*.json
                 agc_storage_url = os.getenv('AGC_STORAGE_URL')
@@ -907,9 +912,9 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                                     _update_progress(request.job_id, "upload_failed", 95, f"上传失败: {e}", done=True, error=str(e))
                         else:
                             # 后台异步上传（默认）
-                            background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
-                                                      agc_product_id, agc_domain, agc_client_id, agc_client_secret)
-                            logger.info("已在后台启动 AGC 上传任务")
+                        background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
+                                                  agc_product_id, agc_domain, agc_client_id, agc_client_secret)
+                        logger.info("已在后台启动 AGC 上传任务")
                             agc_result = {
                                 'status': 'started',
                                 'bucket': agc_bucket,
@@ -925,25 +930,48 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
             except Exception as e:
                 logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
 
-            # 编码输出音频
-            logger.info("编码输出音频文件...")
-            audio_base64 = encode_file_to_base64(output_path)
+            # 如果已上传到云存储，不返回base64（避免响应体过大导致客户端写入失败）
+            # 如果未上传，才返回base64作为备选
             file_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
             total_time = time.time() - start_time
             logger.info(f"多角色播客生成成功，总耗时: {total_time:.2f}s，输出文件大小: {file_size:.2f} MB")
 
+            # 构建云存储URL（即使上传还在后台，URL也可以提前构建）
+            audio_url = None
+            if agc_result and isinstance(agc_result, dict) and agc_result.get('url'):
+                audio_url = agc_result['url']
+            elif agc_storage_url and agc_bucket:
+                # 即使上传还在后台，也可以构建URL
+                object_name = os.path.join('outputs', 'podcasts', os.path.basename(output_path))
+                audio_url = f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
+
+            # 将URL添加到进度中，前端可以从进度查询中获取
+            if audio_url and request.job_id:
+                _update_progress(request.job_id, "completed", 100, "生成完成", done=True, audio_url=audio_url)
+
+            # 限制script长度，避免响应体过大（如果超过10KB，只返回前10KB）
+            script_to_return = text_content
+            if len(script_to_return) > 10240:  # 10KB
+                script_to_return = script_to_return[:10240] + "\n\n[脚本内容过长，已截断...]"
+                logger.info(f"脚本内容过长({len(text_content)}字符)，已截断至10KB")
+
             data = {
-                "audio_base64": audio_base64,
-                "audio_path": output_path,
                 "file_size_mb": round(file_size, 2),
-                "script": text_content,
+                "script": script_to_return,
                 "roles": list(roles)
             }
-            if agc_result:
+            
+            # 如果已上传到云存储或可以构建URL，优先返回URL，不返回base64（避免响应体过大）
+            if audio_url:
+                data['audio_url'] = audio_url
+                if agc_result and isinstance(agc_result, dict):
                 data['agc_upload_status'] = agc_result
-                # 便于前端直接播放的直链
-                if isinstance(agc_result, dict) and agc_result.get('url'):
-                    data['audio_url'] = agc_result['url']
+                logger.info(f"返回云存储URL: {audio_url}，不返回base64以避免响应体过大")
+            else:
+                # 未配置云存储或无法构建URL，返回base64作为备选
+                logger.info("未配置云存储或无法构建URL，返回base64编码")
+                audio_base64 = encode_file_to_base64(output_path)
+                data['audio_base64'] = audio_base64
 
             return ApiResponse(success=True, message="播客生成成功", data=data)
         finally:
@@ -1044,15 +1072,15 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
             generation_time = time.time() - generation_start
             logger.info(f"播客音频生成完成，耗时: {generation_time:.2f}s")
             
-            # 编码输出音频
-            logger.info("编码输出音频文件...")
-            audio_base64 = encode_file_to_base64(output_path)
             file_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
             total_time = time.time() - start_time
             logger.info(f"自定义角色播客生成成功，总耗时: {total_time:.2f}s，输出文件大小: {file_size:.2f} MB")
 
-            # 尝试启动后台 AGC 上传任务（不阻塞主请求）
+            # 尝试启动 AGC 上传任务（如果已上传，不返回base64避免响应体过大）
             agc_result = None
+            # 在外部作用域定义，确保后续可以使用
+            agc_storage_url = None
+            agc_bucket = None
             try:
                 agc_storage_url = os.getenv('AGC_STORAGE_URL')
                 agc_bucket = os.getenv('AGC_BUCKET')
@@ -1128,15 +1156,38 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
             except Exception as e:
                 logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
 
+            # 构建云存储URL（即使上传还在后台，URL也可以提前构建）
+            audio_url = None
+            if agc_result and isinstance(agc_result, dict) and agc_result.get('url'):
+                audio_url = agc_result['url']
+            elif agc_storage_url and agc_bucket:
+                # 即使上传还在后台，也可以构建URL
+                object_name = os.path.join('outputs', 'podcasts', os.path.basename(output_path))
+                audio_url = f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
+
+            # 限制script长度，避免响应体过大（如果超过10KB，只返回前10KB）
+            script_to_return = cleaned_text
+            if len(script_to_return) > 10240:  # 10KB
+                script_to_return = script_to_return[:10240] + "\n\n[脚本内容过长，已截断...]"
+                logger.info(f"脚本内容过长({len(cleaned_text)}字符)，已截断至10KB")
+
             data = {
-                "audio_base64": audio_base64,
-                "audio_path": output_path,
                 "file_size_mb": round(file_size, 2),
-                "script": cleaned_text,
+                "script": script_to_return,
                 "characters": [char.name for char in request.characters]
             }
-            if agc_result:
-                data['agc_upload_status'] = agc_result
+            
+            # 如果已上传到云存储或可以构建URL，优先返回URL，不返回base64（避免响应体过大）
+            if audio_url:
+                data['audio_url'] = audio_url
+                if agc_result and isinstance(agc_result, dict):
+                    data['agc_upload_status'] = agc_result
+                logger.info(f"返回云存储URL: {audio_url}，不返回base64以避免响应体过大")
+            else:
+                # 未配置云存储或无法构建URL，返回base64作为备选
+                logger.info("未配置云存储或无法构建URL，返回base64编码")
+                audio_base64 = encode_file_to_base64(output_path)
+                data['audio_base64'] = audio_base64
 
             return ApiResponse(success=True, message="播客生成成功", data=data)
         finally:
@@ -1239,15 +1290,15 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
             generation_time = time.time() - generation_start
             logger.info(f"播客音频生成完成，耗时: {generation_time:.2f}s")
             
-            # 编码输出音频
-            logger.info("编码输出音频文件...")
-            audio_base64 = encode_file_to_base64(output_path)
             file_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
             total_time = time.time() - start_time
             logger.info(f"主题深度播客生成成功，总耗时: {total_time:.2f}s，输出文件大小: {file_size:.2f} MB")
 
             # 尝试启动后台 AGC 上传任务（不阻塞主请求）
             agc_result = None
+            # 在外部作用域定义，确保后续可以使用
+            agc_storage_url = None
+            agc_bucket = None
             try:
                 agc_storage_url = os.getenv('AGC_STORAGE_URL')
                 agc_bucket = os.getenv('AGC_BUCKET')
@@ -1310,16 +1361,39 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
             except Exception as e:
                 logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
 
+            # 构建云存储URL（即使上传还在后台，URL也可以提前构建）
+            audio_url = None
+            if agc_result and isinstance(agc_result, dict) and agc_result.get('url'):
+                audio_url = agc_result['url']
+            elif agc_storage_url and agc_bucket:
+                # 即使上传还在后台，也可以构建URL
+                object_name = os.path.join('outputs', 'podcasts', os.path.basename(output_path))
+                audio_url = f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
+
+            # 限制script长度，避免响应体过大（如果超过10KB，只返回前10KB）
+            script_to_return = cleaned_text
+            if len(script_to_return) > 10240:  # 10KB
+                script_to_return = script_to_return[:10240] + "\n\n[脚本内容过长，已截断...]"
+                logger.info(f"脚本内容过长({len(cleaned_text)}字符)，已截断至10KB")
+
             data = {
-                "audio_base64": audio_base64,
-                "audio_path": output_path,
                 "file_size_mb": round(file_size, 2),
-                "script": cleaned_text,
+                "script": script_to_return,
                 "topic": request.topic,
                 "depth_level": request.depth_level
             }
-            if agc_result:
-                data['agc_upload_status'] = agc_result
+            
+            # 如果已上传到云存储或可以构建URL，优先返回URL，不返回base64（避免响应体过大）
+            if audio_url:
+                data['audio_url'] = audio_url
+                if agc_result and isinstance(agc_result, dict):
+                    data['agc_upload_status'] = agc_result
+                logger.info(f"返回云存储URL: {audio_url}，不返回base64以避免响应体过大")
+            else:
+                # 未配置云存储或无法构建URL，返回base64作为备选
+                logger.info("未配置云存储或无法构建URL，返回base64编码")
+                audio_base64 = encode_file_to_base64(output_path)
+                data['audio_base64'] = audio_base64
 
             return ApiResponse(success=True, message="播客生成成功", data=data)
         finally:

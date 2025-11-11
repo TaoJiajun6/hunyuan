@@ -22,15 +22,18 @@ export class PodcastConfig {
   //    例如：'http://10.10.210.52:8000'
   // 4. 使用远程服务器：设置为远程服务器的URL
   //    例如：'https://your-server.com'
-  static readonly API_BASE_URL: string = 'http://43.156.78.187:8000/'; // 服务器地址
+  // 5. 直连服务器IP（推荐，避免网关超时）：设置为服务器的公网/内网IP和端口
+  //    例如：'http://9.165.4.87:8000' 或 'http://192.168.1.100:8000'
+  //    注意：确保服务器防火墙允许8000端口访问
+  static readonly API_BASE_URL: string = 'http://43.163.110.240:8000/'; // 请替换为实际的服务器IP地址
   static readonly API_TIMEOUT: number = 600000; // 10分钟超时（考虑大文件上传和播客生成时间）
-
+  
   // 是否使用云函数（如果使用云函数，路径可能不同）
   // 云函数通过HTTP触发器调用，URL格式通常为：https://your-cloud-function-url.com
   // 本地/远程服务器URL格式：http://ip:port 或 https://domain.com
   // Cloud Studio URL格式：https://${SPACE_KEY}--${PORT}.${REGION}.cloudstudio.work
   static readonly USE_CLOUD_FUNCTION: boolean = false; // 设置为 true 如果使用云函数
-
+  
   // 是否使用云存储（后端已强制要求使用云存储URL，此配置保留用于兼容性）
   // 注意：后端API现在强制要求使用云存储URL，不再支持base64编码的音频文件
   // 使用云存储的优势：
@@ -137,6 +140,8 @@ export interface ProgressStatus {
   done: boolean;
   error?: string;
   ts?: number;
+  // 新增：云存储URL（生成完成时返回）
+  audio_url?: string;
 }
 
 /**
@@ -281,7 +286,8 @@ interface UploadStatus {
 }
 
 export interface PodcastResult {
-  audio_base64: string;
+  // 音频数据（如果已上传到云存储，此字段可能为空，优先使用audio_url）
+  audio_base64?: string;
   audio_path: string;
   file_size_mb: number;
   script: string;
@@ -290,10 +296,10 @@ export interface PodcastResult {
   topic?: string;
   depth_level?: string;
 
-  // 新增：云存储直链（后端返回 agc_upload_status.url 时同时回填）
+  // 云存储直链（优先使用，避免响应体过大）
   audio_url?: string;
 
-  // 新增：上传状态信息（可用于前端展示）
+  // 上传状态信息（可用于前端展示）
   agc_upload_status?: UploadStatus;
 }
 
@@ -477,7 +483,7 @@ export class PodcastService {
         // 验证请求参数（text或text_file_url至少有一个）
         const hasText = request.text && request.text.trim().length > 0;
         //const hasTextFile = request.text_file_url && request.text_file_url.trim().length > 0;
-
+        
         if (!hasText) {
           resolve({
             success: false,
@@ -489,7 +495,7 @@ export class PodcastService {
 
         // 强制使用云存储URL（后端已强制要求）
         const roleVoiceUrls = request.role_voice_urls;
-
+        
         // 验证音色数据
         if (!roleVoiceUrls || Object.keys(roleVoiceUrls).length === 0) {
           resolve({
@@ -770,7 +776,7 @@ export class PodcastService {
         // 强制使用云存储URL（后端已强制要求）
         const roleVoiceUrls = request.role_voice_urls;
         const roleNames = ['角色A', '角色B', '角色C'].slice(0, numCharacters);
-
+        
         // 验证音色数据
         if (!roleVoiceUrls || Object.keys(roleVoiceUrls).length !== numCharacters) {
           resolve({
