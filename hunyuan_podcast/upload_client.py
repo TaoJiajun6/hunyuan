@@ -97,14 +97,18 @@ def get_agc_token(domain: str, client_id: str, client_secret: str, timeout: int 
     for attempt in range(1, retries + 1):
         try:
             logger.info(f"请求 AGC token (attempt {attempt}): {url}")
+            logger.info(f"  Payload: grant_type={payload.get('grant_type')}, client_id={payload.get('client_id')[:8] if payload.get('client_id') else None}...")
             resp = requests.post(url, json=payload, timeout=timeout)
+            logger.info(f"Token 响应: status_code={resp.status_code}")
             resp.raise_for_status()
             data = resp.json()
             token = data.get('access_token')
             if not token:
+                logger.error(f"获取 access_token 失败，响应: {data}")
                 raise AGCUploadError(f"获取 access_token 失败，响应: {data}")
             expires_in = int(data.get('expires_in', 3600))
             _TOKEN_CACHE[cache_key] = {'token': token, 'expires_at': now + expires_in - 10}
+            logger.info(f"Token 获取成功，有效期: {expires_in}秒")
             return token
         except RequestException as e:
             last_exc = e
@@ -142,16 +146,20 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
     if not content_type:
         content_type = 'application/octet-stream'
 
+    # 注意：Headers顺序和Java参考代码保持一致
     headers = {
-        'client_id': client_id,
         'productId': product_id or '',
+        'client_id': client_id,
         'Authorization': f'Bearer {token}',
         'X-Agc-File-Size': str(file_size),
-        'X-Agc-Content-Type': content_type,
         'Content-Type': content_type
     }
+    # 注意：Java参考代码中没有X-Agc-Content-Type，只有Content-Type
 
-    logger.info(f"上传到 AGC: {url} 大小={file_size} bytes, content_type={content_type}")
+    logger.info(f"上传到 AGC: {url}")
+    logger.info(f"  文件大小: {file_size} bytes ({file_size / (1024 * 1024):.2f} MB)")
+    logger.info(f"  Content-Type: {content_type}")
+    logger.info(f"  Headers: productId={product_id or '(empty)'}, client_id={client_id[:8] if client_id else '(empty)'}..., Authorization=Bearer {token[:20] if token else '(empty)'}...")
 
     last_exc = None
     retries = 3
@@ -160,12 +168,22 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
         try:
             with open(file_path, 'rb') as f:
                 resp = requests.put(url, data=f, headers=headers, timeout=timeout)
+            logger.info(f"上传响应: status_code={resp.status_code}, headers={dict(resp.headers)}")
+            if resp.text:
+                logger.info(f"上传响应内容: {resp.text[:500]}")
             resp.raise_for_status()
+            logger.info(f"上传成功！")
             return resp
         except RequestException as e:
             last_exc = e
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"上传失败 (attempt {attempt}): HTTP {e.response.status_code}")
+                logger.error(f"  响应头: {dict(e.response.headers)}")
+                logger.error(f"  响应内容: {e.response.text[:500] if e.response.text else '(empty)'}")
+            else:
+                logger.error(f"上传失败 (attempt {attempt}): {e}")
             wait = backoff_factor * (2 ** (attempt - 1))
-            logger.warning(f"上传失败 (attempt {attempt})：{e}，{wait}s 后重试")
+            logger.warning(f"  {wait}s 后重试...")
             time.sleep(wait)
     raise AGCUploadError(f"文件上传失败: {last_exc}")
 
@@ -179,40 +197,59 @@ def upload_generated_podcast(
     client_id: Optional[str] = None,
     client_secret: Optional[str] = None,
     product_id: Optional[str] = None,
+    # 注意：上传时使用的client_id可能与获取token时不同（参考Java代码）
+    upload_client_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """高层封装：读取配置、获取 token、上传文件，返回结果字典
 
     优先级：函数参数 > 环境变量 > 仓库 agc-apiclient-*.json
+    
+    注意：根据Java参考代码，获取token和上传可能使用不同的client_id：
+    - token_client_id: 用于获取token的client_id
+    - upload_client_id: 用于上传时的client_id（如果未提供，则使用token_client_id）
     """
     # 从环境变量读取（可覆盖）
     storage_url = storage_url or os.getenv('AGC_STORAGE_URL')
     bucket = bucket or os.getenv('AGC_BUCKET')
     domain = domain or os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
-    client_id = client_id or os.getenv('AGC_CLIENT_ID')
+    token_client_id = client_id or os.getenv('AGC_CLIENT_ID')
     client_secret = client_secret or os.getenv('AGC_CLIENT_SECRET')
     product_id = product_id or os.getenv('AGC_PRODUCT_ID')
+    # 上传时使用的client_id（如果未指定，使用token_client_id）
+    upload_client_id = upload_client_id or token_client_id
 
     # 如果缺少 client_id/secret，尝试从文件读取
-    if not client_id or not client_secret:
+    if not token_client_id or not client_secret:
         cfg = _find_agc_client_json()
         if cfg:
             cred = _load_agc_credentials_from_file(cfg)
-            client_id = client_id or cred.get('client_id')
+            token_client_id = token_client_id or cred.get('client_id')
             client_secret = client_secret or cred.get('client_secret')
             product_id = product_id or cred.get('project_id')
+            # 如果未指定upload_client_id，使用从文件读取的client_id
+            if not upload_client_id:
+                upload_client_id = token_client_id
 
     if not storage_url or not bucket:
         raise ValueError('需要提供 storage_url 和 bucket （参数或环境变量 AGC_STORAGE_URL/AGC_BUCKET）')
 
+    if not token_client_id or not client_secret:
+        raise ValueError('需要提供 client_id 和 client_secret （参数、环境变量或 agc-apiclient-*.json 文件）')
+
     # 默认 object_name 使用 POSIX 风格路径，避免 windows 反斜杠
     object_name = object_name or ('outputs/podcasts/' + os.path.basename(output_path))
 
-    # 获取 token（带缓存与重试）
-    token = get_agc_token(domain, client_id, client_secret)
+    logger.info(f"准备上传文件: {output_path}")
+    logger.info(f"  Token client_id: {token_client_id[:8] if token_client_id else None}...")
+    logger.info(f"  上传 client_id: {upload_client_id[:8] if upload_client_id else None}...")
+    logger.info(f"  product_id: {product_id}")
 
-    # 上传（带重试）
+    # 获取 token（使用token_client_id和client_secret）
+    token = get_agc_token(domain, token_client_id, client_secret)
+
+    # 上传（使用upload_client_id，可能与token_client_id不同）
     resp = upload_file_to_agc(storage_url, bucket, object_name, output_path,
-                              client_id=client_id, product_id=product_id or '', token=token)
+                              client_id=upload_client_id, product_id=product_id or '', token=token)
 
     return {
         'status': 'uploaded',
