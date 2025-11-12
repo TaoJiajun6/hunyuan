@@ -25,7 +25,8 @@ export struct AudioPlayer {
   @Param audioBase64: string = '';
   // 新增：支持直接播放云存储URL（优先使用此字段）
   @Param audioUrl: string = '';
-  @Param onStateChange: (isPlaying: boolean) => void = () => {};
+  @Param onStateChange: (isPlaying: boolean) => void = () => {
+  };
 
   async aboutToAppear(): Promise<void> {
     if (this.audioUrl || this.audioBase64) {
@@ -51,14 +52,14 @@ export struct AudioPlayer {
         const cloudPath = url.substring(outputsIndex + 1); // +1 去掉开头的 /
         return cloudPath;
       }
-      
+
       // 如果没有找到 /outputs/，尝试其他方式
       // 查找 bucket 名称后的路径（例如：podcasters-y0qig/outputs/podcasts/xxx.wav）
       const bucketMatch = url.match(/\/[^\/]+\/(outputs\/[^\/]+\/.+)$/);
       if (bucketMatch && bucketMatch[1]) {
         return bucketMatch[1];
       }
-      
+
       // 最后尝试：只提取文件名，假设在 outputs/podcasts/ 目录下
       const lastSlashIndex = url.lastIndexOf('/');
       if (lastSlashIndex !== -1) {
@@ -68,7 +69,7 @@ export struct AudioPlayer {
           return `outputs/podcasts/${fileName}`;
         }
       }
-      
+
       return null;
     } catch (error) {
       return null;
@@ -83,7 +84,7 @@ export struct AudioPlayer {
       try {
         const context = getContext(this) as common.UIAbilityContext;
         const storageBucket = cloudStorage.bucket();
-        
+
         // 生成本地文件名
         const fileName = cloudPath.split('/').pop() || `audio_${Date.now()}.wav`;
         const localPath = fileName;
@@ -104,10 +105,9 @@ export struct AudioPlayer {
             const localFilePath = `${context.cacheDir}/${localPath}`;
             resolve(localFilePath);
           });
-
           // 监听下载失败
-          task.on('failed', (error: BusinessError) => {
-            reject(new Error(`下载失败: ${error.message || String(error)}`));
+          task.on('wait', (reason: request.agent.WaitingReason) => {
+            reject(new Error(`下载失败: ${reason}`));
           });
 
           // 启动下载任务
@@ -137,7 +137,7 @@ export struct AudioPlayer {
       this.isLoading = true;
       // 创建播放器
       this.audioPlayer = await media.createAVPlayer();
-      
+
       if (this.audioUrl) {
         // 从云存储URL中提取云侧文件路径
         const cloudPath = this.extractCloudPath(this.audioUrl);
@@ -164,14 +164,14 @@ export struct AudioPlayer {
         const context = getContext(this) as common.UIAbilityContext;
         const tempDir = context.cacheDir;
         this.tempFilePath = `${tempDir}/temp_audio_${Date.now()}.wav`;
-        const file = await fileIo.open(this.tempFilePath, fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
+        const file = await fileIo.open(this.tempFilePath,
+          fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
         await fileIo.write(file.fd, audioData.buffer);
         await fileIo.close(file.fd);
         this.audioPlayer.url = this.tempFilePath;
       }
-
       // 设置音量
-      this.audioPlayer.volume = this.volume;
+      this.audioPlayer.setVolume(this.volume);
 
       // 监听播放状态
       this.audioPlayer.on('stateChange', (state: string) => {
@@ -283,7 +283,7 @@ export struct AudioPlayer {
       if (base64.includes(',')) {
         base64Data = base64.split(',')[1];
       }
-      
+
       const base64Helper = new util.Base64Helper();
       return base64Helper.decodeSync(base64Data);
     } catch (error) {
@@ -326,7 +326,7 @@ export struct AudioPlayer {
     }
     try {
       this.volume = Math.max(0, Math.min(1, vol));
-      this.audioPlayer.volume = this.volume;
+      this.audioPlayer.setVolume(this.volume);
       if (this.volume === 0) {
         this.isMuted = true;
       } else if (this.isMuted && this.volume > 0) {
@@ -421,9 +421,9 @@ export struct AudioPlayer {
             Text(this.formatTime(this.currentTime / 1000))
               .fontSize($r('sys.float.Body_S'))
               .fontColor($r('sys.color.font_secondary'))
-            
+
             Blank()
-            
+
             Text(this.duration > 0 ? this.formatTime(this.duration / 1000) : '--:--')
               .fontSize($r('sys.float.Body_S'))
               .fontColor($r('sys.color.font_secondary'))
@@ -454,7 +454,7 @@ export struct AudioPlayer {
         Row({ space: 8 }) {
           Text('🔊')
             .fontSize(16)
-          
+
           Slider({
             value: this.volume * 100,
             min: 0,

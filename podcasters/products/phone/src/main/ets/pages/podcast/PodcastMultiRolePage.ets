@@ -294,7 +294,6 @@ export struct PodcastMultiRolePage {
                 .borderRadius(8)
                 .padding({ left: 12, top: 8 })
                 .constraintSize({ minHeight: 80 })
-                .maxLines(6)
             }
             .width('100%')
             .alignItems(HorizontalAlign.Start)

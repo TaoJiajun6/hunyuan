@@ -47,7 +47,7 @@ struct IndexPage {
 
           TabContent() {
             MinePageBuilder()
-          }.tabBar(this.tabBarBuilder(2, '我的', $r('app.media.icon_my_on'), $r('app.media.icon_my_off')))
+          }.tabBar(this.tabBarBuilder(1, '我的', $r('app.media.icon_my_on'), $r('app.media.icon_my_off')))
         }
         .scrollable(false)
         .barHeight(this.keyboardHeight > 0 ? 0 : PhoneConstants.BOTTOM_TAB_BAR_HEIGHT)

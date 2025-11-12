@@ -2,7 +2,14 @@ import { PersistenceV2 } from '@kit.ArkUI';
 import { UserInfoModel } from 'lib_common';
 import { AuthorResponse, MineServiceApi } from 'lib_api';
 import { ProtocolData } from './mockdata/ProtocolData';
-import { AuthService } from './AuthService';
+
+interface HuaweiProfileInfo {
+  uid?: string;
+  nickName?: string;
+  avatarUri?: string;
+  phone?: string;
+  description?: string;
+}
 
 /**
  * 账号类
@@ -37,12 +44,25 @@ export class AccountApi {
   /**
    * 华为账号登录
    */
-  public huaweiLogin(nickPhone: string) {
-    const user = MineServiceApi.signIn('hw', nickPhone);
+  public huaweiLogin(nickPhone: string = '', profile?: HuaweiProfileInfo) {
+    const phone = profile?.phone ?? nickPhone;
+    const user = MineServiceApi.signIn('hw', phone);
     if (user) {
       this.userInfoModel.loginChannel = 'hw';
+      if (profile?.uid) {
+        user.authorId = profile.uid;
+      }
+      if (profile?.nickName) {
+        user.authorNickName = profile.nickName;
+      }
+      if (profile?.avatarUri) {
+        user.authorIcon = profile.avatarUri;
+      }
+      if (profile?.description) {
+        user.authorDesc = profile.description;
+      }
+      user.authorPhone = phone || user.authorPhone || '--';
       this.handleUserInfo(user);
-      
 
     }
   }
