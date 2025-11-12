@@ -3,7 +3,7 @@ import { promptAction, router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { HuaweiAuth } from '../utils/HuaweiAuth';
-import { AuthService } from '../services/AuthService';
+import { AccountApi } from '../services/AccountApi';
 
 @Builder
 export function HuaweiLoginPageBuilder() {
@@ -28,10 +28,16 @@ interface HuaweiProfile {
   nickName?: string;
 }
 
+interface LoginErrorInfo {
+  code?: number | string;
+  message: string;
+}
+
 
 @Component
 export struct HuaweiLoginPage {
   //@Link isLoading: boolean
+  private accountApi: AccountApi = new AccountApi();
 
   signInWithHuawei(huaweiProfile?: HuaweiProfile) {
     auth.signIn({
@@ -44,11 +50,12 @@ export struct HuaweiLoginPage {
       // 登录成功后的处理逻辑
       this.handleLoginSuccess(signInResult, huaweiProfile); // <--- 必须传递 huaweiProfile
     })
-      .catch((error: BusinessError) => {
+      .catch((error: BusinessError | Error ) => {
+        const normalized = this.normalizeError(error);
         hilog.error(0x0000, 'testTag', '%{public}s',
-          `signInHwid error, Code: ${error.code}, message: ${error.message}`);
+          `signInHwid error, Code: ${normalized.code ?? 'UNKNOWN'}, message: ${normalized.message}`);
         // 登录失败后的处理逻辑
-        this.handleLoginError(error);
+        this.handleLoginError(normalized);
       });
   }
 
@@ -67,17 +74,25 @@ export struct HuaweiLoginPage {
 
     console.log('存储后的 userPhotoUrl:', AppStorage.get('userPhotoUrl'));
 
+    const description = this.accountApi.getUserInfo().authorDesc || '华为账号用户';
+    this.accountApi.huaweiLogin('', {
+      uid,
+      nickName: huaweiProfile?.nickName || displayName,
+      avatarUri: huaweiProfile?.avatarUri || userPhotoUrl,
+      phone: '--',
+      description
+    });
 
     // 跳转到主页面
     router.replaceUrl({ url: 'pages/Index' });
   }
 
   // 处理登录失败
-  handleLoginError(error: BusinessError) {
+  handleLoginError(error: LoginErrorInfo) {
     // 显示错误信息给用户
     AlertDialog.show({
       title: '登录失败',
-      message: `错误代码: ${error.code}, 错误信息: ${error.message}`,
+      message: error.code !== undefined ? `错误代码: ${error.code}, 错误信息: ${error.message}` : `错误信息: ${error.message}`,
       confirm: {
         value: '确定',
         action: () => {
@@ -85,6 +100,21 @@ export struct HuaweiLoginPage {
         }
       }
     });
+  }
+
+  private normalizeError(error: BusinessError | Error ): LoginErrorInfo {
+    if (error && typeof error === 'object') {
+      const maybeBusiness = error as BusinessError;
+      const code = (maybeBusiness as BusinessError).code;
+      const message = (maybeBusiness as BusinessError).message ?? (maybeBusiness as Error).message;
+      if (message) {
+        return { code, message };
+      }
+    }
+    if (typeof error === 'string') {
+      return { message: error };
+    }
+    return { message: '登录失败，请稍后重试' };
   }
 
   // 检查登录状态

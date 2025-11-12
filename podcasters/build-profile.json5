@@ -83,6 +83,14 @@
     {
       "name": "module_imagepreview",
       "srcPath": "./components/module_imagepreview"
+    },
+    {
+      "name": "module_musicplay",
+      "srcPath": "./components/module_musicplay"
+    },
+    {
+      "name": "module_share",
+      "srcPath": "./components/module_share"
     }
   ]
 }

@@ -1,0 +1,128 @@
+{
+  "string": [
+    {
+      "name": "agcit_huawei_module_musicplay",
+      "value": "1.0.0"
+    },
+    {
+      "name": "agcittype_huawei_module_musicplay",
+      "value": "serviceComponent"
+    },
+    {
+      "name": "page_show",
+      "value": "page from package"
+    },
+    {
+      "name": "module_desc",
+      "value": "模块描述"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "description"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "MusicCard"
+    },
+    {
+      "name": "reason_background",
+      "value": "允许应用在播放音乐场景使用保持在后台运行的能力。"
+    },
+    {
+      "name": "collect",
+      "value": "收藏"
+    },
+    {
+      "name": "PhoneFormAbility_desc",
+      "value": "form_description"
+    },
+    {
+      "name": "PhoneFormAbility_label",
+      "value": "form_label"
+    },
+    {
+      "name": "widget_display_name_lyrics",
+      "value": "心动歌词"
+    },
+    {
+      "name": "widget_desc_lyrics",
+      "value": "让您心动的歌词"
+    },
+    {
+      "name": "widget_display_name_recommended",
+      "value": "音乐推荐"
+    },
+    {
+      "name": "widget_desc_recommended",
+      "value": "推荐您喜爱的音乐"
+    },
+    {
+      "name": "widget_display_name_control",
+      "value": "音乐播控"
+    },
+    {
+      "name": "widget_desc_control",
+      "value": "音乐播控卡片"
+    },
+    {
+      "name": "hot_playlists",
+      "value": "热门歌单"
+    },
+    {
+      "name": "my_collect",
+      "value": "我的收藏"
+    },
+    {
+      "name": "recommended",
+      "value": "推荐"
+    },
+    {
+      "name": "hot_music",
+      "value": "热门歌曲"
+    },
+    {
+      "name": "play_all",
+      "value": "播放全部 (%1$d)"
+    },
+    {
+      "name": "collected_label_synthesis",
+      "value": "综合"
+    },
+    {
+      "name": "collected_label_single",
+      "value": "单曲"
+    },
+    {
+      "name": "collected_label_video",
+      "value": "视频"
+    },
+    {
+      "name": "collected_label_playlists",
+      "value": "歌单"
+    },
+    {
+      "name": "tab_home",
+      "value": "首页"
+    },
+    {
+      "name": "tab_mine",
+      "value": "我的"
+    },
+    {
+      "name": "your_liked_music",
+      "value": "您喜爱的音乐"
+    },
+    {
+      "name": "pure_music_no_lyric",
+      "value": "此歌曲为纯音乐，请您欣赏"
+    },
+    {
+      "name": "current_play_list",
+      "value": "当前播放列表(%1$d)"
+    },
+    {
+      "name": "card_playlists_desc",
+      "value": "这个歌单都很好听"
+    }
+  ]
+}

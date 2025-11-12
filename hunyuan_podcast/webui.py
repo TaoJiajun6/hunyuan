@@ -1364,7 +1364,7 @@ def create_webui():
                             value=0.3,
                             step=0.1,
                             info="调整背景音乐音量（0.0-1.0），建议范围：0.2-0.4，避免盖过对话声音"
-                        )
+                    )
                     
                     gen_button_1 = gr.Button(
                         "🚀 生成播客",

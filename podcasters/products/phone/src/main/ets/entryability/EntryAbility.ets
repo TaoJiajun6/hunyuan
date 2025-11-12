@@ -6,7 +6,6 @@ import { NetworkUtils } from '../common/NetworkUtils';
 import { WindowUtils } from '../common/WindowUtils';
 import { AppUtils } from '../common/AppUtils';
 import { GlobalContext } from '../common/GlobalContext';
-
 const TAG = '[EntryAbility]';
 
 export default class EntryAbility extends UIAbility {
@@ -15,7 +14,6 @@ export default class EntryAbility extends UIAbility {
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam) {
     Logger.info(TAG, 'Ability onCreate');
-    // 初始化全局应用上下文
     GlobalContext.initContext(this.context);
     this.setNeedLoadContent(true);
   }

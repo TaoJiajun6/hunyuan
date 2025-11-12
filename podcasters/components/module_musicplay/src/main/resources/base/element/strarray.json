@@ -1,0 +1,109 @@
+{
+  "strarray": [
+    {
+      "name": "playlists_titles",
+      "value": [
+        {
+          "value": "Hot playlist 1"
+        },
+        {
+          "value": "Hot playlist 2"
+        },
+        {
+          "value": "Hot playlist 3"
+        },
+        {
+          "value": "Hot playlist 4"
+        }
+      ]
+    },
+    {
+      "name": "song_titles",
+      "value": [
+        {
+          "value": "Dream It Possible"
+        },
+        {
+          "value": "我不知道"
+        },
+        {
+          "value": "不忘初心"
+        },
+        {
+          "value": "我知道了"
+        },
+        {
+          "value": "哈哈哈"
+        },
+        {
+          "value": "好好学习"
+        },
+        {
+          "value": "明月几时有"
+        },
+        {
+          "value": "正儿八经"
+        },
+        {
+          "value": "喜欢你"
+        },
+        {
+          "value": "后来"
+        },
+        {
+          "value": "背对背拥抱"
+        },
+        {
+          "value": "真的爱你"
+        },
+        {
+          "value": "如愿"
+        }
+      ]
+    },
+    {
+      "name": "song_singers",
+      "value": [
+        {
+          "value": "Delacey"
+        },
+        {
+          "value": "名佚"
+        },
+        {
+          "value": "张三"
+        },
+        {
+          "value": "李四"
+        },
+        {
+          "value": "王五"
+        },
+        {
+          "value": "赵六"
+        },
+        {
+          "value": "名佚"
+        },
+        {
+          "value": "名佚"
+        },
+        {
+          "value": "小棋"
+        },
+        {
+          "value": "小英"
+        },
+        {
+          "value": "老杰"
+        },
+        {
+          "value": "Beyond"
+        },
+        {
+          "value": "小菲"
+        }
+      ]
+    }
+  ]
+}

@@ -16,10 +16,6 @@
         "name": "client_id",
         "value": "6917589177789044307"
       },
-      {
-        "name": "app_id",
-        "value": "6917589177789044307"
-      }
     ],
     "abilities": [
       {
@@ -31,6 +27,7 @@
         "startWindowIcon": "$media:icon_flip_foreground",
         "startWindowBackground": "$color:start_window_background",
         "exported": true,
+        "backgroundModes": ["audioPlayback"],// 按需配置支持的类型
         "skills": [
           {
             "entities": [
@@ -70,6 +67,16 @@
         "usedScene": {
           "abilities": [
             "EntryAbility"
+          ],
+          "when": "always"
+        }
+      },
+      {
+        "name": "ohos.permission.KEEP_BACKGROUND_RUNNING",
+        "reason": "$string:reason_background",
+        "usedScene": {
+          "abilities": [
+            "PhoneAbility"
           ],
           "when": "always"
         }
