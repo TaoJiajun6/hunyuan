@@ -585,9 +585,12 @@ def _load_agc_credentials_from_file(path: str) -> Tuple[Optional[str], Optional[
             j = json.load(f)
         client_id = j.get('client_id')
         client_secret = j.get('client_secret')
-        project_id = j.get('project_id') or j.get('project_id') or j.get('project_id')
+        # 尝试多种可能的字段名
+        project_id = j.get('project_id') or j.get('projectId') or j.get('projectId')
+        logger.info(f"从 {path} 读取配置: client_id={client_id[:8] if client_id else None}..., project_id={project_id}")
         return client_id, client_secret, project_id
-    except Exception:
+    except Exception as e:
+        logger.error(f"读取 AGC 凭证文件失败: {e}")
         return None, None, None
 
 
