@@ -4,6 +4,7 @@ import { Logger } from 'lib_common';
 import { SongItem } from 'module_musicplay';
 import { GlobalContext } from './GlobalContext';
 import { common } from '@kit.AbilityKit';
+import fs from '@ohos.file.fs';
 
 const TAG = 'CloudStorageMusicUtils';
 
@@ -194,6 +195,41 @@ export class CloudStorageMusicUtils {
   }
 
   /**
+   * 根据云存储路径生成稳定的本地文件路径
+   * @param cloudPath 云存储路径
+   * @param context 应用上下文
+   * @returns 本地文件路径
+   */
+  private static getLocalFilePath(cloudPath: string, context: common.UIAbilityContext): string {
+    // 使用云存储路径生成稳定的本地路径（将路径中的斜杠替换为下划线）
+    const safePath = cloudPath.replace(/\//g, '_').replace(/\\/g, '_');
+    // 保存到 filesDir/podcasts/ 目录，这是一个持久化目录
+    const podcastsDir = `${context.filesDir}/podcasts`;
+    // 确保目录存在
+    try {
+      if (!fs.accessSync(podcastsDir)) {
+        fs.mkdirSync(podcastsDir, true);
+      }
+    } catch (err) {
+      Logger.warn(TAG, `创建目录失败，尝试继续: ${err}`);
+    }
+    return `${podcastsDir}/${safePath}`;
+  }
+
+  /**
+   * 检查本地文件是否存在
+   * @param filePath 文件路径
+   * @returns 文件是否存在
+   */
+  private static isLocalFileExists(filePath: string): boolean {
+    try {
+      return fs.accessSync(filePath);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * 将云存储音频文件转换为 SongItem
    * @param audioFile 云存储音频文件信息
    * @returns Promise<SongItem> SongItem 对象
@@ -201,26 +237,57 @@ export class CloudStorageMusicUtils {
   static async convertToSongItem(audioFile: CloudAudioFile): Promise<SongItem> {
     const songItem = new SongItem();
     
-    // 生成唯一ID
-    songItem.id = `cloud_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    // 生成唯一ID（基于云存储路径，确保相同文件有相同ID）
+    const pathHash = audioFile.filePath.replace(/\//g, '_').replace(/\\/g, '_');
+    songItem.id = `cloud_${pathHash}`;
     
     // 从文件名提取标题（去掉扩展名）
     const fileNameWithoutExt = audioFile.fileName.replace(/\.[^/.]+$/, '');
     songItem.title = fileNameWithoutExt;
     songItem.singer = '云存储音频';
     
-    // 直接下载文件到本地，不通过URL形式
-    try {
-      Logger.info(TAG, `开始下载文件到本地: ${audioFile.filePath}`);
-      const localPath = await CloudStorageMusicUtils.downloadFile(audioFile.filePath, audioFile.fileName, true);
-      // 使用本地文件路径，MediaService 会识别为沙箱文件
-      songItem.src = localPath;
-      songItem.isLocal = true;
-      Logger.info(TAG, `文件已下载到本地: ${localPath}`);
-    } catch (downloadError) {
-      Logger.error(TAG, `下载文件失败: ${downloadError}`);
-      // 如果下载失败，设置为空字符串，后续播放时会跳过
+    // 获取上下文
+    let context = GlobalContext.getContext();
+    if (!context) {
+      const storedContext = AppStorage.get('context') as common.UIAbilityContext | undefined;
+      if (storedContext) {
+        GlobalContext.initContext(storedContext);
+        context = storedContext;
+      }
+    }
+    
+    if (!context) {
+      Logger.error(TAG, '无法获取上下文，无法下载文件');
       songItem.src = '';
+      return songItem;
+    }
+    
+    // 生成本地文件路径
+    const localFilePath = CloudStorageMusicUtils.getLocalFilePath(audioFile.filePath, context);
+    
+    // 检查文件是否已存在
+    if (CloudStorageMusicUtils.isLocalFileExists(localFilePath)) {
+      Logger.info(TAG, `文件已存在，跳过下载: ${localFilePath}`);
+      songItem.src = localFilePath;
+      songItem.isLocal = true;
+    } else {
+      // 文件不存在，需要下载
+      try {
+        Logger.info(TAG, `开始下载文件到本地: ${audioFile.filePath}`);
+        // 使用文件名作为下载路径，但保存到持久化目录
+        const downloadedPath = await CloudStorageMusicUtils.downloadFileToPersistent(
+          audioFile.filePath,
+          localFilePath,
+          false // 不覆盖已存在的文件
+        );
+        songItem.src = downloadedPath;
+        songItem.isLocal = true;
+        Logger.info(TAG, `文件已下载到本地: ${downloadedPath}`);
+      } catch (downloadError) {
+        Logger.error(TAG, `下载文件失败: ${downloadError}`);
+        // 如果下载失败，设置为空字符串，后续播放时会跳过
+        songItem.src = '';
+      }
     }
     
     // 设置其他属性
@@ -290,7 +357,139 @@ export class CloudStorageMusicUtils {
   }
 
   /**
-   * 下载云侧文件至本地
+   * 下载云侧文件至持久化目录
+   * @param cloudPath 云侧文件路径
+   * @param targetPath 目标文件完整路径（绝对路径）
+   * @param overwrite 是否覆盖已存在的文件，默认为 false
+   * @param onProgress 下载进度回调函数
+   * @returns Promise<string> 下载完成后的本地文件路径
+   */
+  static async downloadFileToPersistent(
+    cloudPath: string,
+    targetPath: string,
+    overwrite: boolean = false,
+    onProgress?: (progress: request.agent.Progress) => void
+  ): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      let context = GlobalContext.getContext();
+      if (!context) {
+        const storedContext = AppStorage.get('context') as common.UIAbilityContext | undefined;
+        if (storedContext) {
+          GlobalContext.initContext(storedContext);
+          context = storedContext;
+        }
+      }
+
+      if (!context) {
+        const errorObj = new Error('无法获取上下文，请确保GlobalContext已初始化');
+        reject(errorObj);
+        return;
+      }
+
+      // 检查文件是否已存在
+      if (!overwrite && CloudStorageMusicUtils.isLocalFileExists(targetPath)) {
+        Logger.info(TAG, `文件已存在，跳过下载: ${targetPath}`);
+        resolve(targetPath);
+        return;
+      }
+
+      // 确保目标目录存在
+      const targetDir = targetPath.substring(0, targetPath.lastIndexOf('/'));
+      try {
+        if (!fs.accessSync(targetDir)) {
+          fs.mkdirSync(targetDir, true);
+        }
+      } catch (err) {
+        Logger.warn(TAG, `创建目录失败: ${err}`);
+      }
+
+      const uiContext: common.UIAbilityContext = context;
+      // 提取文件名（相对路径，用于bucket.downloadFile的localPath参数）
+      const fileName = targetPath.split('/').pop() || cloudPath.split('/').pop() || `file_${Date.now()}`;
+      const tempFileName = `temp_${Date.now()}_${fileName}`;
+
+      const bucket = CloudStorageMusicUtils.getStorageBucket();
+      // 先下载到临时位置（cacheDir），然后移动到目标位置（filesDir）
+      // localPath 应该是相对路径，文件会保存在 context.cacheDir/localPath
+      bucket.downloadFile(uiContext, {
+        localPath: tempFileName, // 相对路径，文件会保存在 context.cacheDir/tempFileName
+        cloudPath: cloudPath,
+        overwrite: true
+      }).then((task: request.agent.Task) => {
+        // 监听下载进度
+        task.on('progress', (progress: request.agent.Progress) => {
+          Logger.info(TAG, `下载进度: ${JSON.stringify(progress)}`);
+          if (onProgress) {
+            onProgress(progress);
+          }
+        });
+
+        // 监听下载完成
+        task.on('completed', (progress: request.agent.Progress) => {
+          Logger.info(TAG, `下载完成: ${JSON.stringify(progress)}`);
+          // bucket.downloadFile 会将文件保存到 context.cacheDir/localPath
+          const tempFilePath = `${uiContext.cacheDir}/${tempFileName}`;
+          
+          // 将文件从临时位置移动到目标位置
+          try {
+            if (fs.accessSync(tempFilePath)) {
+              // 如果目标文件已存在，先删除
+              if (CloudStorageMusicUtils.isLocalFileExists(targetPath)) {
+                fs.unlinkSync(targetPath);
+              }
+              // 复制文件到目标位置
+              fs.copyFileSync(tempFilePath, targetPath);
+              // 删除临时文件
+              fs.unlinkSync(tempFilePath);
+              Logger.info(TAG, `文件已移动到持久化目录: ${targetPath}`);
+              resolve(targetPath);
+            } else {
+              reject(new Error('下载的文件不存在'));
+            }
+          } catch (moveError) {
+            Logger.error(TAG, `移动文件失败: ${moveError}`);
+            // 如果移动失败，尝试使用临时文件路径
+            if (fs.accessSync(tempFilePath)) {
+              Logger.warn(TAG, `使用临时文件路径: ${tempFilePath}`);
+              resolve(tempFilePath);
+            } else {
+              reject(new Error(`移动文件失败: ${moveError}`));
+            }
+          }
+        });
+
+        // 监听下载失败
+        task.on('failed', (progress: request.agent.Progress) => {
+          Logger.error(TAG, `下载失败: ${JSON.stringify(progress)}`);
+          const errorObj = new Error(`文件下载失败: ${JSON.stringify(progress)}`);
+          reject(errorObj);
+        });
+
+        // 监听响应
+        task.on('response', (response) => {
+          Logger.info(TAG, `下载响应: ${JSON.stringify(response)}`);
+        });
+
+        // 启动下载任务
+        task.start((err: BusinessError) => {
+          if (err) {
+            Logger.error(TAG, `启动下载任务失败, code: ${err.code}, message: ${err.message}`);
+            const errorObj = new Error(`启动下载任务失败: code=${err.code}, message=${err.message}`);
+            reject(errorObj);
+          } else {
+            Logger.info(TAG, `下载任务已启动, taskId: ${task.tid}`);
+          }
+        });
+      }).catch((err: BusinessError) => {
+        Logger.error(TAG, `创建下载任务失败, code: ${err.code}, message: ${err.message}`);
+        const errorObj = new Error(`创建下载任务失败: code=${err.code}, message=${err.message}`);
+        reject(errorObj);
+      });
+    });
+  }
+
+  /**
+   * 下载云侧文件至本地（兼容旧方法，保存到cacheDir）
    * @param cloudPath 云侧文件路径
    * @param localPath 本地文件路径（相对于 context.cacheDir），文件将会保存在context.cacheDir目录下
    * @param overwrite 是否覆盖已存在的文件，默认为 true

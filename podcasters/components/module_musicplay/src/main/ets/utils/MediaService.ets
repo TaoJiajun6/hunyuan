@@ -394,6 +394,14 @@ export class MediaService {
    * @param musicIndex
    */
   public controlPlay(musicIndex: number): void {
+    // 确保播放器已初始化
+    if (!this.avPlayer && this.changedData.songList.length > 0) {
+      const songToPlay = this.changedData.songList[musicIndex];
+      if (songToPlay) {
+        this.initAudioPlayer(this.changedData.songList, songToPlay);
+        return;
+      }
+    }
     this.isFirstLoadAsset = false;
     this.playByIndex(musicIndex);
   }
@@ -430,6 +438,14 @@ export class MediaService {
   }
 
   public play(): void {
+    // 如果播放器未初始化，尝试初始化
+    if (!this.avPlayer && this.changedData.songList.length > 0) {
+      const currentSong = this.changedData.currentSong || this.changedData.songList[0];
+      if (currentSong) {
+        this.initAudioPlayer(this.changedData.songList, currentSong);
+        return;
+      }
+    }
     if (!this.isPrepared) {
       this.prepare();
     } else {
@@ -518,10 +534,18 @@ export class MediaService {
   }
 
   public async playByIndex(musicIndex: number): Promise<void> {
-    if (musicIndex >= this.changedData.songList.length) {
+    if (musicIndex >= this.changedData.songList.length || musicIndex < 0) {
       Logger.error(TAG,
         `playByIndex error, index is ${musicIndex} out of songList length ${this.changedData.songList.length}`);
       return;
+    }
+    // 确保播放器已初始化
+    if (!this.avPlayer) {
+      const songToPlay = this.changedData.songList[musicIndex];
+      if (songToPlay) {
+        this.initAudioPlayer(this.changedData.songList, songToPlay);
+        return;
+      }
     }
     this.updateMusicIndex(musicIndex);
     await this.stop();
@@ -540,12 +564,27 @@ export class MediaService {
 
   private async loadAsset(currentSong?: SongItem): Promise<void> {
     if (currentSong) {
-      this.musicIndex = Number.parseInt(currentSong.id) - 1;
-      Logger.info(`loadAsset musicIndex: ${this.musicIndex}`);
+      // 通过ID查找索引，而不是直接解析ID为数字
+      const index = this.changedData.songList.findIndex(item => item.id === currentSong!.id);
+      if (index !== -1) {
+        this.musicIndex = index;
+      }
+      Logger.info(TAG, `loadAsset musicIndex: ${this.musicIndex}, songId: ${currentSong.id}`);
+    }
+
+    // 检查索引是否有效
+    if (this.musicIndex < 0 || this.musicIndex >= this.changedData.songList.length) {
+      Logger.error(TAG, `loadAsset error, invalid musicIndex: ${this.musicIndex}, songList length: ${this.changedData.songList.length}`);
+      return;
     }
 
     // 播放歌曲
-    currentSong = this.changedData.songList[this.musicIndex];
+    const songToPlay = this.changedData.songList[this.musicIndex];
+    if (!songToPlay) {
+      Logger.error(TAG, `loadAsset error, song at index ${this.musicIndex} is undefined`);
+      return;
+    }
+    currentSong = songToPlay;
 
     if (currentSong.src.startsWith('http')) {
       // 根据歌曲地址判断是否网络歌曲
@@ -576,17 +615,26 @@ export class MediaService {
    * @param currentSong
    */
   loadAssetHttp(currentSong: SongItem) {
+    if (!this.avPlayer) {
+      Logger.error(TAG, 'loadAssetHttp error, avPlayer is not initialized');
+      return;
+    }
     // 根据音质获取对应 URL
     let qualityUrl = this.getUrlByQuality(currentSong)
     qualityUrl = qualityUrl === '' ? currentSong.src : qualityUrl;
     // 网络歌曲处理
     if (this.avPlayer) {
       this.avPlayer.url = qualityUrl;
+      Logger.info(TAG, `loadAssetHttp success, url: ${qualityUrl}`);
     }
   }
 
   //加载沙箱歌曲
   async loadAssetSandbox(currentSong: SongItem) {
+    if (!this.avPlayer) {
+      Logger.error(TAG, 'loadAssetSandbox error, avPlayer is not initialized');
+      return;
+    }
     let file: fs.File | null = null;
     try {
       // 本地歌曲处理
@@ -595,10 +643,15 @@ export class MediaService {
       fdPath = fdPath + '' + file.fd;
       if (this.avPlayer) {
         this.avPlayer.url = fdPath;
+        Logger.info(TAG, `loadAssetSandbox success, file path: ${currentSong.src}, fd: ${file.fd}`);
       }
     } catch (error) {
       let err: BusinessError = error as BusinessError;
-      Logger.error(TAG, 'loadAsset', ` err: ${err.code}, ${err.message}`);
+      Logger.error(TAG, `loadAssetSandbox error, file path: ${currentSong.src}, err: ${err.code}, ${err.message}`);
+      promptAction.showToast({
+        message: `加载音频失败: ${err.message || String(err)}`,
+        duration: 3000
+      });
     } finally {
       if (file) {
         setTimeout(() => {
