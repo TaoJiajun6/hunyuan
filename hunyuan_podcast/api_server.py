@@ -191,13 +191,35 @@ async def log_requests(request: Request, call_next):
                     
                     # 检查必需字段
                     if path == "/api/v1/podcast/multi_role":
-                        has_text = body_json.get("text") and str(body_json.get("text")).strip()
+                        has_text = body_json.get("text") and str(body_json.get("text")).strip() and str(body_json.get("text")).strip() != "长度: 0 字符"
                         has_text_file = body_json.get("text_file_url") and str(body_json.get("text_file_url")).strip()
+                        has_input_url = body_json.get("input_url") and str(body_json.get("input_url")).strip()
                         has_voice_urls = body_json.get("role_voice_urls") and len(body_json.get("role_voice_urls", {})) > 0
                         has_voices = body_json.get("role_voices") and len(body_json.get("role_voices", {})) > 0
+                        input_type = body_json.get("input_type", "").strip()
                         
-                        if not has_text and not has_text_file:
-                            logger.error("缺少必需字段: text 或 text_file_url 至少需要一个")
+                        # 根据输入类型验证必需的输入
+                        url_types = ["公众号", "公众号+指令", "网页"]
+                        text_types = ["文字", "文字+指令", "文字+英文指令"]
+                        file_types = ["文件", "文件+指令"]
+                        
+                        # 对于URL类型（公众号、网页），不需要text或text_file_url
+                        if input_type in url_types:
+                            if not has_input_url and not has_text_file:
+                                logger.error(f"{input_type}类型需要提供input_url或text_file_url")
+                        # 对于文字类型，需要text
+                        elif input_type in text_types:
+                            if not has_text:
+                                logger.error(f"{input_type}类型需要提供text字段")
+                        # 对于文件类型，需要text_file_url
+                        elif input_type in file_types:
+                            if not has_text_file:
+                                logger.error(f"{input_type}类型需要提供text_file_url字段")
+                        # 对于未知类型，至少需要text、text_file_url或input_url之一
+                        else:
+                            if not has_text and not has_text_file and not has_input_url:
+                                logger.error("缺少必需字段: text、text_file_url或input_url至少需要一个")
+                        
                         if not has_voice_urls and not has_voices:
                             logger.error("缺少必需字段: role_voice_urls 或 role_voices 至少需要一个")
                 except ValueError as e:  # json.JSONDecodeError是ValueError的子类
@@ -1167,7 +1189,11 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
             
             # 生成播客
             logger.info("开始生成播客音频...")
-            _update_progress(request.job_id, "generating", 25, "正在生成语音与合成音频")
+            logger.info(f"对话段数: {len(processor.parse_role_text(text_content))} 段")
+            logger.info("提示：SoulX-Podcast需要逐段生成音频，这是最耗时的步骤")
+            logger.info("     每段对话需要经过：LLM生成 -> Flow生成 -> HiFi-GAN生成")
+            logger.info("     对于4-5分钟的播客（30-60段对话），预计需要2-5分钟")
+            _update_progress(request.job_id, "generating", 25, "正在生成语音与合成音频（这可能需要几分钟，请耐心等待）")
             generation_start = time.time()
             output_path = gen.generate_from_text(
                 text=text_content,

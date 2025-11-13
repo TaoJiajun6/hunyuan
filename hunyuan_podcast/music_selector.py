@@ -150,6 +150,105 @@ class MusicSelector:
         # 默认风格
         return "general"
     
+    def scan_music_files_metadata_only(self) -> List[Dict[str, str]]:
+        """
+        扫描音乐文件，只获取元数据，不预下载文件
+        优化性能：避免在扫描时下载所有文件
+        
+        Returns:
+            音乐文件列表，每个元素包含 {'path': 文件路径（可能为None）, 'name': 文件名, 'style': 推断的风格, 'cloud_path': 云存储路径（如果有）, 'url': 下载URL（如果有）}
+        """
+        music_files = []
+        
+        # 优先尝试从云存储获取（只获取列表，不下载）
+        if self.cloud_client:
+            try:
+                print(f"尝试从云存储获取音乐文件列表 (bucket: {self.cloud_client.bucket}, path: {self.cloud_client.music_path})")
+                cloud_files = self.cloud_client.list_music_files()
+                if cloud_files:
+                    print(f"✓ 从云存储获取到 {len(cloud_files)} 个音乐文件（仅元数据，未下载）")
+                    # 不预下载，只返回元数据
+                    return cloud_files
+                else:
+                    print("⚠️ 云存储中没有找到音乐文件，将尝试使用本地文件")
+            except Exception as e:
+                import traceback
+                print(f"✗ 从云存储获取音乐文件失败: {str(e)}")
+                print(f"  错误详情: {traceback.format_exc()}")
+                print("  将尝试使用本地文件")
+        
+        # 如果云存储不可用，使用本地文件系统
+        if not os.path.exists(self.music_dir):
+            print(f"警告：音乐文件夹不存在: {self.music_dir}")
+            if self.cloud_client:
+                print(f"提示：请确保云存储中有 music/ 文件夹，或创建本地音乐目录: {self.music_dir}")
+            return []
+        
+        # 支持的音频格式
+        audio_extensions = ['*.mp3', '*.wav', '*.m4a', '*.flac', '*.ogg']
+        
+        for ext in audio_extensions:
+            pattern = os.path.join(self.music_dir, ext)
+            files = glob.glob(pattern)
+            for file_path in files:
+                filename = os.path.basename(file_path)
+                # 从文件名推断风格
+                style = self._infer_style_from_filename(filename)
+                music_files.append({
+                    'path': file_path,
+                    'name': filename,
+                    'style': style
+                })
+        
+        print(f"从本地扫描到 {len(music_files)} 个音乐文件")
+        return music_files
+    
+    def _download_music_if_needed(self, music_info: Dict[str, str]) -> Optional[str]:
+        """
+        如果需要，下载音乐文件到本地
+        
+        Args:
+            music_info: 音乐文件信息字典
+        
+        Returns:
+            本地文件路径，如果下载失败则返回None
+        """
+        music_path = music_info.get('path')
+        
+        # 如果已经有本地路径且文件存在，直接使用
+        if music_path and os.path.exists(music_path):
+            return music_path
+        
+        # 如果有URL，尝试下载
+        if 'url' in music_info and music_info['url'] and self.cloud_client:
+            print(f"  正在下载选中的音乐文件: {music_info.get('name', 'unknown')}")
+            local_path = self.cloud_client.get_music_by_url(music_info['url'])
+            if local_path:
+                print(f"    ✓ 下载成功: {local_path}")
+                return local_path
+            else:
+                print(f"    ✗ 下载失败: {music_info.get('url')}")
+                return None
+        
+        # 如果有云存储路径，尝试下载
+        if 'cloud_path' in music_info and music_info['cloud_path'] and self.cloud_client:
+            print(f"  正在下载选中的音乐文件: {music_info.get('name', 'unknown')}")
+            cloud_path = music_info['cloud_path']
+            local_path = self.cloud_client.download_music_file(cloud_path)
+            if local_path:
+                print(f"    ✓ 下载成功: {local_path}")
+                return local_path
+            else:
+                print(f"    ✗ 下载失败: {cloud_path}")
+                return None
+        
+        # 如果有本地路径但文件不存在
+        if music_path:
+            print(f"  警告：音乐文件不存在: {music_path}")
+            return None
+        
+        return None
+    
     def select_music_by_ai(
         self,
         text: str,
@@ -171,16 +270,22 @@ class MusicSelector:
         Returns:
             选中的音乐文件路径列表
         """
-        # 扫描音乐文件
-        music_files = self.scan_music_files()
+        # 扫描音乐文件（只获取文件列表，不预下载）
+        # 优化：先选择音乐，再下载选中的文件，避免下载所有文件
+        music_files = self.scan_music_files_metadata_only()
         if not music_files:
             print(f"警告：没有找到音乐文件（音乐目录: {self.music_dir}）")
             print(f"提示：请确保音乐文件位于 {self.music_dir} 目录下")
             return []
         
-        # 如果只有一个音乐文件，直接返回
+        # 如果只有一个音乐文件，直接下载并返回
         if len(music_files) == 1:
-            return [music_files[0]['path']]
+            music_info = music_files[0]
+            local_path = self._download_music_if_needed(music_info)
+            if local_path:
+                return [local_path]
+            else:
+                return []
         
         # 构建选择提示词
         music_list_str = "\n".join([
@@ -254,32 +359,15 @@ class MusicSelector:
                 # 限制数量
                 valid_indices = valid_indices[:num_music]
                 
-                # 获取选中的音乐文件路径
+                # 获取选中的音乐文件路径（只下载选中的文件）
                 selected_music = []
                 for idx in valid_indices:
                     music_info = music_files[idx]
-                    music_path = music_info.get('path')
-                    
-                    # 如果已经有本地路径，直接使用
-                    if music_path and os.path.exists(music_path):
-                        selected_music.append(music_path)
-                    # 如果有URL，尝试下载
-                    elif 'url' in music_info and music_info['url'] and self.cloud_client:
-                        local_path = self.cloud_client.get_music_by_url(music_info['url'])
-                        if local_path:
-                            selected_music.append(local_path)
-                        else:
-                            print(f"警告：无法下载云存储文件 {music_info.get('url')}，跳过")
-                    # 如果有云存储路径，尝试下载
-                    elif 'cloud_path' in music_info and self.cloud_client:
-                        cloud_path = music_info['cloud_path']
-                        local_path = self.cloud_client.download_music_file(cloud_path)
-                        if local_path:
-                            selected_music.append(local_path)
-                        else:
-                            print(f"警告：无法下载云存储文件 {cloud_path}，跳过")
-                    elif music_path:
-                        selected_music.append(music_path)
+                    local_path = self._download_music_if_needed(music_info)
+                    if local_path:
+                        selected_music.append(local_path)
+                    else:
+                        print(f"警告：无法下载音乐文件 {music_info.get('name', 'unknown')}，跳过")
                 
                 reason = result.get("reason", "AI自动选择")
                 print(f"AI选择音乐: {[os.path.basename(p) for p in selected_music]}")
