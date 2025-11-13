@@ -25,7 +25,7 @@ export class PodcastConfig {
   // 5. 直连服务器IP（推荐，避免网关超时）：设置为服务器的公网/内网IP和端口
   //    例如：'http://9.165.4.87:8000' 或 'http://192.168.1.100:8000'
   //    注意：确保服务器防火墙允许8000端口访问
-  static readonly API_BASE_URL: string = 'http://129.226.93.84:8000/'; // 请替换为实际的服务器IP地址
+  static readonly API_BASE_URL: string = 'http://43.134.54.169:8000/'; // 请替换为实际的服务器IP地址
   static readonly API_TIMEOUT: number = 600000; // 10分钟超时（考虑大文件上传和播客生成时间）
 
 
@@ -65,7 +65,7 @@ export interface CharacterInfo {
 export interface MultiRoleRequest {
   text?: string; // 播客文本（如果使用text_file_url或input_url，此字段可为空）
   text_file_url?: string; // 文本文件云存储URL（.txt或Word文件，如果提供，优先使用）
-  input_type?: string; // 输入类型，可选值：文字、文字+指令、公众号、公众号+指令、网页、PDF、PDF+指令、文字+英文指令
+  input_type?: string; // 输入类型，可选值：文字、文字+指令、公众号、公众号+指令、网页、文件、文件+指令、文字+英文指令
   input_url?: string; // 输入URL（用于公众号、网页、PDF等类型）
   instruction?: string; // 指令内容（可选，用于控制播客生成过程）
   role_voice_urls: Record<string, string>; // 角色名 -> 云存储URL（必需，后端强制要求）
@@ -83,6 +83,7 @@ export interface MultiRoleRequest {
   character_3_personality?: string; // 角色3性格特点（可选）
   character_3_speaking_style?: string; // 角色3说话风格（可选）
   scene_types?: string[]; // 互动场景类型列表（可选）
+  category?: string; // 播客分类（可选），如：商业、科技、财经、新闻、影视、自我成长与自愈、职场万象、学习类、娱乐八卦类、考题、文化艺术、职场类—人际关系、学生类—求职就业、健康养生、运动健身、旅游、美食、教育育儿、情感恋爱、历史、心理学、音乐、体育、游戏电竞、时尚美妆、汽车、法律、创业创新、哲学思考、科学科普、读书阅读、生活方式、喜剧、宠物等
   job_id?: string; // 可选任务ID，用于轮询进度
 }
 
@@ -172,6 +173,7 @@ class MultiRoleRequestBody {
   character_3_personality?: string;
   character_3_speaking_style?: string;
   scene_types?: string[];
+  category?: string;
   job_id?: string;
 
   constructor(
@@ -195,6 +197,7 @@ class MultiRoleRequestBody {
     character_3_personality?: string,
     character_3_speaking_style?: string,
     scene_types?: string[],
+    category?: string,
     job_id?: string
   ) {
     this.text = text;
@@ -217,6 +220,7 @@ class MultiRoleRequestBody {
     this.character_3_personality = character_3_personality;
     this.character_3_speaking_style = character_3_speaking_style;
     this.scene_types = scene_types;
+    this.category = category;
     this.job_id = job_id;
   }
 }
@@ -541,6 +545,7 @@ export class PodcastService {
           request.character_3_personality,
           request.character_3_speaking_style,
           request.scene_types,
+          request.category,
           request.job_id
         );
 
