@@ -307,13 +307,17 @@ class PodcastGenerator:
                         background_audio = background_audios[0]
                 
                 print(f"正在混合背景音乐（ducking效果: 启用，音量: {background_volume}）...")
+                print(f"播放策略: intro 5秒 -> 对话（ducking）-> outro 5秒")
                 
                 main_audio = mix_audio_with_background(
                     main_audio,
                     background_audio,
                     background_volume=background_volume,
                     background_mode=background_mode,
-                    enable_ducking=True  # 启用ducking效果
+                    enable_ducking=True,  # 启用ducking效果
+                    intro_duration_ms=5000,  # 开场音乐5秒
+                    outro_duration_ms=5000,  # 结束音乐5秒
+                    remove_background_silence=True  # 去除背景音乐中的静音段
                 )
                 print("✓ 背景音乐混合完成")
                 final_audio = main_audio
