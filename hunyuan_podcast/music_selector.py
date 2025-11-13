@@ -1,6 +1,7 @@
 """
 音乐自动选择模块
 使用AI分析文本内容，自动从音乐库中选择合适的背景音乐
+支持本地文件系统和云存储两种方式
 """
 import os
 import glob
@@ -9,6 +10,7 @@ import json
 from typing import List, Optional, Dict
 from .config import MUSIC_DIR
 from .api_client import get_client
+from .cloud_storage_music import get_cloud_music_client, CloudStorageMusicClient
 
 
 class MusicSelector:
@@ -25,32 +27,88 @@ class MusicSelector:
         "intro": ["开场", "介绍", "intro", "opening"]
     }
     
-    def __init__(self, music_dir: Optional[str] = None):
+    def __init__(self, music_dir: Optional[str] = None, use_cloud_storage: bool = True):
         """
         初始化音乐选择器
         
         Args:
             music_dir: 音乐文件夹路径，如果为None则使用默认路径
+            use_cloud_storage: 是否优先使用云存储，默认True
         """
         self.music_dir = music_dir or MUSIC_DIR
         self.api_client = get_client()
         self._music_cache: Optional[List[Dict[str, str]]] = None
+        self.use_cloud_storage = use_cloud_storage
+        self.cloud_client: Optional[CloudStorageMusicClient] = None
+        
+        # 如果启用云存储，尝试初始化云存储客户端
+        if self.use_cloud_storage:
+            self.cloud_client = get_cloud_music_client()
+            if self.cloud_client:
+                print("已启用云存储音乐支持")
+            else:
+                print("云存储配置不完整，将使用本地音乐文件")
     
     def scan_music_files(self) -> List[Dict[str, str]]:
         """
         扫描音乐文件夹，获取所有音乐文件
+        优先从云存储获取，如果云存储不可用则使用本地文件
         
         Returns:
-            音乐文件列表，每个元素包含 {'path': 文件路径, 'name': 文件名, 'style': 推断的风格}
+            音乐文件列表，每个元素包含 {'path': 文件路径, 'name': 文件名, 'style': 推断的风格, 'cloud_path': 云存储路径（如果有）}
         """
         if self._music_cache is not None:
             return self._music_cache
         
+        music_files = []
+        
+        # 优先尝试从云存储获取
+        if self.cloud_client:
+            try:
+                print(f"尝试从云存储获取音乐文件 (bucket: {self.cloud_client.bucket}, path: {self.cloud_client.music_path})")
+                cloud_files = self.cloud_client.list_music_files()
+                if cloud_files:
+                    print(f"✓ 从云存储获取到 {len(cloud_files)} 个音乐文件")
+                    # 预下载所有云存储文件到本地缓存
+                    downloaded_count = 0
+                    for i, music_info in enumerate(cloud_files, 1):
+                        if 'url' in music_info and music_info['url']:
+                            print(f"  [{i}/{len(cloud_files)}] 下载音乐文件: {music_info.get('name', 'unknown')}")
+                            local_path = self.cloud_client.get_music_by_url(music_info['url'])
+                            if local_path:
+                                music_info['path'] = local_path
+                                downloaded_count += 1
+                                print(f"    ✓ 下载成功: {local_path}")
+                            else:
+                                print(f"    ✗ 下载失败: {music_info['url']}")
+                        elif 'cloud_path' in music_info and music_info['cloud_path']:
+                            print(f"  [{i}/{len(cloud_files)}] 下载音乐文件: {music_info.get('name', 'unknown')}")
+                            local_path = self.cloud_client.download_music_file(music_info['cloud_path'])
+                            if local_path:
+                                music_info['path'] = local_path
+                                downloaded_count += 1
+                                print(f"    ✓ 下载成功: {local_path}")
+                            else:
+                                print(f"    ✗ 下载失败: {music_info['cloud_path']}")
+                    print(f"✓ 成功下载 {downloaded_count}/{len(cloud_files)} 个音乐文件到本地缓存")
+                    self._music_cache = cloud_files
+                    return cloud_files
+                else:
+                    print("⚠️ 云存储中没有找到音乐文件，将尝试使用本地文件")
+            except Exception as e:
+                import traceback
+                print(f"✗ 从云存储获取音乐文件失败: {str(e)}")
+                print(f"  错误详情: {traceback.format_exc()}")
+                print("  将尝试使用本地文件")
+        
+        # 如果云存储不可用，使用本地文件系统
         if not os.path.exists(self.music_dir):
             print(f"警告：音乐文件夹不存在: {self.music_dir}")
+            # 如果配置了云存储但本地目录不存在，提示用户
+            if self.cloud_client:
+                print(f"提示：请确保云存储中有 music/ 文件夹，或创建本地音乐目录: {self.music_dir}")
             return []
         
-        music_files = []
         # 支持的音频格式
         audio_extensions = ['*.mp3', '*.wav', '*.m4a', '*.flac', '*.ogg']
         
@@ -68,7 +126,7 @@ class MusicSelector:
                 })
         
         self._music_cache = music_files
-        print(f"扫描到 {len(music_files)} 个音乐文件")
+        print(f"从本地扫描到 {len(music_files)} 个音乐文件")
         return music_files
     
     def _infer_style_from_filename(self, filename: str) -> str:
@@ -116,7 +174,8 @@ class MusicSelector:
         # 扫描音乐文件
         music_files = self.scan_music_files()
         if not music_files:
-            print("警告：没有找到音乐文件")
+            print(f"警告：没有找到音乐文件（音乐目录: {self.music_dir}）")
+            print(f"提示：请确保音乐文件位于 {self.music_dir} 目录下")
             return []
         
         # 如果只有一个音乐文件，直接返回
@@ -195,7 +254,32 @@ class MusicSelector:
                 # 限制数量
                 valid_indices = valid_indices[:num_music]
                 
-                selected_music = [music_files[idx]['path'] for idx in valid_indices]
+                # 获取选中的音乐文件路径
+                selected_music = []
+                for idx in valid_indices:
+                    music_info = music_files[idx]
+                    music_path = music_info.get('path')
+                    
+                    # 如果已经有本地路径，直接使用
+                    if music_path and os.path.exists(music_path):
+                        selected_music.append(music_path)
+                    # 如果有URL，尝试下载
+                    elif 'url' in music_info and music_info['url'] and self.cloud_client:
+                        local_path = self.cloud_client.get_music_by_url(music_info['url'])
+                        if local_path:
+                            selected_music.append(local_path)
+                        else:
+                            print(f"警告：无法下载云存储文件 {music_info.get('url')}，跳过")
+                    # 如果有云存储路径，尝试下载
+                    elif 'cloud_path' in music_info and self.cloud_client:
+                        cloud_path = music_info['cloud_path']
+                        local_path = self.cloud_client.download_music_file(cloud_path)
+                        if local_path:
+                            selected_music.append(local_path)
+                        else:
+                            print(f"警告：无法下载云存储文件 {cloud_path}，跳过")
+                    elif music_path:
+                        selected_music.append(music_path)
                 
                 reason = result.get("reason", "AI自动选择")
                 print(f"AI选择音乐: {[os.path.basename(p) for p in selected_music]}")
@@ -260,8 +344,21 @@ class MusicSelector:
         # 按分数排序
         scores.sort(key=lambda x: x[0], reverse=True)
         
-        # 选择前num_music个
-        selected = [music['path'] for _, music in scores[:num_music]]
+        # 选择前num_music个，处理云存储文件
+        selected = []
+        for _, music in scores[:num_music]:
+            music_path = music.get('path')
+            
+            # 如果是云存储文件，需要先下载
+            if 'cloud_path' in music and self.cloud_client:
+                cloud_path = music['cloud_path']
+                local_path = self.cloud_client.download_music_file(cloud_path)
+                if local_path:
+                    selected.append(local_path)
+                else:
+                    print(f"警告：无法下载云存储文件 {cloud_path}，跳过")
+            elif music_path:
+                selected.append(music_path)
         
         print(f"基于关键词选择音乐: {[os.path.basename(p) for p in selected]}")
         return selected

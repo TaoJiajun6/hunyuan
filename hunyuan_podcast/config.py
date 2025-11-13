@@ -26,7 +26,7 @@ DEFAULT_MAX_TOKENS = 2000
 DEFAULT_TOP_P = 0.9
 
 # 音频合成配置
-AUDIO_SILENCE_INTERVAL = 300  # 角色切换时的静音间隔（毫秒）
+AUDIO_SILENCE_INTERVAL = 600  # 角色切换时的静音间隔（毫秒），默认600ms以增加角色之间的间隔
 AUDIO_SAMPLING_RATE = 22050
 
 # 输出目录（使用绝对路径，确保无论从哪里运行都能正确保存）
@@ -39,4 +39,8 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 _music_dir_index_tts = os.path.join(_project_root, "index-tts", "music")
 _music_dir_default = os.path.join(_project_root, "music")
 MUSIC_DIR = _music_dir_index_tts if os.path.exists(_music_dir_index_tts) else _music_dir_default
+
+# 云存储音乐配置
+# 云存储音乐文件夹路径（相对于bucket的路径）
+CLOUD_STORAGE_MUSIC_PATH = os.getenv('CLOUD_STORAGE_MUSIC_PATH', 'music/')
 

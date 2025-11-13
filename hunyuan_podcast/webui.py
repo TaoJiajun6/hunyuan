@@ -83,18 +83,41 @@ def wrap_multi_role_podcast(
     background_music_processed = None
     if auto_select_music:
         # AI自动选择音乐
-        from .music_selector import MusicSelector
-        selector = MusicSelector()
-        background_music_processed = selector.select_music_by_ai(
-            text=text,
-            podcast_name=podcast_name if podcast_name and podcast_name.strip() else None,
-            topic=topic if topic and topic.strip() else None,
-            scene_types=scene_types if scene_types else None,
-            num_music=1
-        )
+        try:
+            print("=" * 60)
+            print("开始AI自动选择背景音乐...")
+            from .music_selector import MusicSelector
+            selector = MusicSelector(use_cloud_storage=True)
+            background_music_processed = selector.select_music_by_ai(
+                text=text,
+                podcast_name=podcast_name if podcast_name and podcast_name.strip() else None,
+                topic=topic if topic and topic.strip() else None,
+                scene_types=scene_types if scene_types else None,
+                num_music=1
+            )
+            # 如果AI选择返回空列表，设置为None
+            if isinstance(background_music_processed, list) and len(background_music_processed) == 0:
+                print("⚠️ AI选择音乐返回空列表")
+                background_music_processed = None
+            elif background_music_processed:
+                print(f"✓ AI选择的背景音乐: {background_music_processed}")
+                for i, music_path in enumerate(background_music_processed, 1):
+                    if music_path and os.path.exists(music_path):
+                        print(f"  [{i}] {os.path.basename(music_path)} ({music_path})")
+                    else:
+                        print(f"  [{i}] ⚠️ 文件不存在: {music_path}")
+            else:
+                print("⚠️ AI选择音乐返回None")
+            print("=" * 60)
+        except Exception as e:
+            import traceback
+            print(f"✗ AI自动选择音乐失败: {str(e)}")
+            print(f"  错误详情: {traceback.format_exc()}")
+            background_music_processed = None
     else:
         # 手动上传的音乐
         background_music_processed = process_file_input(background_music)
+        print(f"手动上传的背景音乐: {background_music_processed}")
     
     audio_path, status, script = generate_multi_role_podcast(
         text, role_a_voice, role_b_voice, role_c_voice, silence_interval,
@@ -319,7 +342,7 @@ def generate_multi_role_podcast(
     role_a_voice: Optional[str],
     role_b_voice: Optional[str],
     role_c_voice: Optional[str],
-    silence_interval: int = 300,
+    silence_interval: int = 600,  # 默认600ms，增加角色之间的间隔
     podcast_name: Optional[str] = None,
     topic: Optional[str] = None,
     character_1_name: Optional[str] = None,
@@ -431,7 +454,7 @@ def generate_multi_role_podcast(
                     generated_text = api_client.generate_text(
                         prompt=prompt,
                         temperature=0.8,
-                        max_tokens=2500
+                        max_tokens=5000  # 增加到5000以支持4-5分钟的对话内容
                     )
                     
                     if verbose:
@@ -571,8 +594,6 @@ def generate_multi_role_podcast(
                 text=text,
                 role_voices=role_voices,
                 silence_interval=silence_interval,
-                intro_music=intro_music,
-                outro_music=outro_music,
                 background_music=background_music,
                 background_volume=background_volume,
                 background_mode=background_mode,
@@ -1372,11 +1393,11 @@ def create_webui():
                     
                     silence_interval = gr.Slider(
                         label="⏱️ 角色切换静音间隔（毫秒）",
-                        minimum=100,
-                        maximum=1000,
-                        value=300,
+                        minimum=200,
+                        maximum=1500,
+                        value=600,
                         step=50,
-                        info="调整角色之间的静音间隔，建议范围：200-500毫秒"
+                        info="调整角色之间的静音间隔，建议范围：400-800毫秒。较大的间隔可以让对话更清晰，节奏更舒缓。"
                     )
                     
                     # 音效设置（折叠面板）
