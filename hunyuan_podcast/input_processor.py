@@ -414,8 +414,17 @@ class InputProcessor:
         if "+指令" in input_type or "+instruction" in input_type_lower or "+英文指令" in input_type:
             has_instruction = True
         
+        # 提取基础类型（去掉指令后缀）
+        base_type = input_type_lower
+        if "+指令" in input_type:
+            base_type = input_type.split("+指令")[0].lower().strip()
+        elif "+instruction" in input_type_lower:
+            base_type = input_type_lower.split("+instruction")[0].strip()
+        elif "+英文指令" in input_type:
+            base_type = input_type.split("+英文指令")[0].lower().strip()
+        
         # 根据输入类型处理
-        if input_type_lower in ["文字", "text"]:
+        if base_type in ["文字", "text"] or input_type_lower in ["文字", "text"]:
             # 纯文字输入
             if not input_content:
                 raise ValueError("文字类型需要提供 input_content 参数")
@@ -425,8 +434,8 @@ class InputProcessor:
             if has_instruction:
                 extracted_text, extracted_instruction = self.parse_instruction(extracted_text)
             
-        elif input_type_lower in ["公众号", "wechat", "微信公众号"]:
-            # 微信公众号文章
+        elif base_type in ["公众号", "wechat", "微信公众号"] or "公众号" in input_type_lower or "wechat" in input_type_lower:
+            # 微信公众号文章（支持"公众号"、"公众号+指令"等）
             if not input_url:
                 raise ValueError("公众号类型需要提供 input_url 参数")
             extracted_text = self.extract_text_from_wechat_article(input_url)
@@ -435,13 +444,13 @@ class InputProcessor:
             if has_instruction:
                 extracted_text, extracted_instruction = self.parse_instruction(extracted_text)
                 
-        elif input_type_lower in ["网页", "webpage", "web"]:
+        elif base_type in ["网页", "webpage", "web"] or input_type_lower in ["网页", "webpage", "web"]:
             # 网页内容
             if not input_url:
                 raise ValueError("网页类型需要提供 input_url 参数")
             extracted_text = self.extract_text_from_webpage(input_url)
             
-        elif input_type_lower in ["pdf"]:
+        elif base_type in ["pdf"] or input_type_lower in ["pdf"]:
             # PDF文件（优先使用文件路径，如果没有则使用URL）
             if input_file_path:
                 extracted_text = self.extract_text_from_pdf_file(input_file_path)

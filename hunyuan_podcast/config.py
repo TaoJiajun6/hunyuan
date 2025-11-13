@@ -3,6 +3,39 @@
 """
 import os
 from typing import Optional
+from pathlib import Path
+
+# 加载 .env 文件（如果存在）
+def _load_dotenv_if_exists():
+    """
+    读取项目根目录下的 .env（可选），用于持久化环境变量。
+    支持的格式：KEY=VALUE 或 KEY="VALUE"
+    """
+    try:
+        # 获取项目根目录（相对于当前文件）
+        current_file_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(current_file_dir)
+        env_path = Path(project_root) / ".env"
+        
+        if not env_path.exists():
+            return
+        
+        print(f"📝 检测到 .env 文件，正在加载环境变量: {env_path}")
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            if k and v and k not in os.environ:
+                os.environ[k] = v
+                print(f"   ✓ 加载: {k}={v}")
+    except Exception as e:
+        print(f"⚠️  加载 .env 失败: {e}")
+
+# 在导入配置之前加载 .env 文件
+_load_dotenv_if_exists()
 
 # 硅基流动API配置
 # 请在此处直接配置您的API密钥（从 https://cloud.siliconflow.cn 获取）

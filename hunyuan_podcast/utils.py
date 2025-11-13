@@ -204,6 +204,96 @@ def trim_silence(audio: torch.Tensor, sr: int = AUDIO_SAMPLING_RATE, threshold: 
     return audio_np
 
 
+def remove_silence_segments(
+    audio: torch.Tensor,
+    sr: int = AUDIO_SAMPLING_RATE,
+    threshold: float = 0.01,
+    min_silence_duration_ms: int = 200
+) -> torch.Tensor:
+    """
+    去除音频中的静音段（包括中间的静音）
+    
+    Args:
+        audio: 音频张量，形状为 (1, samples) 或 (samples,)
+        sr: 采样率
+        threshold: 静音阈值（绝对值）
+        min_silence_duration_ms: 最小静音时长（毫秒），小于此值的静音段不会被去除
+    
+    Returns:
+        处理后的音频张量
+    """
+    # 确保是1D张量
+    if audio.dim() > 1:
+        if audio.shape[0] == 1:
+            audio = audio.squeeze(0)
+        else:
+            audio = torch.mean(audio, dim=0)
+    
+    audio_np = audio.cpu().numpy() if isinstance(audio, torch.Tensor) else audio
+    
+    # 找到非静音的位置
+    non_silent = np.abs(audio_np) > threshold
+    
+    # 计算最小静音样本数
+    min_silence_samples = int(sr * min_silence_duration_ms / 1000.0)
+    
+    # 找到所有非静音段
+    if not non_silent.any():
+        # 如果全部是静音，返回空音频
+        return torch.zeros(1, 0) if isinstance(audio, torch.Tensor) else np.array([])
+    
+    # 找到静音段的开始和结束
+    # 使用差分来找到静音段的边界
+    diff = np.diff(non_silent.astype(int))
+    silence_starts = np.where(diff == -1)[0] + 1  # 从非静音到静音
+    silence_ends = np.where(diff == 1)[0] + 1     # 从静音到非静音
+    
+    # 处理开头和结尾
+    if not non_silent[0]:
+        # 开头是静音
+        silence_starts = np.concatenate([[0], silence_starts])
+    if not non_silent[-1]:
+        # 结尾是静音
+        silence_ends = np.concatenate([silence_ends, [len(non_silent)]])
+    
+    # 过滤掉太短的静音段
+    valid_segments = []
+    last_end = 0
+    
+    for start, end in zip(silence_starts, silence_ends):
+        silence_duration = end - start
+        if silence_duration >= min_silence_samples:
+            # 保留前面的非静音段
+            if start > last_end:
+                valid_segments.append((last_end, start))
+            last_end = end
+        # 如果静音段太短，不处理（保留）
+    
+    # 添加最后一段
+    if last_end < len(audio_np):
+        valid_segments.append((last_end, len(audio_np)))
+    
+    # 如果没有有效的非静音段，返回空音频
+    if not valid_segments:
+        return torch.zeros(1, 0) if isinstance(audio, torch.Tensor) else np.array([])
+    
+    # 拼接所有非静音段
+    result_segments = []
+    for start, end in valid_segments:
+        result_segments.append(audio_np[start:end])
+    
+    if result_segments:
+        result = np.concatenate(result_segments)
+    else:
+        result = np.array([])
+    
+    # 转换回tensor
+    if isinstance(audio, torch.Tensor):
+        result = torch.from_numpy(result).unsqueeze(0)
+    
+    return result
+
+
 def mix_audio_with_background(
     foreground: torch.Tensor,
     background: torch.Tensor,
@@ -213,10 +303,20 @@ def mix_audio_with_background(
     background_mode: str = "single",
     enable_ducking: bool = True,
     ducking_threshold: float = 0.01,
-    ducking_ratio: float = 0.3
+    ducking_ratio: float = 0.3,
+    intro_duration_ms: int = 5000,
+    outro_duration_ms: int = 5000,
+    remove_background_silence: bool = True
 ) -> torch.Tensor:
     """
     将前景音频与背景音频混合，支持ducking效果（对话时自动压低背景音乐）
+    实现策略：
+    1. 先播放背景音乐几秒钟（intro）
+    2. 慢慢引入角色对话（淡入效果）
+    3. 对话时背景音乐音量调小（ducking效果）
+    4. 如果背景音乐有连接，截掉背景音的空白部分
+    5. 对话结束后，音乐音量调大（淡出效果）
+    6. 播放几秒钟才结束（outro）
     
     Args:
         foreground: 前景音频（主音频）
@@ -232,6 +332,9 @@ def mix_audio_with_background(
         enable_ducking: 是否启用ducking效果（对话时自动压低背景音乐），默认True
         ducking_threshold: ducking触发阈值（前景音频音量超过此值时触发），默认0.01
         ducking_ratio: ducking时背景音乐音量降低比例（0.0-1.0），默认0.3（降低到30%）
+        intro_duration_ms: 开场音乐播放时长（毫秒），默认5000（5秒）
+        outro_duration_ms: 结束音乐播放时长（毫秒），默认5000（5秒）
+        remove_background_silence: 是否去除背景音乐中的静音段，默认True
     
     Returns:
         混合后的音频张量
@@ -292,74 +395,102 @@ def mix_audio_with_background(
     if background.dim() == 1:
         background = background.unsqueeze(0)
     
+    # 去除背景音乐中的静音段（如果启用）
+    if remove_background_silence:
+        background = remove_silence_segments(background, sr=AUDIO_SAMPLING_RATE, threshold=0.01, min_silence_duration_ms=200)
+        background_len = background.shape[1] if background.dim() > 1 else len(background)
+        if background_len == 0:
+            # 如果背景音乐全部是静音，返回前景音频
+            return foreground
+    
     foreground_len = foreground.shape[1]
     background_len = background.shape[1]
+    sr = AUDIO_SAMPLING_RATE
     
-    # 如果背景音频比前景短，循环播放
-    if background_len < foreground_len:
-        repeat_times = (foreground_len // background_len) + 1
+    # 计算intro和outro的样本数
+    intro_samples = int(sr * intro_duration_ms / 1000.0)
+    outro_samples = int(sr * outro_duration_ms / 1000.0)
+    
+    # 计算总长度：intro + 对话 + outro
+    total_len = intro_samples + foreground_len + outro_samples
+    
+    # 准备背景音乐：需要覆盖整个长度（intro + 对话 + outro）
+    # 如果背景音频比总长度短，循环播放
+    if background_len < total_len:
+        repeat_times = (total_len // background_len) + 1
         background = background.repeat(1, repeat_times)
     
-    # 裁剪背景音频到前景长度
-    background = background[:, :foreground_len]
+    # 裁剪背景音频到总长度
+    background = background[:, :total_len]
     
-    # 应用淡入淡出效果
-    sr = AUDIO_SAMPLING_RATE
-    fade_in_samples = int(sr * fade_in_ms / 1000.0)
-    fade_out_samples = int(sr * fade_out_ms / 1000.0)
+    # 创建前景音频：在intro和outro部分添加静音
+    foreground_padded = torch.zeros(1, total_len, device=foreground.device, dtype=foreground.dtype)
+    foreground_padded[:, intro_samples:intro_samples + foreground_len] = foreground
     
-    # 创建淡入淡出曲线
-    fade_in_curve = torch.linspace(0, 1, fade_in_samples).unsqueeze(0)
-    fade_out_curve = torch.linspace(1, 0, fade_out_samples).unsqueeze(0)
+    # 对前景音频应用淡入效果（在对话开始时）
+    dialogue_fade_in_samples = int(sr * fade_in_ms / 1000.0)
+    if dialogue_fade_in_samples > 0 and dialogue_fade_in_samples < foreground_len:
+        dialogue_fade_in_curve = torch.linspace(0, 1, dialogue_fade_in_samples, device=foreground.device).unsqueeze(0)
+        foreground_padded[:, intro_samples:intro_samples + dialogue_fade_in_samples] *= dialogue_fade_in_curve
     
-    # 应用淡入
-    if fade_in_samples > 0 and fade_in_samples < foreground_len:
-        background[:, :fade_in_samples] *= fade_in_curve
+    # 对前景音频应用淡出效果（在对话结束时）
+    dialogue_fade_out_samples = int(sr * fade_out_ms / 1000.0)
+    if dialogue_fade_out_samples > 0 and dialogue_fade_out_samples < foreground_len:
+        dialogue_fade_out_start = intro_samples + foreground_len - dialogue_fade_out_samples
+        dialogue_fade_out_curve = torch.linspace(1, 0, dialogue_fade_out_samples, device=foreground.device).unsqueeze(0)
+        foreground_padded[:, dialogue_fade_out_start:intro_samples + foreground_len] *= dialogue_fade_out_curve
     
-    # 应用淡出
-    if fade_out_samples > 0 and fade_out_samples < foreground_len:
-        start_fade_out = foreground_len - fade_out_samples
-        background[:, start_fade_out:] *= fade_out_curve
+    # 创建背景音乐音量曲线
+    background_volume_curve = torch.ones(1, total_len, device=background.device, dtype=background.dtype)
     
-    # 调整背景音量
-    background = background * background_volume
+    # Intro部分：背景音乐从0淡入到正常音量
+    intro_fade_in_samples = min(intro_samples, int(sr * 1000 / 1000.0))  # 1秒淡入
+    if intro_fade_in_samples > 0:
+        intro_fade_in_curve = torch.linspace(0, 1, intro_fade_in_samples, device=background.device).unsqueeze(0)
+        background_volume_curve[:, :intro_fade_in_samples] = intro_fade_in_curve
+        # Intro剩余部分保持正常音量
+        background_volume_curve[:, intro_fade_in_samples:intro_samples] = 1.0
     
-    # 如果启用ducking效果，根据前景音频音量动态调整背景音量
+    # 对话部分：应用ducking效果（如果启用）
+    dialogue_start = intro_samples
+    dialogue_end = intro_samples + foreground_len
+    
     if enable_ducking:
+        # 计算对话部分的ducking曲线
+        dialogue_foreground = foreground_padded[:, dialogue_start:dialogue_end]
+        dialogue_foreground_len = dialogue_foreground.shape[1]
+        
         # 计算前景音频的包络（使用滑动窗口平滑）
         window_size = int(sr * 0.05)  # 50ms窗口
         if window_size < 1:
             window_size = 1
         
         # 计算前景音频的绝对值（音量）
-        foreground_abs = torch.abs(foreground)
+        foreground_abs = torch.abs(dialogue_foreground)
         
         # 使用平均池化创建平滑的包络
         if foreground_abs.shape[1] > window_size:
-            # 使用简单的移动平均来创建平滑的包络
-            # 将音频分成多个窗口，计算每个窗口的平均值
-            num_windows = (foreground_len + window_size - 1) // window_size
+            num_windows = (dialogue_foreground_len + window_size - 1) // window_size
             envelope_samples = []
             
             for i in range(num_windows):
                 start = i * window_size
-                end = min(start + window_size, foreground_len)
+                end = min(start + window_size, dialogue_foreground_len)
                 window_avg = foreground_abs[:, start:end].mean()
                 envelope_samples.append(window_avg)
             
             # 创建包络张量
             foreground_envelope = torch.tensor(envelope_samples, device=foreground_abs.device, dtype=foreground_abs.dtype)
             
-            # 插值回原始长度（使用简单的线性插值）
+            # 插值回原始长度
             if len(envelope_samples) > 1:
-                # 使用numpy进行插值，然后转回tensor
                 import numpy as np
                 envelope_np = foreground_envelope.cpu().numpy()
-                indices = np.linspace(0, len(envelope_np) - 1, foreground_len)
+                indices = np.linspace(0, len(envelope_np) - 1, dialogue_foreground_len)
                 envelope_interp = np.interp(indices, np.arange(len(envelope_np)), envelope_np)
                 foreground_envelope = torch.from_numpy(envelope_interp).to(foreground_abs.device).unsqueeze(0)
             else:
-                foreground_envelope = foreground_envelope.unsqueeze(0).repeat(1, foreground_len)
+                foreground_envelope = foreground_envelope.unsqueeze(0).repeat(1, dialogue_foreground_len)
         else:
             foreground_envelope = foreground_abs
         
@@ -369,22 +500,34 @@ def mix_audio_with_background(
             foreground_envelope = foreground_envelope / max_envelope
         
         # 创建ducking曲线：当前景音频音量高时，背景音量降低
-        # 使用平滑的过渡曲线
         ducking_curve = torch.ones_like(foreground_envelope)
-        # 当前景音频超过阈值时，应用ducking
         mask = foreground_envelope > ducking_threshold
         if mask.any():
-            # 计算ducking强度（前景音量越高，ducking越强）
+            # 计算ducking强度
             ducking_strength = (foreground_envelope - ducking_threshold) / (1.0 - ducking_threshold)
             ducking_strength = torch.clamp(ducking_strength, 0, 1)
             # 应用ducking：背景音量降低到 ducking_ratio
             ducking_curve = 1.0 - ducking_strength * (1.0 - ducking_ratio)
         
-        # 应用ducking曲线到背景音乐
-        background = background * ducking_curve
+        # 应用到对话部分的背景音量曲线
+        background_volume_curve[:, dialogue_start:dialogue_end] = ducking_curve
+    
+    # Outro部分：背景音乐从正常音量淡出到0
+    outro_fade_out_samples = min(outro_samples, int(sr * 1000 / 1000.0))  # 1秒淡出
+    if outro_fade_out_samples > 0:
+        outro_fade_out_curve = torch.linspace(1, 0, outro_fade_out_samples, device=background.device).unsqueeze(0)
+        outro_start = total_len - outro_samples
+        outro_fade_out_start = total_len - outro_fade_out_samples
+        # Outro开始部分保持正常音量
+        background_volume_curve[:, outro_start:outro_fade_out_start] = 1.0
+        # Outro结束部分淡出
+        background_volume_curve[:, outro_fade_out_start:] = outro_fade_out_curve
+    
+    # 应用背景音量曲线和基础音量
+    background = background * background_volume_curve * background_volume
     
     # 混合音频（简单相加，然后归一化避免削波）
-    mixed = foreground + background
+    mixed = foreground_padded + background
     
     # 归一化到[-1, 1]范围
     max_val = torch.abs(mixed).max()

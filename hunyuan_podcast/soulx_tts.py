@@ -230,9 +230,23 @@ class SoulXTTS:
             print(f"[INFO] 开始生成多角色播客音频...")
             print(f"      说话人数量: {len(speakers)}")
             print(f"      对话轮数: {len(dialogues)}")
+            # 估算生成时间（根据经验值：每段对话约2-5秒推理时间）
+            estimated_time = len(dialogues) * 3  # 平均每段3秒
+            print(f"      预计生成时间: 约 {estimated_time} 秒（{estimated_time/60:.1f} 分钟）")
+            print(f"      提示：SoulX-Podcast需要逐段生成音频，这是正常现象")
         
-        # 生成音频
+        # 生成音频（这是最耗时的步骤）
+        # 原因分析：
+        # 1. 每段对话都需要经过LLM生成 -> Flow生成 -> HiFi-GAN生成三个步骤
+        # 2. 对于4-5分钟的播客（30-60段对话），总耗时 = 段数 × 每段耗时（2-5秒）
+        # 3. 如果使用较慢的GPU或CPU，每段可能需要更长时间
+        import time
+        generation_start = time.time()
         results_dict = self.model.forward_longform(**data)
+        generation_time = time.time() - generation_start
+        if verbose:
+            print(f"[INFO] 音频生成完成，耗时: {generation_time:.2f} 秒（{generation_time/60:.2f} 分钟）")
+            print(f"      平均每段对话耗时: {generation_time/len(dialogues):.2f} 秒")
         
         # 处理音频片段，添加静音间隔和淡入淡出效果以改善角色衔接
         generated_wavs = results_dict["generated_wavs"]
