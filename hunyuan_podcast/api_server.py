@@ -1091,9 +1091,14 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
         temp_files = []
         role_voices = {}
         
+        # 性能统计：检索信息
+        retrieval_timings = {}
+        
         try:
             _update_progress(request.job_id, "downloading_voices", 5, "正在下载角色音色文件")
+            voice_download_start = time.time()
             for role, voice_data in role_voice_data.items():
+                role_download_start = time.time()
                 logger.info(f"获取角色 '{role}' 的音频文件...")
                 if use_cloud_storage:
                     # 从云存储URL下载
@@ -1103,9 +1108,14 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                     # 从base64解码
                     logger.info(f"从base64解码")
                     temp_file = decode_base64_audio(voice_data)
+                role_download_time = time.time() - role_download_start
+                retrieval_timings[f"角色音色下载_{role}"] = role_download_time
                 temp_files.append(temp_file)
                 role_voices[role] = temp_file
-                logger.info(f"角色 '{role}' 音频文件获取完成")
+                logger.info(f"角色 '{role}' 音频文件获取完成，耗时: {role_download_time:.2f}s")
+            voice_download_total = time.time() - voice_download_start
+            retrieval_timings["角色音色下载_总计"] = voice_download_total
+            logger.info(f"所有角色音色文件下载完成，总耗时: {voice_download_total:.2f}s")
             
             # 音效文件支持（如果未来需要）
             intro_music_path = None
@@ -1148,11 +1158,15 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                     category=request.category if request.category else None
                 )
                 
+                text_generation_start = time.time()
                 generated_text = api_client.generate_text(
                     prompt=prompt,
                     temperature=0.8,
                     max_tokens=5000  # 增加到5000以支持4-5分钟的对话内容
                 )
+                text_generation_time = time.time() - text_generation_start
+                retrieval_timings["对话文本生成"] = text_generation_time
+                logger.info(f"对话文本生成完成，耗时: {text_generation_time:.2f}s，文本长度: {len(generated_text)}")
                 
                 generated_text = processor.clean_text(generated_text)
                 text_content = generated_text
@@ -1162,6 +1176,7 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
             try:
                 _update_progress(request.job_id, "selecting_music", 22, "正在选择背景音乐")
                 logger.info("开始自动选择背景音乐...")
+                music_selection_start = time.time()
                 music_selector = MusicSelector(use_cloud_storage=True)
                 selected_music = music_selector.select_music_by_ai(
                     text=text_content,  # 使用完整的文本内容（包括AI生成的对话）
@@ -1170,6 +1185,9 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                     scene_types=request.scene_types,
                     num_music=1
                 )
+                music_selection_time = time.time() - music_selection_start
+                retrieval_timings["背景音乐选择"] = music_selection_time
+                logger.info(f"背景音乐选择完成，耗时: {music_selection_time:.2f}s")
                 
                 if selected_music and len(selected_music) > 0:
                     background_music_path = selected_music[0]
@@ -1186,13 +1204,63 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 import traceback
                 logger.debug(f"错误详情: {traceback.format_exc()}")
                 background_music_path = None
+                if "music_selection_start" in locals():
+                    music_selection_time = time.time() - music_selection_start
+                    retrieval_timings["背景音乐选择"] = music_selection_time
             
             # 生成播客
             logger.info("开始生成播客音频...")
-            logger.info(f"对话段数: {len(processor.parse_role_text(text_content))} 段")
+            dialogues = processor.parse_role_text(text_content)
+            dialogue_count = len(dialogues)
+            
+            # 计算对话总字数
+            total_chars = sum(len(content) for _, content in dialogues)
+            avg_chars_per_dialogue = total_chars / dialogue_count if dialogue_count > 0 else 0
+            
+            # 统计角色信息
+            unique_roles = set(role for role, _ in dialogues)
+            role_count = len(unique_roles)
+            
+            # 输出脚本信息
+            logger.info("=" * 60)
+            logger.info("【输出脚本信息】")
+            logger.info(f"  - 对话段数: {dialogue_count} 段")
+            logger.info(f"  - 对话总字数: {total_chars} 字")
+            logger.info(f"  - 平均每段字数: {avg_chars_per_dialogue:.1f} 字")
+            logger.info(f"  - 角色数量: {role_count} 个")
+            logger.info(f"  - 角色列表: {', '.join(sorted(unique_roles))}")
+            logger.info("=" * 60)
+            
+            # 中间过程-检索信息
+            logger.info("=" * 60)
+            logger.info("【中间过程-检索信息】")
+            for key, timing in retrieval_timings.items():
+                logger.info(f"  - {key}: {timing:.2f}s")
+            retrieval_total = sum(retrieval_timings.values())
+            logger.info(f"  - 检索总耗时: {retrieval_total:.2f}s")
+            logger.info("=" * 60)
+            
+            # 性能分析
+            logger.info("=" * 60)
+            logger.info("性能分析：")
+            logger.info(f"  - 使用引擎: {SOULX_PODCAST_LLM_ENGINE}")
+            logger.info(f"  - FP16 Flow: {SOULX_PODCAST_FP16_FLOW}")
+            
+            # 估算耗时
+            if SOULX_PODCAST_LLM_ENGINE == "vllm":
+                # VLLM引擎：每段约1.5-3秒
+                estimated_time_per_segment = 2.0 if avg_chars_per_dialogue < 40 else 2.5
+            else:
+                # HF引擎：每段约2-5秒
+                estimated_time_per_segment = 3.0 if avg_chars_per_dialogue < 40 else 4.0
+            
+            estimated_total_time = dialogue_count * estimated_time_per_segment
+            logger.info(f"  - 预计每段耗时: {estimated_time_per_segment:.1f} 秒")
+            logger.info(f"  - 预计总耗时: {estimated_total_time:.0f} 秒（{estimated_total_time/60:.1f} 分钟）")
+            logger.info("=" * 60)
+            
             logger.info("提示：SoulX-Podcast需要逐段生成音频，这是最耗时的步骤")
             logger.info("     每段对话需要经过：LLM生成 -> Flow生成 -> HiFi-GAN生成")
-            logger.info("     对于4-5分钟的播客（30-60段对话），预计需要2-5分钟")
             _update_progress(request.job_id, "generating", 25, "正在生成语音与合成音频（这可能需要几分钟，请耐心等待）")
             generation_start = time.time()
             output_path = gen.generate_from_text(
@@ -1207,7 +1275,42 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 verbose=True
             )
             generation_time = time.time() - generation_start
-            logger.info(f"播客音频生成完成，耗时: {generation_time:.2f}s")
+            logger.info("=" * 60)
+            logger.info("生成完成！性能统计：")
+            logger.info("【必须】生成时延统计（单位：s）：")
+            logger.info(f"  - 总耗时: {generation_time:.2f}s（{generation_time/60:.2f} 分钟）")
+            if dialogue_count > 0:
+                avg_time_per_segment = generation_time / dialogue_count
+                logger.info(f"  - 平均时延: {avg_time_per_segment:.2f}s/段")
+                logger.info(f"  - 对话段数: {dialogue_count} 段")
+                logger.info(f"  - 每段平均字数: {avg_chars_per_dialogue:.1f} 字")
+                logger.info(f"  - 生成速度: {avg_chars_per_dialogue/avg_time_per_segment:.1f} 字/秒")
+                
+                # 性能评估
+                if SOULX_PODCAST_LLM_ENGINE == "vllm":
+                    if avg_time_per_segment < 2.0:
+                        logger.info("  ✅ 性能优秀！VLLM加速效果明显")
+                    elif avg_time_per_segment < 3.0:
+                        logger.info("  ✓ 性能良好")
+                    else:
+                        logger.info("  ⚠️ 性能一般，可能的原因：")
+                        logger.info("     - GPU性能不足")
+                        logger.info("     - 对话文本过长")
+                        logger.info("     - 建议检查VLLM配置")
+                else:
+                    if avg_time_per_segment < 3.0:
+                        logger.info("  ✓ 性能良好（HF引擎）")
+                    else:
+                        logger.info("  💡 建议使用VLLM引擎加速（设置 SOULX_PODCAST_LLM_ENGINE=vllm）")
+            
+            # 汇总所有耗时
+            logger.info("=" * 60)
+            logger.info("【总耗时汇总】")
+            logger.info(f"  - 检索耗时: {retrieval_total:.2f}s")
+            logger.info(f"  - 生成耗时: {generation_time:.2f}s")
+            total_time = retrieval_total + generation_time
+            logger.info(f"  - 总耗时: {total_time:.2f}s（{total_time/60:.2f} 分钟）")
+            logger.info("=" * 60)
             _update_progress(request.job_id, "saving", 85, "保存音频文件")
             # 尝试启动 AGC 上传任务
             agc_result = None
@@ -1302,21 +1405,21 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                     _update_progress(request.job_id, "completed", 100, "生成完成", done=True)
             except Exception as e:
                 logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
-
+            
             # 编码输出音频
             logger.info("编码输出音频文件...")
             audio_base64 = encode_file_to_base64(output_path)
             file_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
             total_time = time.time() - start_time
             logger.info(f"多角色播客生成成功，总耗时: {total_time:.2f}s，输出文件大小: {file_size:.2f} MB")
-
+            
             data = {
-                "audio_base64": audio_base64,
+                    "audio_base64": audio_base64,
                 "audio_path": output_path,  # 默认使用本地路径
-                "file_size_mb": round(file_size, 2),
+                    "file_size_mb": round(file_size, 2),
                 "script": text_content,
-                "roles": list(roles)
-            }
+                    "roles": list(roles)
+                }
             if agc_result:
                 data['agc_upload_status'] = agc_result
                 # 如果上传成功，使用云存储路径作为 audio_path
@@ -1433,7 +1536,7 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
             file_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
             total_time = time.time() - start_time
             logger.info(f"自定义角色播客生成成功，总耗时: {total_time:.2f}s，输出文件大小: {file_size:.2f} MB")
-
+            
             # 尝试启动后台 AGC 上传任务（不阻塞主请求）
             agc_result = None
             try:
@@ -1518,12 +1621,12 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
                 logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
 
             data = {
-                "audio_base64": audio_base64,
+                    "audio_base64": audio_base64,
                 "audio_path": output_path,  # 默认使用本地路径
-                "file_size_mb": round(file_size, 2),
-                "script": cleaned_text,
-                "characters": [char.name for char in request.characters]
-            }
+                    "file_size_mb": round(file_size, 2),
+                    "script": cleaned_text,
+                    "characters": [char.name for char in request.characters]
+                }
             if agc_result:
                 data['agc_upload_status'] = agc_result
                 # 如果上传成功，使用云存储路径作为 audio_path
@@ -1640,7 +1743,7 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
             file_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
             total_time = time.time() - start_time
             logger.info(f"主题深度播客生成成功，总耗时: {total_time:.2f}s，输出文件大小: {file_size:.2f} MB")
-
+            
             # 尝试启动后台 AGC 上传任务（不阻塞主请求）
             agc_result = None
             try:
@@ -1725,13 +1828,13 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
                 logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
 
             data = {
-                "audio_base64": audio_base64,
+                    "audio_base64": audio_base64,
                 "audio_path": output_path,  # 默认使用本地路径
-                "file_size_mb": round(file_size, 2),
-                "script": cleaned_text,
-                "topic": request.topic,
-                "depth_level": request.depth_level
-            }
+                    "file_size_mb": round(file_size, 2),
+                    "script": cleaned_text,
+                    "topic": request.topic,
+                    "depth_level": request.depth_level
+                }
             if agc_result:
                 data['agc_upload_status'] = agc_result
                 # 如果上传成功，使用云存储路径作为 audio_path
