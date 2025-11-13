@@ -25,10 +25,10 @@ export class PodcastConfig {
   // 5. 直连服务器IP（推荐，避免网关超时）：设置为服务器的公网/内网IP和端口
   //    例如：'http://9.165.4.87:8000' 或 'http://192.168.1.100:8000'
   //    注意：确保服务器防火墙允许8000端口访问
-  static readonly API_BASE_URL: string = 'http://43.156.34.234:8000/'; // 请替换为实际的服务器IP地址
+  static readonly API_BASE_URL: string = 'http://43.163.104.207:8000/'; // 请替换为实际的服务器IP地址
   static readonly API_TIMEOUT: number = 600000; // 10分钟超时（考虑大文件上传和播客生成时间）
 
-  
+
   // 是否使用云函数（如果使用云函数，路径可能不同）
   // 云函数通过HTTP触发器调用，URL格式通常为：https://your-cloud-function-url.com
   // 本地/远程服务器URL格式：http://ip:port 或 https://domain.com
