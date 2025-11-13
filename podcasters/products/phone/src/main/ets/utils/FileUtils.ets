@@ -718,8 +718,32 @@ export class FileUtils {
         // 如果解码失败，使用原始文件名
       }
 
-      // 如果启用云存储上传
-      if (uploadToCloud) {
+      // 检测文件类型（根据文件扩展名）
+      const fileExtension = fileName.toLowerCase().split('.').pop() || '';
+      const supportedExtensions = ['txt', 'doc', 'docx', 'pdf'];
+      const isSupportedFile = supportedExtensions.includes(fileExtension);
+
+      if (!isSupportedFile) {
+        promptAction.showToast({
+          message: `不支持的文件格式: .${fileExtension}，支持格式: .txt, .doc, .docx, .pdf`,
+          duration: 3000
+        });
+        return null;
+      }
+
+      // 如果启用云存储上传（PDF和Word文件必须上传到云存储）
+      const requiresCloudUpload = fileExtension === 'pdf' || fileExtension === 'doc' || fileExtension === 'docx';
+      
+      if (requiresCloudUpload && !uploadToCloud) {
+        // PDF和Word文件必须上传到云存储
+        promptAction.showToast({
+          message: `${fileExtension.toUpperCase()}文件必须上传到云存储，请启用云存储上传`,
+          duration: 2000
+        });
+        return null;
+      }
+
+      if (uploadToCloud || requiresCloudUpload) {
         const cloudInfo = await FileUtils.uploadFileToCloud(uiContext, fileUri, fileName);
         if (cloudInfo) {
           const fileInfo: TextFileInfo = {
@@ -730,26 +754,43 @@ export class FileUtils {
             cloudUrl: cloudInfo.cloudUrl
           };
 
+          // 根据文件类型显示不同的提示信息
+          const fileTypeName = fileExtension === 'pdf' ? 'PDF' : 
+                               fileExtension === 'docx' || fileExtension === 'doc' ? 'Word' : 
+                               '文本';
+          
           promptAction.showToast({
-            message: `文件选择成功 (${fileSizeMB.toFixed(2)}MB)，已上传到云存储`,
+            message: `${fileTypeName}文件选择成功 (${fileSizeMB.toFixed(2)}MB)，已上传到云存储`,
             duration: 2000
           });
 
+          Logger.info(TAG, `文件上传成功: ${fileName} (${fileSizeMB.toFixed(2)}MB) -> ${cloudInfo.cloudUrl}`);
           return fileInfo;
         } else {
-          // 上传失败，回退到本地处理模式
-          Logger.warn(TAG, '文件上传到云存储失败，回退到本地处理模式');
-          promptAction.showToast({
-            message: `文件上传失败，将尝试本地处理`,
-            duration: 2000
-          });
-          // 继续执行本地处理逻辑
+          // 上传失败
+          if (requiresCloudUpload) {
+            // PDF和Word文件上传失败，无法继续
+            Logger.error(TAG, `${fileExtension.toUpperCase()}文件上传到云存储失败`);
+            promptAction.showToast({
+              message: `${fileExtension.toUpperCase()}文件上传失败，请重试`,
+              duration: 3000
+            });
+            return null;
+          } else {
+            // 文本文件上传失败，回退到本地处理模式
+            Logger.warn(TAG, '文件上传到云存储失败，回退到本地处理模式');
+            promptAction.showToast({
+              message: `文件上传失败，将尝试本地处理`,
+              duration: 2000
+            });
+            // 继续执行本地处理逻辑
+          }
         }
       }
 
       // 不使用云存储，读取文件内容（仅支持.txt文件）
       // PDF和Word文件必须上传到云存储，由后端处理
-      if (fileName.endsWith('.txt')) {
+      if (fileExtension === 'txt') {
         let file: fs.File | null = null;
         try {
           file = fs.openSync(fileUri, fs.OpenMode.READ_ONLY);
@@ -786,10 +827,11 @@ export class FileUtils {
           };
 
           promptAction.showToast({
-            message: `文件选择成功 (${fileSizeMB.toFixed(2)}MB)`,
+            message: `文本文件选择成功 (${fileSizeMB.toFixed(2)}MB)`,
             duration: 2000
           });
 
+          Logger.info(TAG, `文本文件读取成功: ${fileName} (${fileSizeMB.toFixed(2)}MB), 内容长度: ${content.length} 字符`);
           return fileInfo;
         } finally {
           if (file) {
@@ -798,8 +840,10 @@ export class FileUtils {
         }
       } else {
         // Word和PDF文件需要上传到云存储，由后端处理
+        // 这不应该到达这里，因为前面已经检查了requiresCloudUpload
+        Logger.error(TAG, `${fileExtension.toUpperCase()}文件必须上传到云存储，但uploadToCloud为false`);
         promptAction.showToast({
-          message: `${fileName.endsWith('.pdf') ? 'PDF' : 'Word'}文件需要上传到云存储，请启用云存储上传`,
+          message: `${fileExtension.toUpperCase()}文件需要上传到云存储，请启用云存储上传`,
           duration: 2000
         });
         return null;
