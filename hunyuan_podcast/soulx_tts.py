@@ -254,6 +254,10 @@ class SoulXTTS:
             elif wav.dim() > 1 and wav.shape[0] > 1:
                 wav = torch.mean(wav, dim=0, keepdim=True)
             
+            # 克隆张量以避免在推理模式下的原地操作错误
+            # 推理模式下不能对张量进行原地操作，需要先克隆
+            wav = wav.clone()
+            
             # 获取音频的设备，确保所有操作在同一设备上
             device = wav.device
             
@@ -262,12 +266,14 @@ class SoulXTTS:
             if fade_samples > 0 and wav.shape[1] > fade_samples * 2:
                 # 淡入曲线（从0到1），确保在正确的设备上
                 fade_in_curve = torch.linspace(0, 1, fade_samples, device=device).unsqueeze(0)
-                wav[:, :fade_samples] *= fade_in_curve
+                # 使用非原地操作或先克隆再操作
+                wav[:, :fade_samples] = wav[:, :fade_samples] * fade_in_curve
                 
                 # 淡出曲线（从1到0），确保在正确的设备上
                 fade_out_curve = torch.linspace(1, 0, fade_samples, device=device).unsqueeze(0)
                 fade_out_start = wav.shape[1] - fade_samples
-                wav[:, fade_out_start:] *= fade_out_curve
+                # 使用非原地操作或先克隆再操作
+                wav[:, fade_out_start:] = wav[:, fade_out_start:] * fade_out_curve
             
             processed_segments.append(wav)
             
