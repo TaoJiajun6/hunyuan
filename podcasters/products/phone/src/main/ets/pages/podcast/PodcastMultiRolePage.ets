@@ -21,9 +21,10 @@ export struct PodcastMultiRolePage {
   @Local text: string = ''; // 保留用于兼容，但优先使用textFileUrl
   @Local textFileUrl: string = ''; // 文本文件云存储URL
   @Local textFileName: string = ''; // 文本文件名
-  @Local inputType: string = '文字'; // 输入类型：文字、文字+指令、公众号、公众号+指令、网页、PDF、PDF+指令、文字+英文指令
-  @Local inputUrl: string = ''; // 输入URL（用于公众号、网页、PDF等类型）
+  @Local inputType: string = '文字'; // 输入类型：文字、文字+指令、公众号、公众号+指令、网页、文件、文件+指令、文字+英文指令
+  @Local inputUrl: string = ''; // 输入URL（用于公众号、网页等类型）
   @Local instruction: string = ''; // 指令内容（可选）
+  @Local category: string = ''; // 播客分类（可选）
   @Local roleVoiceUrls: Record<string, string> = {}; // 角色名 -> 云存储URL（必需）
   @Local roleNames: string[] = ['角色A', '角色B'];
   @Local isLoading: boolean = false;
@@ -40,9 +41,47 @@ export struct PodcastMultiRolePage {
     { value: '公众号' },
     { value: '公众号+指令' },
     { value: '网页' },
-    { value: 'PDF' },
-    { value: 'PDF+指令' },
+    { value: '文件' },
+    { value: '文件+指令' },
     { value: '文字+英文指令' }
+  ];
+  
+  // 播客分类选项列表
+  private readonly categoryOptions: SelectOption[] = [
+    { value: '商业' },
+    { value: '科技' },
+    { value: '财经' },
+    { value: '新闻' },
+    { value: '影视' },
+    { value: '自我成长与自愈' },
+    { value: '职场万象' },
+    { value: '学习类' },
+    { value: '娱乐八卦类' },
+    { value: '考题' },
+    { value: '文化艺术' },
+    { value: '职场类—人际关系' },
+    { value: '学生类—求职就业' },
+    { value: '健康养生' },
+    { value: '运动健身' },
+    { value: '旅游' },
+    { value: '美食' },
+    { value: '教育育儿' },
+    { value: '情感恋爱' },
+    { value: '历史' },
+    { value: '心理学' },
+    { value: '音乐' },
+    { value: '体育' },
+    { value: '游戏电竞' },
+    { value: '时尚美妆' },
+    { value: '汽车' },
+    { value: '法律' },
+    { value: '创业创新' },
+    { value: '哲学思考' },
+    { value: '科学科普' },
+    { value: '读书阅读' },
+    { value: '生活方式' },
+    { value: '喜剧' },
+    { value: '宠物' }
   ];
 
   /**
@@ -55,11 +94,10 @@ export struct PodcastMultiRolePage {
       // 强制使用云存储上传（后端要求）
       const audioFileInfo = await FileUtils.pickAudioFile(context, true);
       if (audioFileInfo && audioFileInfo.cloudUrl) {
-        // 保存云存储URL
-        if (!this.roleVoiceUrls) {
-          this.roleVoiceUrls = {};
-        }
-        this.roleVoiceUrls[roleName] = audioFileInfo.cloudUrl;
+        // 保存云存储URL（重新创建对象以触发响应式更新）
+        const updatedRoleVoiceUrls = { ...this.roleVoiceUrls };
+        updatedRoleVoiceUrls[roleName] = audioFileInfo.cloudUrl;
+        this.roleVoiceUrls = updatedRoleVoiceUrls;
         promptAction.showToast({
           message: `${roleName}音色已选择并上传到云存储`,
           duration: 2000
@@ -80,30 +118,48 @@ export struct PodcastMultiRolePage {
   }
 
   /**
-   * 选择播客文本文件
+   * 选择播客文本文件（支持.txt、.doc、.docx、.pdf）
    */
   async selectTextFile(): Promise<void> {
     try {
       // 获取UIAbility上下文
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      // 使用云存储上传
+      
+      // 检查当前输入类型，如果是文件类型
+      const isFileType = ['文件', '文件+指令'].includes(this.inputType);
+      
+      // 使用云存储上传（文件必须上传到云存储）
       const textFileInfo = await FileUtils.pickTextFile(context, true);
       if (textFileInfo && textFileInfo.cloudUrl) {
+        // 文件类型支持.txt、.doc、.docx、.pdf等格式，不需要特殊验证
+        const fileName = textFileInfo.fileName.toLowerCase();
+        const fileExtension = fileName.split('.').pop() || '';
+        
         // 保存云存储URL
         this.textFileUrl = textFileInfo.cloudUrl;
         this.textFileName = textFileInfo.fileName;
-        // 如果文件已读取内容，也保存到text字段（用于兼容）
-        if (textFileInfo.content) {
+        
+        // 如果文件是.txt格式且已读取内容，保存到text字段（用于兼容）
+        if (fileExtension === 'txt' && textFileInfo.content) {
           this.text = textFileInfo.content;
+        } else {
+          // PDF和Word文件不需要保存内容到text字段
+          this.text = '';
         }
+        
+        // 根据文件类型显示不同的提示信息
+        const fileTypeName = fileExtension === 'pdf' ? 'PDF' : 
+                             fileExtension === 'docx' || fileExtension === 'doc' ? 'Word' : 
+                             '文本';
+        
         promptAction.showToast({
-          message: `文本文件已选择并上传到云存储: ${textFileInfo.fileName}`,
+          message: `${fileTypeName}文件已选择并上传到云存储: ${textFileInfo.fileName}`,
           duration: 2000
         });
       } else {
         // 上传失败或未获取到URL
         promptAction.showToast({
-          message: '文本文件上传失败，请重试',
+          message: '文件上传失败，请重试',
           duration: 2000
         });
       }
@@ -126,13 +182,13 @@ export struct PodcastMultiRolePage {
 
     // 根据输入类型验证
     const needsInputUrl = ['公众号', '公众号+指令', '网页'].includes(this.inputType);
-    const needsFile = ['PDF', 'PDF+指令'].includes(this.inputType);
+    const needsFile = ['文件', '文件+指令'].includes(this.inputType);
     const needsText = ['文字', '文字+指令', '文字+英文指令'].includes(this.inputType);
 
-    // PDF类型需要文件上传
+    // 文件类型需要文件上传
     if (needsFile && !hasTextFile) {
       promptAction.showToast({
-        message: '请上传PDF文件',
+        message: '请上传文件（支持.txt、.doc、.docx、.pdf等格式）',
         duration: 2000
       });
       return;
@@ -189,7 +245,8 @@ export struct PodcastMultiRolePage {
         input_url: hasInputUrl ? this.inputUrl : undefined, // 输入URL
         instruction: this.instruction.trim().length > 0 ? this.instruction : undefined, // 指令内容
         role_voice_urls: this.roleVoiceUrls, // 强制使用云存储URL
-        silence_interval: 300,
+        silence_interval: 800,
+        category: this.category.trim().length > 0 ? this.category : undefined, // 播客分类
         job_id: this.jobId
       } as MultiRoleRequest;
 
@@ -339,7 +396,7 @@ export struct PodcastMultiRolePage {
             }
 
             // 指令输入（当选择包含指令的类型时显示）
-            if (['文字+指令', '公众号+指令', 'PDF+指令', '文字+英文指令'].includes(this.inputType)) {
+            if (['文字+指令', '公众号+指令', '文件+指令', '文字+英文指令'].includes(this.inputType)) {
               Column({ space: 12 }) {
                 Text('指令内容（可选）')
                   .fontSize($r('sys.float.Subtitle_L'))
@@ -358,6 +415,22 @@ export struct PodcastMultiRolePage {
                   .backgroundColor($r('sys.color.comp_background_tertiary'))
                   .borderRadius(8)
               }
+            }
+
+            // 播客分类选择
+            Column({ space: 12 }) {
+              Text('播客分类（可选）')
+                .fontSize($r('sys.float.Subtitle_L'))
+                .fontColor($r('sys.color.font_primary'))
+                .fontWeight(FontWeight.Bold)
+                .alignSelf(ItemAlign.Start)
+
+              Select(this.categoryOptions)
+                .value(this.category || '')
+                .onSelect((index: number, value: string) => {
+                  this.category = value;
+                })
+                .width('100%')
             }
 
             // 文本输入（文字类型使用）
@@ -389,50 +462,52 @@ export struct PodcastMultiRolePage {
               .alignItems(HorizontalAlign.Start)
             }
 
-            // 文件上传（PDF类型使用）
-            if (['PDF', 'PDF+指令'].includes(this.inputType)) {
-              Column({ space: 12 }) {
-                Text('播客PDF文件（必需）')
-                  .fontSize($r('sys.float.Subtitle_L'))
-                  .fontColor($r('sys.color.font_primary'))
-                  .fontWeight(FontWeight.Bold)
-                  .alignSelf(ItemAlign.Start)
+            // 文件上传（文件类型必需，其他类型可选）
+            Column({ space: 12 }) {
+              Text(['文件', '文件+指令'].includes(this.inputType) ? 
+                '播客文件（必需）' : 
+                '播客文件（可选，支持.txt、.doc、.docx、.pdf）')
+                .fontSize($r('sys.float.Subtitle_L'))
+                .fontColor($r('sys.color.font_primary'))
+                .fontWeight(FontWeight.Bold)
+                .alignSelf(ItemAlign.Start)
 
-                Row({ space: 12 }) {
-                  Column({ space: 4 }) {
-                    Text(this.textFileName || '未选择文件')
-                      .fontSize($r('sys.float.Body_M'))
-                      .fontColor(this.textFileUrl ? $r('sys.color.font_primary') : $r('sys.color.font_secondary'))
-                      .maxLines(1)
+              Row({ space: 12 }) {
+                Column({ space: 4 }) {
+                  Text(this.textFileName || '未选择文件')
+                    .fontSize($r('sys.float.Body_M'))
+                    .fontColor(this.textFileUrl ? $r('sys.color.font_primary') : $r('sys.color.font_secondary'))
+                    .maxLines(1)
 
-                    Text('支持.pdf格式，最大50MB')
-                      .fontSize($r('sys.float.Body_S'))
-                      .fontColor($r('sys.color.font_secondary'))
-                  }
-                  .layoutWeight(1)
-                  .alignItems(HorizontalAlign.Start)
-
-                  Button(this.textFileUrl ? '已选择' : '选择文件')
+                  Text(['文件', '文件+指令'].includes(this.inputType) ? 
+                    '支持.txt、.doc、.docx、.pdf格式，最大50MB' : 
+                    '支持.txt、.doc、.docx、.pdf格式，最大50MB')
                     .fontSize($r('sys.float.Body_S'))
-                    .type(ButtonType.Normal)
-                    .backgroundColor(this.textFileUrl ?
-                      $r('sys.color.icon_emphasize') :
-                      $r('sys.color.comp_background_tertiary'))
-                    .fontColor(this.textFileUrl ?
-                      $r('sys.color.font_on_primary') :
-                      $r('sys.color.font_primary'))
-                    .onClick(() => {
-                      this.selectTextFile();
-                    })
+                    .fontColor($r('sys.color.font_secondary'))
                 }
-                .width('100%')
-                .padding(12)
-                .borderRadius(8)
-                .backgroundColor($r('sys.color.comp_background_tertiary'))
+                .layoutWeight(1)
+                .alignItems(HorizontalAlign.Start)
+
+                Button(this.textFileUrl ? '已选择' : '选择文件')
+                  .fontSize($r('sys.float.Body_S'))
+                  .type(ButtonType.Normal)
+                  .backgroundColor(this.textFileUrl ?
+                    $r('sys.color.icon_emphasize') :
+                    $r('sys.color.comp_background_tertiary'))
+                  .fontColor(this.textFileUrl ?
+                    $r('sys.color.font_on_primary') :
+                    $r('sys.color.font_primary'))
+                  .onClick(() => {
+                    this.selectTextFile();
+                  })
               }
               .width('100%')
-              .alignItems(HorizontalAlign.Start)
+              .padding(12)
+              .borderRadius(8)
+              .backgroundColor($r('sys.color.comp_background_tertiary'))
             }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
 
             // 角色音色选择
             Column({ space: 12 }) {
@@ -503,7 +578,7 @@ export struct PodcastMultiRolePage {
               .width('100%')
               .height(40)
               .enabled(!this.isLoading &&
-                (this.text.trim().length > 0 || this.textFileUrl.length > 0) &&
+                (this.text.trim().length > 0 || this.textFileUrl.length > 0 || this.inputUrl.trim().length > 0) &&
                 Object.keys(this.roleVoiceUrls).length >= 2)
               .onClick(() => {
                 this.generatePodcast();

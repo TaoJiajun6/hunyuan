@@ -40,6 +40,7 @@ from .config import SOULX_PODCAST_MODEL_DIR, SOULX_PODCAST_LLM_ENGINE, SOULX_POD
 from .text_processor import TextProcessor
 from .api_client import get_client
 from .input_processor import InputProcessor, get_processor
+from .music_selector import MusicSelector
 
 
 # 配置日志
@@ -211,12 +212,12 @@ class MultiRoleRequest(BaseModel):
     """多角色互动播客请求"""
     text: Optional[str] = Field(None, description="播客文本（支持角色标记或普通文本，如果使用text_file_url或input_url，此字段可为空）")
     text_file_url: Optional[str] = Field(None, description="文本文件云存储URL（.txt或Word文件，如果提供，优先使用）")
-    input_type: Optional[str] = Field(None, description="输入类型，可选值：文字、文字+指令、公众号、公众号+指令、网页、PDF、PDF+指令、文字+英文指令")
+    input_type: Optional[str] = Field(None, description="输入类型，可选值：文字、文字+指令、公众号、公众号+指令、网页、文件、文件+指令、文字+英文指令")
     input_url: Optional[str] = Field(None, description="输入URL（用于公众号、网页、PDF等类型）")
     instruction: Optional[str] = Field(None, description="指令内容（可选，用于控制播客生成过程，如'生成5分钟播客'、'使用轻松风格'等）")
     role_voice_urls: Optional[Dict[str, str]] = Field(None, description="角色音色映射，云存储URL（如果使用云存储，键为角色名，值为云存储下载URL）")
     role_voices: Optional[Dict[str, str]] = Field(None, description="[已废弃] 角色音色映射，base64编码的音频文件（已废弃，请使用role_voice_urls）")
-    silence_interval: int = Field(600, description="角色切换静音间隔（毫秒），默认600ms以增加角色之间的间隔", ge=200, le=1500)
+    silence_interval: int = Field(800, description="角色切换静音间隔（毫秒），默认800ms以增加角色之间的间隔，让对话更清晰", ge=200, le=1500)
     podcast_name: Optional[str] = Field(None, description="播客名称（可选）")
     topic: Optional[str] = Field(None, description="本期主题（可选）")
     character_1_name: Optional[str] = Field(None, description="角色1名称（可选）")
@@ -229,6 +230,7 @@ class MultiRoleRequest(BaseModel):
     character_3_personality: Optional[str] = Field(None, description="角色3性格特点（可选）")
     character_3_speaking_style: Optional[str] = Field(None, description="角色3说话风格（可选）")
     scene_types: Optional[List[str]] = Field(None, description="互动场景类型列表（可选）")
+    category: Optional[str] = Field(None, description="播客分类（可选），如：商业、科技、财经、新闻、影视、自我成长与自愈、职场万象、学习类、娱乐八卦类、考题、文化艺术、职场类—人际关系、学生类—求职就业、健康养生、运动健身、旅游、美食、教育育儿、情感恋爱、历史、心理学、音乐、体育、游戏电竞、时尚美妆、汽车、法律、创业创新、哲学思考、科学科普、读书阅读、生活方式、喜剧、宠物等")
     intro_music: Optional[str] = Field(None, description="[已废弃] 开场音乐，base64编码的音频文件（已废弃）")
     outro_music: Optional[str] = Field(None, description="[已废弃] 结尾音乐，base64编码的音频文件（已废弃）")
     background_music: Optional[str] = Field(None, description="[已废弃] 背景音乐，base64编码的音频文件（已废弃）")
@@ -255,7 +257,7 @@ class CharacterRequest(BaseModel):
     """自定义角色播客请求"""
     characters: List[CharacterInfo] = Field(..., description="角色列表", min_items=2, max_items=3)
     topic: Optional[str] = Field(None, description="播客主题（可选）")
-    silence_interval: int = Field(600, description="角色切换静音间隔（毫秒），默认600ms以增加角色之间的间隔", ge=200, le=1500)
+    silence_interval: int = Field(800, description="角色切换静音间隔（毫秒），默认800ms以增加角色之间的间隔，让对话更清晰", ge=200, le=1500)
     job_id: Optional[str] = Field(None, description="可选任务ID，用于前端轮询进度")
 
 
@@ -266,7 +268,7 @@ class DeepPodcastRequest(BaseModel):
     role_voices: Optional[Dict[str, str]] = Field(None, description="[已废弃] 角色音色映射，base64编码的音频文件（已废弃，请使用role_voice_urls）")
     num_characters: int = Field(2, description="角色数量", ge=2, le=3)
     depth_level: str = Field("深度", description="深度级别", pattern="^(深度|中等|浅层)$")
-    silence_interval: int = Field(600, description="角色切换静音间隔（毫秒），默认600ms以增加角色之间的间隔", ge=200, le=1500)
+    silence_interval: int = Field(800, description="角色切换静音间隔（毫秒），默认800ms以增加角色之间的间隔，让对话更清晰", ge=200, le=1500)
     wait_for_upload: bool = Field(False, description="是否等待上传到云存储完成（可选，默认false）")
     upload_timeout: int = Field(120, description="等待上传完成的超时时间（秒），如果为0则根据文件大小自动计算", ge=0, le=600)
     job_id: Optional[str] = Field(None, description="可选任务ID，用于前端轮询进度")
@@ -480,10 +482,43 @@ def download_text_from_url(url: str, timeout: int = 60) -> str:
         
         # 检查Content-Type
         content_type = response.headers.get("content-type", "").lower()
-        file_extension = url.lower().split('.')[-1] if '.' in url else ''
+        # 从URL中提取文件扩展名（支持查询参数的情况）
+        url_path = url.split('?')[0]  # 移除查询参数
+        file_extension = url_path.lower().split('.')[-1] if '.' in url_path else ''
         
         # 读取文件内容
         content_bytes = response.content
+        
+        # 如果无法从URL确定文件类型，尝试从Content-Type判断
+        if not file_extension:
+            if 'application/pdf' in content_type:
+                file_extension = 'pdf'
+            elif 'application/msword' in content_type or 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' in content_type:
+                file_extension = 'docx' if 'vnd.openxmlformats' in content_type else 'doc'
+            elif 'text/plain' in content_type:
+                file_extension = 'txt'
+        
+        # 如果仍然无法确定，尝试从文件内容检测（通过文件头）
+        if not file_extension:
+            # 检测PDF文件头：%PDF
+            if content_bytes[:4] == b'%PDF':
+                file_extension = 'pdf'
+                logger.info("通过文件头检测到PDF文件")
+            # 检测Word文件头：PK (ZIP格式，docx是zip)
+            elif content_bytes[:4] == b'PK\x03\x04':
+                # 检查是否是docx（包含word/目录）
+                if b'word/' in content_bytes[:2048]:
+                    file_extension = 'docx'
+                    logger.info("通过文件头检测到DOCX文件")
+                else:
+                    # 可能是其他ZIP格式文件
+                    logger.warning("检测到ZIP格式文件，但无法确定是否为Word文件")
+            # 检测旧版Word文件头（OLE2格式）
+            elif content_bytes[:8] == b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1':
+                file_extension = 'doc'
+                logger.info("通过文件头检测到DOC文件")
+        
+        logger.info(f"检测到的文件类型: 扩展名={file_extension}, Content-Type={content_type}")
         
         # 根据文件类型解析内容
         if file_extension == 'txt' or 'text/plain' in content_type:
@@ -849,8 +884,8 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
             request.input_type = input_processor.detect_input_type_from_content("", request.input_url)
             logger.info(f"自动检测输入类型: {request.input_type}")
         elif has_text_file:
-            # 如果有文件，可能是PDF类型
-            request.input_type = "PDF"
+            # 如果有文件，可能是文件类型
+            request.input_type = "文件"
             logger.info(f"自动检测输入类型: {request.input_type}")
         elif has_text:
             # 根据文本内容检测是否包含指令
@@ -864,7 +899,7 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
     # 根据输入类型验证必需的输入
     input_type = request.input_type or ""
     text_types = ["文字", "文字+指令", "文字+英文指令"]
-    pdf_types = ["PDF", "PDF+指令"]
+    file_types = ["文件", "文件+指令"]
     url_types = ["公众号", "公众号+指令", "网页"]
     
     # 文字类型：只需要text，不需要text_file_url
@@ -875,12 +910,12 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
             logger.warning(f"文字类型不需要text_file_url，将忽略该字段")
             request.text_file_url = None
     
-    # PDF类型：只需要text_file_url，不需要text
-    elif input_type in pdf_types:
+    # 文件类型：只需要text_file_url，不需要text（支持.txt、.doc、.docx、.pdf等文件）
+    elif input_type in file_types:
         if not has_text_file:
-            raise HTTPException(status_code=400, detail="PDF类型需要上传PDF文件（text_file_url字段）")
+            raise HTTPException(status_code=400, detail="文件类型需要上传文件（text_file_url字段，支持.txt、.doc、.docx、.pdf等格式）")
         if has_text:
-            logger.warning(f"PDF类型不需要text，将忽略该字段")
+            logger.warning(f"文件类型不需要text，将忽略该字段")
             request.text = None
     
     # 公众号/网页类型：需要input_url
@@ -910,25 +945,25 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
         except Exception as e:
             logger.error(f"处理{input_type}类型输入失败: {str(e)}")
             raise HTTPException(status_code=400, detail=f"处理{input_type}类型输入失败: {str(e)}")
-    elif input_type in pdf_types:
-        # PDF类型：从云存储URL读取PDF文件
-        logger.info(f"从云存储URL读取PDF文件: {request.text_file_url}")
+    elif input_type in file_types:
+        # 文件类型：从云存储URL读取文件（支持.txt、.doc、.docx、.pdf等格式）
+        logger.info(f"从云存储URL读取文件: {request.text_file_url}")
         try:
-            _update_progress(request.job_id, "downloading_text", 3, "正在下载PDF文件")
+            _update_progress(request.job_id, "downloading_text", 3, "正在下载文件")
             text_content = download_text_from_url(request.text_file_url)
-            logger.info(f"PDF文件读取成功: {len(text_content)} 字符")
+            logger.info(f"文件读取成功: {len(text_content)} 字符")
             
             # 如果输入类型包含指令，尝试解析指令
             if "指令" in input_type or "instruction" in input_type.lower():
                 input_processor = get_processor()
                 text_content, extracted_instruction = input_processor.parse_instruction(text_content)
                 if extracted_instruction:
-                    logger.info(f"从PDF文件中提取的指令: {extracted_instruction}")
+                    logger.info(f"从文件中提取的指令: {extracted_instruction}")
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"读取PDF文件失败: {str(e)}")
-            raise HTTPException(status_code=400, detail=f"读取PDF文件失败: {str(e)}")
+            logger.error(f"读取文件失败: {str(e)}")
+            raise HTTPException(status_code=400, detail=f"读取文件失败: {str(e)}")
     elif input_type in text_types:
         # 文字类型：使用直接输入的文本
         text_content = request.text
@@ -1073,7 +1108,8 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                     podcast_name=request.podcast_name if request.podcast_name else None,
                     topic=request.topic if request.topic else None,
                     character_descriptions=character_descriptions if character_descriptions else None,
-                    scene_types=request.scene_types if request.scene_types else None
+                    scene_types=request.scene_types if request.scene_types else None,
+                    category=request.category if request.category else None
                 )
                 
                 generated_text = api_client.generate_text(
@@ -1085,6 +1121,35 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 generated_text = processor.clean_text(generated_text)
                 text_content = generated_text
                 roles = processor.extract_roles(text_content)
+            
+            # 自动选择背景音乐（在AI生成对话之后，使用完整的文本内容）
+            try:
+                _update_progress(request.job_id, "selecting_music", 22, "正在选择背景音乐")
+                logger.info("开始自动选择背景音乐...")
+                music_selector = MusicSelector(use_cloud_storage=True)
+                selected_music = music_selector.select_music_by_ai(
+                    text=text_content,  # 使用完整的文本内容（包括AI生成的对话）
+                    podcast_name=request.podcast_name,
+                    topic=request.topic,
+                    scene_types=request.scene_types,
+                    num_music=1
+                )
+                
+                if selected_music and len(selected_music) > 0:
+                    background_music_path = selected_music[0]
+                    logger.info(f"✓ 自动选择背景音乐: {os.path.basename(background_music_path)}")
+                    # 验证文件是否存在
+                    if not os.path.exists(background_music_path):
+                        logger.warning(f"⚠️ 背景音乐文件不存在: {background_music_path}")
+                        background_music_path = None
+                else:
+                    logger.warning("⚠️ 未找到合适的背景音乐，将不使用背景音乐")
+                    background_music_path = None
+            except Exception as e:
+                logger.warning(f"⚠️ 自动选择背景音乐失败: {str(e)}，将不使用背景音乐")
+                import traceback
+                logger.debug(f"错误详情: {traceback.format_exc()}")
+                background_music_path = None
             
             # 生成播客
             logger.info("开始生成播客音频...")
@@ -1098,6 +1163,7 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 outro_music=outro_music_path,
                 background_music=background_music_path,
                 background_volume=request.background_volume,
+                background_mode="single",  # 单个背景音乐，使用single模式
                 verbose=True
             )
             generation_time = time.time() - generation_start
