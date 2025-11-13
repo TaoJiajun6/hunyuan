@@ -230,7 +230,7 @@ class MultiRoleRequest(BaseModel):
     character_3_personality: Optional[str] = Field(None, description="角色3性格特点（可选）")
     character_3_speaking_style: Optional[str] = Field(None, description="角色3说话风格（可选）")
     scene_types: Optional[List[str]] = Field(None, description="互动场景类型列表（可选）")
-    category: Optional[str] = Field(None, description="播客分类（可选），如：商业、科技、财经、新闻、影视、自我成长与自愈、职场万象、学习类、娱乐八卦类、考题、文化艺术、职场类—人际关系、学生类—求职就业、健康养生、运动健身、旅游、美食、教育育儿、情感恋爱、历史、心理学、音乐、体育、游戏电竞、时尚美妆、汽车、法律、创业创新、哲学思考、科学科普、读书阅读、生活方式、喜剧、宠物等")
+    category: Optional[str] = Field(None, description="播客分类（可选），如：商业、科技、财经、新闻、影视、音乐、文化艺术、历史、哲学思考、自我成长、职场、学习、教育育儿、情感恋爱、健康养生、旅游、美食、生活方式、娱乐、游戏电竞、体育、时尚美妆、汽车、法律、宠物等")
     intro_music: Optional[str] = Field(None, description="[已废弃] 开场音乐，base64编码的音频文件（已废弃）")
     outro_music: Optional[str] = Field(None, description="[已废弃] 结尾音乐，base64编码的音频文件（已废弃）")
     background_music: Optional[str] = Field(None, description="[已废弃] 背景音乐，base64编码的音频文件（已废弃）")
