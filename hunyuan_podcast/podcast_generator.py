@@ -200,6 +200,7 @@ class PodcastGenerator:
             speakers=speakers,
             dialogues=dialogues,
             output_path=temp_audio_path,
+            silence_interval=silence_interval,
             verbose=verbose
         )
         

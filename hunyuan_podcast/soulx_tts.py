@@ -171,6 +171,7 @@ class SoulXTTS:
         speakers: Dict[str, Dict[str, str]],
         dialogues: List[tuple],
         output_path: str,
+        silence_interval: Optional[int] = None,
         verbose: bool = False
     ):
         """
@@ -180,6 +181,7 @@ class SoulXTTS:
             speakers: 说话人信息字典，格式为 {角色名: {"prompt_audio": 路径, "prompt_text": 文本}}
             dialogues: 对话列表，格式为 [(角色名, 文本), ...]
             output_path: 输出音频路径
+            silence_interval: 角色切换静音间隔（毫秒），如果为None则使用默认值400ms
             verbose: 是否输出详细信息
         
         Returns:
@@ -232,17 +234,54 @@ class SoulXTTS:
         # 生成音频
         results_dict = self.model.forward_longform(**data)
         
-        # 保存音频
-        target_audio = None
-        for wav in results_dict["generated_wavs"]:
-            if target_audio is None:
-                target_audio = wav
-            else:
-                target_audio = torch.cat([target_audio, wav], dim=1)
+        # 处理音频片段，添加静音间隔和淡入淡出效果以改善角色衔接
+        generated_wavs = results_dict["generated_wavs"]
+        if not generated_wavs:
+            raise ValueError("未生成任何音频片段")
+        
+        # SoulX-Podcast 输出采样率为 24000
+        sr = 24000
+        # 使用传入的静音间隔，如果没有则使用默认值400ms（比配置的800ms稍短以保持流畅）
+        silence_interval_ms = silence_interval if silence_interval is not None else 400
+        fade_duration_ms = 80  # 淡入淡出时长（毫秒），平滑过渡
+        
+        processed_segments = []
+        for i, wav in enumerate(generated_wavs):
+            # 确保音频格式正确 (1, samples)
+            if wav.dim() == 1:
+                wav = wav.unsqueeze(0)
+            elif wav.dim() > 1 and wav.shape[0] > 1:
+                wav = torch.mean(wav, dim=0, keepdim=True)
+            
+            # 应用淡入淡出效果，让衔接更自然
+            fade_samples = int(sr * fade_duration_ms / 1000.0)
+            if fade_samples > 0 and wav.shape[1] > fade_samples * 2:
+                # 淡入曲线（从0到1）
+                fade_in_curve = torch.linspace(0, 1, fade_samples).unsqueeze(0)
+                wav[:, :fade_samples] *= fade_in_curve
+                
+                # 淡出曲线（从1到0）
+                fade_out_curve = torch.linspace(1, 0, fade_samples).unsqueeze(0)
+                fade_out_start = wav.shape[1] - fade_samples
+                wav[:, fade_out_start:] *= fade_out_curve
+            
+            processed_segments.append(wav)
+            
+            # 在片段之间添加静音间隔（除了最后一个）
+            if i < len(generated_wavs) - 1:
+                silence_samples = int(sr * silence_interval_ms / 1000.0)
+                silence = torch.zeros(1, silence_samples)
+                processed_segments.append(silence)
+        
+        # 拼接所有处理后的音频片段
+        if len(processed_segments) == 1:
+            target_audio = processed_segments[0]
+        else:
+            target_audio = torch.cat(processed_segments, dim=1)
         
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         # SoulX-Podcast 输出采样率为 24000
-        sf.write(output_path, target_audio.cpu().squeeze(0).numpy(), 24000)
+        sf.write(output_path, target_audio.cpu().squeeze(0).numpy(), sr)
         
         if verbose:
             print(f"[INFO] 音频已保存到: {output_path}")
