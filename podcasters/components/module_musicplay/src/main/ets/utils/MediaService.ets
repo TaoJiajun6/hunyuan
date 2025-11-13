@@ -31,6 +31,8 @@ import { audio } from '@kit.AudioKit';
 import fs from '@ohos.file.fs';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { util } from '@kit.ArkTS';
+import { cloudStorage } from '@kit.CloudFoundationKit';
+import { request } from '@kit.BasicServicesKit';
 
 const TAG = 'MediaService';
 
@@ -277,6 +279,16 @@ export class MediaService {
   public initAudioPlayer(songList: Array<SongItem>, currentSong: SongItem): void {
     Logger.info(TAG, 'initAudioPlayer');
     this.changedData.songList = songList;
+    // 查找当前歌曲在列表中的索引
+    const songIndex = songList.findIndex(song => song.id === currentSong.id);
+    if (songIndex !== -1) {
+      this.musicIndex = songIndex;
+      Logger.info(TAG, `initAudioPlayer: 找到歌曲索引 ${songIndex} for song ${currentSong.id}`);
+    } else {
+      // 如果找不到，使用第一个
+      this.musicIndex = 0;
+      Logger.warn(TAG, `initAudioPlayer: 未找到歌曲，使用索引 0`);
+    }
     media.createAVPlayer().then(async avPlayer => {
       if (avPlayer) {
         this.avPlayer = avPlayer;
@@ -394,13 +406,23 @@ export class MediaService {
    * @param musicIndex
    */
   public controlPlay(musicIndex: number): void {
-    // 确保播放器已初始化
-    if (!this.avPlayer && this.changedData.songList.length > 0) {
-      const songToPlay = this.changedData.songList[musicIndex];
-      if (songToPlay) {
-        this.initAudioPlayer(this.changedData.songList, songToPlay);
+    // 检查播放器是否已初始化
+    if (!this.avPlayer) {
+      Logger.info(TAG, `播放器未初始化，开始初始化播放器，musicIndex: ${musicIndex}`);
+      // 确保有歌曲列表
+      if (this.changedData.songList.length === 0) {
+        Logger.error(TAG, '播放列表为空，无法初始化播放器');
         return;
       }
+      // 确保索引有效
+      if (musicIndex < 0 || musicIndex >= this.changedData.songList.length) {
+        Logger.error(TAG, `索引超出范围: ${musicIndex}, 列表长度: ${this.changedData.songList.length}`);
+        return;
+      }
+      // 初始化播放器
+      const currentSong = this.changedData.songList[musicIndex];
+      this.initAudioPlayer(this.changedData.songList, currentSong);
+      return;
     }
     this.isFirstLoadAsset = false;
     this.playByIndex(musicIndex);
@@ -438,14 +460,6 @@ export class MediaService {
   }
 
   public play(): void {
-    // 如果播放器未初始化，尝试初始化
-    if (!this.avPlayer && this.changedData.songList.length > 0) {
-      const currentSong = this.changedData.currentSong || this.changedData.songList[0];
-      if (currentSong) {
-        this.initAudioPlayer(this.changedData.songList, currentSong);
-        return;
-      }
-    }
     if (!this.isPrepared) {
       this.prepare();
     } else {
@@ -534,18 +548,10 @@ export class MediaService {
   }
 
   public async playByIndex(musicIndex: number): Promise<void> {
-    if (musicIndex >= this.changedData.songList.length || musicIndex < 0) {
+    if (musicIndex >= this.changedData.songList.length) {
       Logger.error(TAG,
         `playByIndex error, index is ${musicIndex} out of songList length ${this.changedData.songList.length}`);
       return;
-    }
-    // 确保播放器已初始化
-    if (!this.avPlayer) {
-      const songToPlay = this.changedData.songList[musicIndex];
-      if (songToPlay) {
-        this.initAudioPlayer(this.changedData.songList, songToPlay);
-        return;
-      }
     }
     this.updateMusicIndex(musicIndex);
     await this.stop();
@@ -563,32 +569,35 @@ export class MediaService {
   }
 
   private async loadAsset(currentSong?: SongItem): Promise<void> {
-    if (currentSong) {
-      // 通过ID查找索引，而不是直接解析ID为数字
-      const index = this.changedData.songList.findIndex(item => item.id === currentSong!.id);
-      if (index !== -1) {
-        this.musicIndex = index;
+    // 如果传入了 currentSong，尝试在列表中查找它的索引
+    if (currentSong && this.changedData.songList.length > 0) {
+      const songToFind = currentSong; // 使用局部变量确保类型安全
+      const foundIndex = this.changedData.songList.findIndex(song => song.id === songToFind.id);
+      if (foundIndex !== -1) {
+        this.musicIndex = foundIndex;
+        Logger.info(TAG, `loadAsset: 找到歌曲索引 ${foundIndex} for song ${songToFind.id}`);
+      } else {
+        // 如果找不到，尝试使用 id 作为索引（兼容旧逻辑）
+        const parsedIndex = Number.parseInt(songToFind.id) - 1;
+        if (!isNaN(parsedIndex) && parsedIndex >= 0 && parsedIndex < this.changedData.songList.length) {
+          this.musicIndex = parsedIndex;
+          Logger.info(TAG, `loadAsset: 使用解析的索引 ${parsedIndex} for song ${songToFind.id}`);
+        }
       }
-      Logger.info(TAG, `loadAsset musicIndex: ${this.musicIndex}, songId: ${currentSong.id}`);
     }
 
-    // 检查索引是否有效
+    // 确保索引有效
     if (this.musicIndex < 0 || this.musicIndex >= this.changedData.songList.length) {
-      Logger.error(TAG, `loadAsset error, invalid musicIndex: ${this.musicIndex}, songList length: ${this.changedData.songList.length}`);
+      Logger.error(TAG, `loadAsset: 索引无效 ${this.musicIndex}, 列表长度: ${this.changedData.songList.length}`);
       return;
     }
 
     // 播放歌曲
-    const songToPlay = this.changedData.songList[this.musicIndex];
-    if (!songToPlay) {
-      Logger.error(TAG, `loadAsset error, song at index ${this.musicIndex} is undefined`);
-      return;
-    }
-    currentSong = songToPlay;
+    currentSong = this.changedData.songList[this.musicIndex];
 
     if (currentSong.src.startsWith('http')) {
       // 根据歌曲地址判断是否网络歌曲
-      this.loadAssetHttp(currentSong)
+      await this.loadAssetHttp(currentSong)
     } else if (currentSong.src.startsWith('/')) {
       // 沙箱文件路径判断 - 以 '/' 开头的绝对路径视为沙箱文件
       this.loadAssetSandbox(currentSong);
@@ -611,10 +620,110 @@ export class MediaService {
 
 
   /**
+   * 从云存储URL中提取云侧文件路径
+   * 例如：https://ops-server-drcn.agcstorage.link/v0/podcasters-y0qig/outputs/podcasts/podcast_xxx.wav
+   * 提取：outputs/podcasts/podcast_xxx.wav
+   */
+  private extractCloudPath(url: string): string | null {
+    try {
+      // 查找 /outputs/ 来确定路径起始位置（这是最可靠的方式）
+      const outputsIndex = url.indexOf('/outputs/');
+      if (outputsIndex !== -1) {
+        // 提取从 /outputs/ 开始到URL结尾的所有内容
+        const cloudPath = url.substring(outputsIndex + 1); // +1 去掉开头的 /
+        return cloudPath;
+      }
+
+      // 如果没有找到 /outputs/，尝试其他方式
+      // 查找 bucket 名称后的路径（例如：podcasters-y0qig/outputs/podcasts/xxx.wav）
+      const bucketMatch = url.match(/\/[^\/]+\/(outputs\/[^\/]+\/.+)$/);
+      if (bucketMatch && bucketMatch[1]) {
+        return bucketMatch[1];
+      }
+
+      // 最后尝试：只提取文件名，假设在 outputs/podcasts/ 目录下
+      const lastSlashIndex = url.lastIndexOf('/');
+      if (lastSlashIndex !== -1) {
+        const fileName = url.substring(lastSlashIndex + 1);
+        // 如果文件名看起来像音频文件，假设它在 outputs/podcasts/ 目录下
+        if (fileName.match(/\.(wav|mp3|m4a|aac)$/i)) {
+          return `outputs/podcasts/${fileName}`;
+        }
+      }
+
+      return null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /**
+   * 从云存储下载文件
+   */
+  private async downloadFromCloudStorage(cloudPath: string): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      try {
+        const storageBucket = cloudStorage.bucket();
+
+        // 生成本地文件名
+        const fileName = cloudPath.split('/').pop() || `audio_${Date.now()}.wav`;
+        const localPath = fileName;
+
+        storageBucket.downloadFile(this.context, {
+          localPath: localPath,
+          cloudPath: cloudPath,
+          overwrite: true // 允许覆盖已存在的文件
+        }).then((task: request.agent.Task) => {
+          // 监听下载进度
+          task.on('progress', (progress: request.agent.Progress) => {
+            // 可以在这里更新下载进度UI
+            Logger.info(TAG, `下载进度: ${JSON.stringify(progress)}`);
+          });
+
+          // 监听下载完成
+          task.on('completed', (progress: request.agent.Progress) => {
+            // 文件已下载到 context.cacheDir/localPath
+            const localFilePath = `${this.context.cacheDir}/${localPath}`;
+            Logger.info(TAG, `云存储文件下载完成: ${localFilePath}`);
+            resolve(localFilePath);
+          });
+
+          // 监听下载失败
+          task.on('failed', (progress: request.agent.Progress) => {
+            Logger.error(TAG, `下载失败: ${JSON.stringify(progress)}`);
+            reject(new Error(`下载失败: ${JSON.stringify(progress)}`));
+          });
+
+          // 启动下载任务
+          task.start((err: BusinessError) => {
+            if (err) {
+              Logger.error(TAG, `启动下载任务失败: ${err.message || String(err)}`);
+              reject(new Error(`启动下载任务失败: ${err.message || String(err)}`));
+            }
+          });
+        }).catch((err: BusinessError) => {
+          Logger.error(TAG, `下载文件失败: ${err.message || String(err)}`);
+          reject(new Error(`下载文件失败: ${err.message || String(err)}`));
+        });
+      } catch (error) {
+        Logger.error(TAG, `下载文件异常: ${String(error)}`);
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * 检测URL是否是云存储URL
+   */
+  private isCloudStorageUrl(url: string): boolean {
+    return url.includes('agcstorage.link') || url.includes('/outputs/');
+  }
+
+  /**
    * 加载网络歌曲
    * @param currentSong
    */
-  loadAssetHttp(currentSong: SongItem) {
+  async loadAssetHttp(currentSong: SongItem) {
     if (!this.avPlayer) {
       Logger.error(TAG, 'loadAssetHttp error, avPlayer is not initialized');
       return;
@@ -622,19 +731,57 @@ export class MediaService {
     // 根据音质获取对应 URL
     let qualityUrl = this.getUrlByQuality(currentSong)
     qualityUrl = qualityUrl === '' ? currentSong.src : qualityUrl;
-    // 网络歌曲处理
-    if (this.avPlayer) {
-      this.avPlayer.url = qualityUrl;
-      Logger.info(TAG, `loadAssetHttp success, url: ${qualityUrl}`);
+
+    // 检测是否是云存储URL，如果是则先下载到本地
+    if (this.isCloudStorageUrl(qualityUrl)) {
+      Logger.info(TAG, `检测到云存储URL，开始下载: ${qualityUrl}`);
+      const cloudPath = this.extractCloudPath(qualityUrl);
+      if (cloudPath) {
+        try {
+          const localFilePath = await this.downloadFromCloudStorage(cloudPath);
+          // 使用本地文件路径播放（直接使用文件路径，参考 AudioPlayer 的实现）
+          if (this.avPlayer) {
+            // 验证文件是否存在（fs.accessSync 如果文件不存在会抛出异常）
+            try {
+              fs.accessSync(localFilePath);
+              Logger.info(TAG, `文件存在，准备播放: ${localFilePath}`);
+            } catch (accessError) {
+              Logger.warn(TAG, `文件访问检查失败，但继续尝试播放: ${localFilePath}, 错误: ${String(accessError)}`);
+            }
+            // 直接使用文件路径播放（AudioPlayer 就是这样做的）
+            this.avPlayer.url = localFilePath;
+            Logger.info(TAG, `loadAssetHttp success, 已设置播放URL: ${localFilePath}`);
+          } else {
+            Logger.error(TAG, `avPlayer 未初始化，无法设置URL`);
+          }
+        } catch (error) {
+          Logger.error(TAG, `下载云存储文件失败: ${String(error)}，尝试直接使用URL播放`);
+          promptAction.showToast({
+            message: `下载失败，尝试直接播放: ${String(error)}`,
+            duration: 2000
+          });
+          // 下载失败，尝试直接使用URL播放（作为备选）
+          if (this.avPlayer) {
+            this.avPlayer.url = qualityUrl;
+          }
+        }
+      } else {
+        Logger.warn(TAG, `无法提取云存储路径，直接使用URL: ${qualityUrl}`);
+        if (this.avPlayer) {
+          this.avPlayer.url = qualityUrl;
+        }
+      }
+    } else {
+      // 普通网络歌曲处理
+      if (this.avPlayer) {
+        this.avPlayer.url = qualityUrl;
+        Logger.info(TAG, `loadAssetHttp success, url: ${qualityUrl}`);
+      }
     }
   }
 
   //加载沙箱歌曲
   async loadAssetSandbox(currentSong: SongItem) {
-    if (!this.avPlayer) {
-      Logger.error(TAG, 'loadAssetSandbox error, avPlayer is not initialized');
-      return;
-    }
     let file: fs.File | null = null;
     try {
       // 本地歌曲处理
@@ -643,15 +790,10 @@ export class MediaService {
       fdPath = fdPath + '' + file.fd;
       if (this.avPlayer) {
         this.avPlayer.url = fdPath;
-        Logger.info(TAG, `loadAssetSandbox success, file path: ${currentSong.src}, fd: ${file.fd}`);
       }
     } catch (error) {
       let err: BusinessError = error as BusinessError;
-      Logger.error(TAG, `loadAssetSandbox error, file path: ${currentSong.src}, err: ${err.code}, ${err.message}`);
-      promptAction.showToast({
-        message: `加载音频失败: ${err.message || String(err)}`,
-        duration: 3000
-      });
+      Logger.error(TAG, 'loadAsset', ` err: ${err.code}, ${err.message}`);
     } finally {
       if (file) {
         setTimeout(() => {

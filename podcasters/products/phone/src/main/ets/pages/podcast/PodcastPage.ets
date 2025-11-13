@@ -4,6 +4,10 @@ import { MusicPlayController } from 'module_musicplay';
 import { CloudStorageMusicUtils } from '../../common/CloudStorageMusicUtils';
 import { MediaService } from 'module_musicplay';
 import { promptAction } from '@kit.ArkUI';
+import { FileUtils } from '../../utils/FileUtils';
+import { picker } from '@kit.CoreFileKit';
+import { common } from '@kit.AbilityKit';
+import { Logger } from 'lib_common';
 
 @Builder
 export function PodcastPageBuilder() {
@@ -13,6 +17,74 @@ export function PodcastPageBuilder() {
 @ComponentV2
 export struct PodcastPage {
   @Local isLoading: boolean = false;
+  @Local isUploadingMusic: boolean = false;
+
+  /**
+   * 上传背景音乐到云存储
+   */
+  async uploadBackgroundMusic() {
+    if (this.isUploadingMusic) {
+      return;
+    }
+
+    try {
+      this.isUploadingMusic = true;
+      
+      // 获取UIAbility上下文
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      
+      // 使用文件选择器选择音频文件
+      const filePicker = new picker.DocumentViewPicker();
+      const documentSelectOptions = new picker.DocumentSelectOptions();
+      documentSelectOptions.maxSelectNumber = 1;
+      documentSelectOptions.fileSuffixFilters = ['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac'];
+      
+      try {
+        const documentSelectResult = await filePicker.select(documentSelectOptions);
+        if (documentSelectResult && documentSelectResult.length > 0) {
+          const fileUri = documentSelectResult[0];
+          
+          promptAction.showToast({
+            message: '正在上传背景音乐到云存储...',
+            duration: 2000
+          });
+          
+          // 上传到云存储
+          const cloudInfo = await FileUtils.uploadBackgroundMusicToCloud(context, fileUri);
+          
+          if (cloudInfo && cloudInfo.cloudUrl) {
+            promptAction.showToast({
+              message: `背景音乐上传成功！\n文件已保存到云存储 music/ 目录`,
+              duration: 3000
+            });
+            Logger.info('PodcastPage', `背景音乐上传成功: ${cloudInfo.cloudUrl}`);
+          } else {
+            promptAction.showToast({
+              message: '背景音乐上传失败，请重试',
+              duration: 2000
+            });
+          }
+        } else {
+          // 用户取消了选择
+          Logger.info('PodcastPage', '用户取消了文件选择');
+        }
+      } catch (error) {
+        Logger.error('PodcastPage', `选择文件失败: ${error}`);
+        promptAction.showToast({
+          message: `选择文件失败: ${error}`,
+          duration: 2000
+        });
+      }
+    } catch (error) {
+      Logger.error('PodcastPage', `上传背景音乐失败: ${error}`);
+      promptAction.showToast({
+        message: `上传失败: ${error}`,
+        duration: 3000
+      });
+    } finally {
+      this.isUploadingMusic = false;
+    }
+  }
 
   /**
    * 从云存储导入音频
@@ -143,6 +215,33 @@ export struct PodcastPage {
             .backgroundColor($r('sys.color.comp_background_tertiary'))
             .onClick(() => {
               RouterUtils.pushPathByName(RouterMap.PODCAST_DEEP_PAGE)
+            })
+
+            // 上传背景音乐到云存储
+            Row() {
+              Column({ space: 8 }) {
+                Text('上传背景音乐')
+                  .fontSize($r('sys.float.Title_M'))
+                  .fontColor($r('sys.color.font_primary'))
+                  .fontWeight(FontWeight.Bold)
+
+                Text('将本地背景音乐文件上传到云存储 music/ 目录')
+                  .fontSize($r('sys.float.Body_M'))
+                  .fontColor($r('sys.color.font_secondary'))
+                  .maxLines(2)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+              }
+              .alignItems(HorizontalAlign.Start)
+              .layoutWeight(1)
+            }
+            .width('100%')
+            .padding(16)
+            .borderRadius(12)
+            .backgroundColor($r('sys.color.comp_background_tertiary'))
+            .opacity(this.isUploadingMusic ? 0.6 : 1)
+            .enabled(!this.isUploadingMusic)
+            .onClick(() => {
+              this.uploadBackgroundMusic();
             })
 
             // 从云存储导入音频

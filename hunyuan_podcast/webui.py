@@ -6,12 +6,12 @@ import os
 import sys
 import argparse
 import re
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, Tuple, List, Union
 
 # gradio 将在 create_webui 函数中导入，以便提供更好的错误提示
 
 from .podcast_generator import PodcastGenerator
-from .config import INDEXTTS_CONFIG_PATH, INDEXTTS_MODEL_DIR
+from .config import SOULX_PODCAST_MODEL_DIR, SOULX_PODCAST_LLM_ENGINE, SOULX_PODCAST_FP16_FLOW
 from .text_processor import TextProcessor
 
 
@@ -21,7 +21,7 @@ podcast_gen: Optional[PodcastGenerator] = None
 _generator_config: Optional[dict] = None
 
 
-def init_generator(use_fp16: bool = None, use_cuda_kernel: bool = None, device: Optional[str] = None):
+def init_generator(llm_engine: Optional[str] = None, fp16_flow: Optional[bool] = None, device: Optional[str] = None):
     """
     初始化播客生成器
     如果参数为None，则使用全局配置
@@ -30,29 +30,28 @@ def init_generator(use_fp16: bool = None, use_cuda_kernel: bool = None, device: 
     
     # 如果已有配置，使用配置中的值（如果参数为None）
     if _generator_config is not None:
-        use_fp16 = use_fp16 if use_fp16 is not None else _generator_config.get('use_fp16', False)
-        use_cuda_kernel = use_cuda_kernel if use_cuda_kernel is not None else _generator_config.get('use_cuda_kernel', False)
+        llm_engine = llm_engine if llm_engine is not None else _generator_config.get('llm_engine', None)
+        fp16_flow = fp16_flow if fp16_flow is not None else _generator_config.get('fp16_flow', None)
         device = device if device is not None else _generator_config.get('device', None)
     
     if podcast_gen is None:
         print("正在初始化播客生成器...")
         podcast_gen = PodcastGenerator(
-            tts_config_path=INDEXTTS_CONFIG_PATH,
-            tts_model_dir=INDEXTTS_MODEL_DIR,
-            use_fp16=use_fp16 or False,
-            use_cuda_kernel=use_cuda_kernel or False,
+            tts_model_dir=SOULX_PODCAST_MODEL_DIR,
+            llm_engine=llm_engine,
+            fp16_flow=fp16_flow,
             device=device
         )
         print("播客生成器初始化完成！")
     return podcast_gen
 
 
-def set_generator_config(use_fp16: bool = False, use_cuda_kernel: bool = False, device: Optional[str] = None):
+def set_generator_config(llm_engine: Optional[str] = None, fp16_flow: Optional[bool] = None, device: Optional[str] = None):
     """设置全局生成器配置"""
     global _generator_config
     _generator_config = {
-        'use_fp16': use_fp16,
-        'use_cuda_kernel': use_cuda_kernel,
+        'llm_engine': llm_engine,
+        'fp16_flow': fp16_flow,
         'device': device
     }
 
@@ -63,18 +62,56 @@ def wrap_multi_role_podcast(
     character_1_name, character_1_personality, character_1_speaking_style,
     character_2_name, character_2_personality, character_2_speaking_style,
     character_3_name, character_3_personality, character_3_speaking_style,
-    scene_types, intro_music, outro_music, background_music, background_volume,
-    progress=None
+    scene_types, auto_select_music, background_music, background_volume,
+    background_mode, progress=None
 ):
     """包装函数，格式化脚本输出"""
+    # 处理多文件上传（Gradio File 组件返回文件对象列表）
+    def process_file_input(file_input):
+        if not file_input:
+            return None
+        if isinstance(file_input, list):
+            # 如果是列表，提取文件路径
+            paths = [f.name if hasattr(f, 'name') else str(f) for f in file_input if f]
+            return paths if paths else None
+        elif hasattr(file_input, 'name'):
+            return file_input.name
+        else:
+            return str(file_input) if file_input else None
+    
+    # 如果启用AI自动选择音乐，则忽略手动上传的音乐
+    background_music_processed = None
+    if auto_select_music:
+        # AI自动选择音乐
+        try:
+            from .music_selector import MusicSelector
+            selector = MusicSelector()
+            background_music_processed = selector.select_music_by_ai(
+                text=text,
+                podcast_name=podcast_name if podcast_name and podcast_name.strip() else None,
+                topic=topic if topic and topic.strip() else None,
+                scene_types=scene_types if scene_types else None,
+                num_music=1
+            )
+            # 如果AI选择返回空列表，设置为None
+            if isinstance(background_music_processed, list) and len(background_music_processed) == 0:
+                background_music_processed = None
+            print(f"AI选择的背景音乐: {background_music_processed}")
+        except Exception as e:
+            print(f"AI自动选择音乐失败: {str(e)}")
+            background_music_processed = None
+    else:
+        # 手动上传的音乐
+        background_music_processed = process_file_input(background_music)
+        print(f"手动上传的背景音乐: {background_music_processed}")
+    
     audio_path, status, script = generate_multi_role_podcast(
         text, role_a_voice, role_b_voice, role_c_voice, silence_interval,
         podcast_name, topic,
         character_1_name, character_1_personality, character_1_speaking_style,
         character_2_name, character_2_personality, character_2_speaking_style,
         character_3_name, character_3_personality, character_3_speaking_style,
-        scene_types, intro_music, outro_music, background_music, background_volume,
-        progress
+        scene_types, background_music_processed, background_volume, background_mode, progress
     )
     if script:
         formatted_script = format_script_for_display(script)
@@ -304,10 +341,9 @@ def generate_multi_role_podcast(
     character_3_personality: Optional[str] = None,
     character_3_speaking_style: Optional[str] = None,
     scene_types: Optional[List[str]] = None,
-    intro_music: Optional[str] = None,
-    outro_music: Optional[str] = None,
-    background_music: Optional[str] = None,
+    background_music: Optional[Union[str, List[str]]] = None,
     background_volume: float = 0.3,
+    background_mode: str = "random",
     progress=None
 ) -> Tuple[str, str, str]:
     """
@@ -530,7 +566,7 @@ def generate_multi_role_podcast(
             return None, error_msg, ""
         
         if progress:
-            progress(0.4, desc=f"正在加载IndexTTS-2模型...")
+            progress(0.4, desc=f"正在加载SoulX-Podcast模型...")
         
         # 现在才初始化生成器（延迟加载TTS模型）
         generator = init_generator()
@@ -544,10 +580,9 @@ def generate_multi_role_podcast(
                 text=text,
                 role_voices=role_voices,
                 silence_interval=silence_interval,
-                intro_music=intro_music,
-                outro_music=outro_music,
                 background_music=background_music,
                 background_volume=background_volume,
+                background_mode=background_mode,
                 verbose=True
             )
             
@@ -833,65 +868,82 @@ def create_webui():
     except ImportError:
         print("错误：未安装 gradio")
         print("\n解决方案：")
-        print("1. 如果使用 uv 环境：")
-        print("   cd index-tts")
-        print("   uv pip install gradio")
-        print("\n2. 如果使用标准 Python 环境：")
         print("   pip install gradio")
         sys.exit(1)
     
     parser = argparse.ArgumentParser(description="混元AI播客生成系统")
     parser.add_argument("--port", type=int, default=7861, help="WebUI端口")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="WebUI主机")
-    parser.add_argument("--fp16", action="store_true", help="使用FP16精度")
-    parser.add_argument("--cuda_kernel", action="store_true", help="使用CUDA内核")
+    parser.add_argument("--fp16-flow", action="store_true", dest="fp16_flow", help="使用FP16精度（Flow模型）")
+    parser.add_argument("--no-fp16-flow", action="store_true", dest="no_fp16_flow", help="禁用FP16精度（Flow模型）")
+    parser.add_argument("--llm-engine", type=str, default=None, choices=["hf", "vllm"], help="LLM引擎类型 (hf 或 vllm)")
     parser.add_argument("--device", type=str, default=None, help="设备类型 (如 'cuda:0', 'cuda', 'cpu')，如果未指定则自动检测GPU")
     args = parser.parse_args()
     
     # 设备检测和配置
     import torch
     device = args.device
+    has_gpu = False
     if device is None:
         # 自动检测GPU
         if torch.cuda.is_available():
             device = "cuda:0"
+            has_gpu = True
             print(f"🚀 检测到GPU可用，将使用设备: {device}")
             if torch.cuda.device_count() > 1:
                 print(f"   检测到 {torch.cuda.device_count()} 个GPU设备")
             print(f"   GPU名称: {torch.cuda.get_device_name(0)}")
-            # 如果使用GPU，默认启用fp16和cuda_kernel（如果用户未指定）
-            if not args.fp16:
-                print("   💡 提示：使用GPU时建议启用 --fp16 以加速推理")
-            if not args.cuda_kernel:
-                print("   💡 提示：使用GPU时建议启用 --cuda_kernel 以进一步加速")
         else:
-            device = None  # 让IndexTTS2自动检测
-            print("⚠️  未检测到GPU，将使用CPU模式")
-            print("   ⚠️  CPU模式运行较慢，建议使用GPU环境")
+            device = None
+            print("⚠️  未检测到GPU，SoulX-Podcast需要GPU支持")
+            print("   ⚠️  请确保已安装CUDA和PyTorch GPU版本")
     else:
         print(f"🎯 使用指定设备: {device}")
-        if device.startswith("cuda") and not torch.cuda.is_available():
-            print(f"⚠️  警告：指定了CUDA设备，但CUDA不可用，将回退到CPU模式")
-            device = None
+        if device.startswith("cuda"):
+            if torch.cuda.is_available():
+                has_gpu = True
+            else:
+                print(f"⚠️  警告：指定了CUDA设备，但CUDA不可用，将回退到CPU模式")
+                device = None
+    
+    # 配置LLM引擎和FP16 Flow
+    llm_engine = args.llm_engine if args.llm_engine else None
+    fp16_flow = None
+    
+    if has_gpu:
+        # 自动启用fp16_flow（除非用户明确禁用）
+        if args.no_fp16_flow:
+            fp16_flow = False
+            print("   ⚠️  已禁用FP16 Flow（用户指定）")
+        else:
+            fp16_flow = args.fp16_flow or True  # 如果用户指定了--fp16-flow则使用，否则自动启用
+            if args.fp16_flow:
+                print("   ✅ 已启用FP16 Flow（用户指定）")
+            else:
+                print("   ✅ 已自动启用FP16 Flow（检测到GPU）")
+    else:
+        # CPU模式，不使用GPU优化
+        fp16_flow = False
+        if args.fp16_flow:
+            print("⚠️  警告: CPU模式不支持FP16 Flow，将忽略 --fp16-flow 参数")
     
     # 检查模型文件（使用绝对路径）
-    config_path = os.path.abspath(INDEXTTS_CONFIG_PATH)
-    model_dir = os.path.abspath(INDEXTTS_MODEL_DIR)
+    model_dir = os.path.abspath(SOULX_PODCAST_MODEL_DIR)
     
-    if not os.path.exists(config_path):
-        print(f"警告：配置文件不存在 {config_path}")
-        print(f"   请检查路径是否正确，或设置环境变量 INDEXTTS_CONFIG_PATH")
     if not os.path.exists(model_dir):
         print(f"警告：模型目录不存在 {model_dir}")
-        print(f"   请检查路径是否正确，或设置环境变量 INDEXTTS_MODEL_DIR")
+        print(f"   请检查路径是否正确，或设置环境变量 SOULX_PODCAST_MODEL_DIR")
+        print(f"   模型下载方法：")
+        print(f"   cd SoulX-Podcast")
+        print(f"   huggingface-cli download --resume-download Soul-AILab/SoulX-Podcast-1.7B --local-dir pretrained_models/SoulX-Podcast-1.7B")
     
     # 更新args中的device，以便后续使用
     args.device = device
     
     # 设置全局生成器配置
     set_generator_config(
-        use_fp16=args.fp16,
-        use_cuda_kernel=args.cuda_kernel,
+        llm_engine=llm_engine,
+        fp16_flow=fp16_flow,
         device=device
     )
     
@@ -1149,7 +1201,7 @@ def create_webui():
         gr.HTML('''
         <div class="header-section">
             <h1>🎙️ 混元AI播客生成系统</h1>
-            <p style="font-size: 1.2em; color: #667eea; font-weight: 600;">基于混元大模型和IndexTTS-2的智能播客音频生成工具</p>
+            <p style="font-size: 1.2em; color: #667eea; font-weight: 600;">基于混元大模型和SoulX-Podcast的智能播客音频生成工具</p>
             <p style="color: #888;">支持多角色互动、自定义角色人设、主题深度播客生成</p>
             <div style="margin-top: 20px;">
                 <span style="background: #667eea; color: white; padding: 6px 12px; border-radius: 20px; margin: 0 8px; display: inline-block;">
@@ -1335,36 +1387,47 @@ def create_webui():
                     )
                     
                     # 音效设置（折叠面板）
-                    with gr.Accordion("🎵 音效设置（可选）", open=False):
-                        intro_music = gr.Audio(
-                            label="🎵 开场音乐",
-                            sources=["upload"],
-                            type="filepath",
-                            info="上传开场音乐文件（WAV/MP3格式），会在播客开始时播放",
+                    with gr.Accordion("🎵 背景音乐设置（可选）", open=False):
+                        gr.Markdown("""
+                        **💡 智能背景音乐功能：**
+                        - ✅ **自动Ducking效果**：角色说话时，背景音乐音量自动降低，确保对话清晰
+                        - ✅ **AI自动匹配**：系统会根据播客内容自动选择最合适的背景音乐
+                        - ✅ **手动上传**：也可以手动上传自定义背景音乐
+                        """)
+                        
+                        auto_select_music = gr.Checkbox(
+                            label="🤖 AI自动选择背景音乐",
+                            value=True,
+                            info="启用后，系统会根据播客内容、主题和场景类型，从音乐库中自动选择最合适的背景音乐"
+                        )
+                        
+                        background_music = gr.File(
+                            label="🎵 手动上传背景音乐（可多选，仅在AI自动选择关闭时生效）",
+                            file_count="multiple",
+                            file_types=[".wav", ".mp3", ".m4a", ".flac"],
+                            info="如果关闭AI自动选择，可以手动上传背景音乐文件。可以上传多个文件，系统会根据下方模式处理。",
                             elem_classes=["audio-container"]
                         )
-                        outro_music = gr.Audio(
-                            label="🎵 结尾音乐",
-                            sources=["upload"],
-                            type="filepath",
-                            info="上传结尾音乐文件（WAV/MP3格式），会在播客结束时播放",
-                            elem_classes=["audio-container"]
+                        
+                        background_mode = gr.Radio(
+                            label="🎛️ 背景音乐处理模式（仅手动上传多个文件时生效）",
+                            choices=[
+                                ("随机选择", "random"),
+                                ("顺序拼接", "concat"),
+                                ("混合播放", "mix")
+                            ],
+                            value="random",
+                            info="当手动上传多个背景音乐时：随机选择 = 随机选一个；顺序拼接 = 按顺序播放；混合播放 = 混合所有音乐"
                         )
-                        background_music = gr.Audio(
-                            label="🎵 背景音乐",
-                            sources=["upload"],
-                            type="filepath",
-                            info="上传背景音乐文件（WAV/MP3格式），会在整个播客过程中作为背景音播放",
-                            elem_classes=["audio-container"]
-                        )
+                        
                         background_volume = gr.Slider(
-                            label="🔊 背景音乐音量",
+                            label="🔊 背景音乐基础音量",
                             minimum=0.0,
                             maximum=1.0,
                             value=0.3,
                             step=0.1,
-                            info="调整背景音乐音量（0.0-1.0），建议范围：0.2-0.4，避免盖过对话声音"
-                    )
+                            info="背景音乐的基础音量（0.0-1.0）。角色说话时，系统会自动降低音量（ducking效果）。建议范围：0.2-0.4"
+                        )
                     
                     gen_button_1 = gr.Button(
                         "🚀 生成播客",
@@ -1444,10 +1507,10 @@ def create_webui():
                     character_3_personality,
                     character_3_speaking_style,
                     scene_types,
-                    intro_music,
-                    outro_music,
+                    auto_select_music,
                     background_music,
-                    background_volume
+                    background_volume,
+                    background_mode
                 ],
                 outputs=[output_audio_1, status_text_1, script_display_1]
             )
@@ -1787,7 +1850,7 @@ def create_webui():
         gr.HTML('''
         <div style="text-align: center; margin-top: 40px; padding: 24px; background: #f8f9fa; border-radius: 12px; border-top: 1px solid #e9ecef;">
             <p style="color: #666; margin: 8px 0; font-size: 0.95em;">
-                <strong>混元AI播客生成系统</strong> | 基于混元大模型和IndexTTS-2
+                <strong>混元AI播客生成系统</strong> | 基于混元大模型和SoulX-Podcast
             </p>
             <p style="color: #999; margin: 4px 0; font-size: 0.85em;">
                 支持多角色互动、自定义角色人设、主题深度播客生成

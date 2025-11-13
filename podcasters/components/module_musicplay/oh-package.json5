@@ -5,9 +5,7 @@
   "main": "Index.ets",
   "author": "",
   "license": "Apache-2.0",
-  "dependencies": {
-    "module_share": "file:../../components/module_share"
-  },
+  "dependencies": {},
   "devDependencies": {},
   "dynamicDependencies": {}
 }

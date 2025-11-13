@@ -10,15 +10,15 @@ SILICONFLOW_API_KEY = "sk-tpoapasxdwjyexqfagbiigtvwsoydwravbptrmrrmwjfdwbh"  # �
 SILICONFLOW_API_BASE = "https://api.siliconflow.cn/v1"
 SILICONFLOW_MODEL = "tencent/Hunyuan-A13B-Instruct"
 
-# IndexTTS-2配置
+# SoulX-Podcast配置
 # 获取项目根目录（相对于当前文件）
 _current_file_dir = os.path.dirname(os.path.abspath(__file__))
 _project_root = os.path.dirname(_current_file_dir)
-_default_config_path = os.path.join(_project_root, "index-tts", "checkpoints", "config.yaml")
-_default_model_dir = os.path.join(_project_root, "index-tts", "checkpoints")
+_default_model_dir = os.path.join(_project_root, "SoulX-Podcast", "pretrained_models", "SoulX-Podcast-1.7B")
 
-INDEXTTS_CONFIG_PATH = os.getenv("INDEXTTS_CONFIG_PATH", _default_config_path)
-INDEXTTS_MODEL_DIR = os.getenv("INDEXTTS_MODEL_DIR", _default_model_dir)
+SOULX_PODCAST_MODEL_DIR = os.getenv("SOULX_PODCAST_MODEL_DIR", _default_model_dir)
+SOULX_PODCAST_LLM_ENGINE = os.getenv("SOULX_PODCAST_LLM_ENGINE", "hf")  # "hf" 或 "vllm"
+SOULX_PODCAST_FP16_FLOW = os.getenv("SOULX_PODCAST_FP16_FLOW", "False").lower() == "true"
 
 # 默认参数
 DEFAULT_TEMPERATURE = 0.7
@@ -34,4 +34,13 @@ _current_file_dir = os.path.dirname(os.path.abspath(__file__))
 _project_root = os.path.dirname(_current_file_dir)
 OUTPUT_DIR = os.path.join(_project_root, "outputs", "podcasts")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# 音乐文件夹路径（保留原有路径，如果不存在则使用备用路径）
+_music_dir_index_tts = os.path.join(_project_root, "index-tts", "music")
+_music_dir_default = os.path.join(_project_root, "music")
+MUSIC_DIR = _music_dir_index_tts if os.path.exists(_music_dir_index_tts) else _music_dir_default
+
+# 云存储音乐配置
+# 云存储音乐文件夹路径（相对于bucket的路径）
+CLOUD_STORAGE_MUSIC_PATH = os.getenv('CLOUD_STORAGE_MUSIC_PATH', 'music/')
 

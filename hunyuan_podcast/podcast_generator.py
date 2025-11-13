@@ -1,54 +1,18 @@
 """
 播客生成核心模块
-整合混元模型和IndexTTS-2，实现多角色播客生成
+整合混元模型和SoulX-Podcast，实现多角色播客生成
 """
 import os
 import sys
 import logging
 import torch
-from typing import Dict, List, Optional, Tuple
+import torchaudio
+from typing import Dict, List, Optional, Tuple, Union
 from pathlib import Path
 
 # 设置 HuggingFace 镜像（如果未设置，避免下载时的网络问题）
 if "HF_ENDPOINT" not in os.environ:
     os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-
-# 添加index-tts路径到sys.path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(current_dir)
-index_tts_path = os.path.join(project_root, "index-tts")
-if index_tts_path not in sys.path:
-    sys.path.insert(0, index_tts_path)
-
-try:
-    from indextts.infer_v2 import IndexTTS2
-except ImportError as e:
-    error_msg = str(e)
-    # 检查是否是缺少依赖导致的错误
-    if "librosa" in error_msg or "No module named" in error_msg:
-        print("导入错误：缺少必要的依赖")
-        print(f"   错误详情: {error_msg}")
-        print("\n解决方案：")
-        print("   1. 如果使用 uv 环境：")
-        print("      cd index-tts")
-        print("      uv sync --all-extras")
-        print("   2. 如果使用标准 Python 环境：")
-        print("      pip install librosa torch torchaudio")
-        print("   3. 确保在正确的 Python 环境中运行")
-        raise ImportError(f"缺少依赖: {error_msg}\n请按照上述提示安装依赖。")
-    
-    # 如果直接导入失败，尝试从项目根目录导入
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "infer_v2",
-        os.path.join(index_tts_path, "indextts", "infer_v2.py")
-    )
-    if spec and spec.loader:
-        infer_v2_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(infer_v2_module)
-        IndexTTS2 = infer_v2_module.IndexTTS2
-    else:
-        raise ImportError("无法导入IndexTTS2，请检查index-tts路径")
 
 from .api_client import get_client, SiliconFlowClient
 from .text_processor import TextProcessor
@@ -62,7 +26,8 @@ from .utils import (
     AUDIO_SAMPLING_RATE,
     AUDIO_SILENCE_INTERVAL
 )
-from .config import INDEXTTS_CONFIG_PATH, INDEXTTS_MODEL_DIR
+from .config import SOULX_PODCAST_MODEL_DIR, SOULX_PODCAST_LLM_ENGINE, SOULX_PODCAST_FP16_FLOW
+from .soulx_tts import SoulXTTS
 
 
 class PodcastGenerator:
@@ -70,10 +35,9 @@ class PodcastGenerator:
     
     def __init__(
         self,
-        tts_config_path: Optional[str] = None,
         tts_model_dir: Optional[str] = None,
-        use_fp16: bool = False,
-        use_cuda_kernel: bool = False,
+        llm_engine: Optional[str] = None,
+        fp16_flow: Optional[bool] = None,
         device: Optional[str] = None,
         api_client: Optional[SiliconFlowClient] = None
     ):
@@ -81,22 +45,20 @@ class PodcastGenerator:
         初始化播客生成器
         
         Args:
-            tts_config_path: IndexTTS-2配置文件路径
-            tts_model_dir: IndexTTS-2模型目录
-            use_fp16: 是否使用FP16精度
-            use_cuda_kernel: 是否使用CUDA内核
-            device: 设备类型 (如 'cuda:0', 'cuda', 'cpu')，如果为None则自动检测
+            tts_model_dir: SoulX-Podcast模型目录
+            llm_engine: LLM引擎类型 ("hf" 或 "vllm")，如果为None则使用配置默认值
+            fp16_flow: 是否使用FP16精度，如果为None则使用配置默认值
+            device: 设备类型（SoulX-Podcast自动使用CUDA，此参数保留以兼容接口）
             api_client: API客户端实例，如果为None则创建新实例
         """
         # 保存TTS配置（延迟加载）
-        self.tts_config_path = tts_config_path or INDEXTTS_CONFIG_PATH
-        self.tts_model_dir = tts_model_dir or INDEXTTS_MODEL_DIR
-        self.use_fp16 = use_fp16
-        self.use_cuda_kernel = use_cuda_kernel
-        self.device = device
+        self.tts_model_dir = tts_model_dir or SOULX_PODCAST_MODEL_DIR
+        self.llm_engine = llm_engine if llm_engine is not None else SOULX_PODCAST_LLM_ENGINE
+        self.fp16_flow = fp16_flow if fp16_flow is not None else SOULX_PODCAST_FP16_FLOW
+        self.device = device  # SoulX-Podcast 自动使用 CUDA
         
         # TTS模型延迟加载（在需要时才加载）
-        self.tts: Optional[IndexTTS2] = None
+        self.tts: Optional[SoulXTTS] = None
         
         # 初始化文本处理器和API客户端
         self.text_processor = TextProcessor()
@@ -110,31 +72,23 @@ class PodcastGenerator:
         确保TTS模型已加载（延迟加载）
         """
         if self.tts is None:
-            print(f"正在加载IndexTTS-2模型...")
-            print(f"配置文件: {self.tts_config_path}")
+            print(f"正在加载SoulX-Podcast模型...")
             print(f"模型目录: {self.tts_model_dir}")
+            print(f"LLM引擎: {self.llm_engine}")
+            print(f"FP16 Flow: {self.fp16_flow}")
             
-            # 如果没有指定设备，自动检测GPU
-            device = self.device
-            if device is None:
-                if torch.cuda.is_available():
-                    device = "cuda:0"
-                    print(f"🎯 检测到GPU，将使用设备: {device}")
-                else:
-                    device = None  # 让IndexTTS2自动检测
-                    print("⚠️  未检测到GPU，将使用CPU模式")
+            if torch.cuda.is_available():
+                print(f"🎯 检测到GPU，将使用CUDA")
             else:
-                print(f"🎯 使用指定设备: {device}")
+                print("⚠️  警告：未检测到GPU，SoulX-Podcast需要GPU支持")
             
-            self.tts = IndexTTS2(
-                cfg_path=self.tts_config_path,
-                model_dir=self.tts_model_dir,
-                use_fp16=self.use_fp16,
-                device=device,
-                use_cuda_kernel=self.use_cuda_kernel,
-                use_deepspeed=False
+            self.tts = SoulXTTS(
+                model_path=self.tts_model_dir,
+                llm_engine=self.llm_engine,
+                fp16_flow=self.fp16_flow,
+                device=self.device
             )
-            print(f"✅ IndexTTS-2模型加载完成！使用设备: {self.tts.device}")
+            print(f"✅ SoulX-Podcast模型加载完成！")
     
     def set_role_voice(self, role: str, voice_file: str) -> None:
         """
@@ -165,10 +119,11 @@ class PodcastGenerator:
         role_voices: Optional[Dict[str, str]] = None,
         output_path: Optional[str] = None,
         silence_interval: int = AUDIO_SILENCE_INTERVAL,
-        intro_music: Optional[str] = None,
-        outro_music: Optional[str] = None,
-        background_music: Optional[str] = None,
+        intro_music: Optional[Union[str, List[str]]] = None,
+        outro_music: Optional[Union[str, List[str]]] = None,
+        background_music: Optional[Union[str, List[str]]] = None,
         background_volume: float = 0.3,
+        background_mode: str = "random",
         verbose: bool = False
     ) -> str:
         """
@@ -179,10 +134,11 @@ class PodcastGenerator:
             role_voices: 角色音色映射，如果为None则使用已设置的映射
             output_path: 输出文件路径
             silence_interval: 角色切换时的静音间隔（毫秒）
-            intro_music: 开场音乐文件路径（可选）
-            outro_music: 结尾音乐文件路径（可选）
-            background_music: 背景音乐文件路径（可选）
+            intro_music: 开场音乐文件路径或路径列表（可选）
+            outro_music: 结尾音乐文件路径或路径列表（可选）
+            background_music: 背景音乐文件路径或路径列表（可选）
             background_volume: 背景音乐音量（0.0-1.0），默认0.3
+            background_mode: 背景音乐处理模式（"random"/"concat"/"mix"），默认"random"
             verbose: 是否输出详细信息
         
         Returns:
@@ -219,44 +175,52 @@ class PodcastGenerator:
             for role, content in dialogues:
                 print(f"  {role}: {content[:50]}...")
         
-        # 为每个角色生成音频
-        audio_segments = []
-        for role, content in dialogues:
-            if not content.strip():
-                continue
-            
-            # 获取角色的音色文件
+        # 确保TTS模型已加载
+        self._ensure_tts_loaded()
+        
+        # 构建说话人信息字典（SoulX-Podcast格式）
+        speakers = {}
+        for role in set(role for role, _ in dialogues):
             voice_file = self.role_voices.get(role)
             if not voice_file:
                 raise ValueError(f"角色 '{role}' 没有设置音色文件")
-            
-            if verbose:
-                print(f"正在为角色 '{role}' 生成音频...")
-            
-            # 生成临时音频文件
-            temp_audio_path = get_output_path(f"temp_{role}_{len(audio_segments)}.wav")
-            
-            # 确保TTS模型已加载
-            self._ensure_tts_loaded()
-            
-            # 使用IndexTTS-2生成音频
-            self.tts.infer(
-                spk_audio_prompt=voice_file,
-                text=content,
-                output_path=temp_audio_path,
-                verbose=verbose,
-                max_text_tokens_per_segment=120
-            )
-            
-            # 加载生成的音频
-            audio, sr = load_audio(temp_audio_path, AUDIO_SAMPLING_RATE)
-            audio_segments.append(audio)
-            
-            # 清理临时文件
-            if os.path.exists(temp_audio_path):
-                os.remove(temp_audio_path)
+            speakers[role] = {
+                "prompt_audio": voice_file,
+                "prompt_text": f"这是角色 {role} 的参考音频。"
+            }
         
-        # 合成所有音频片段
+        # 生成临时音频文件（SoulX-Podcast输出24000采样率）
+        temp_audio_path = get_output_path("temp_soulx_output.wav")
+        
+        if verbose:
+            print(f"正在使用SoulX-Podcast生成多角色播客音频...")
+        
+        # 使用SoulX-Podcast生成多角色播客音频
+        self.tts.infer_multi_speaker(
+            speakers=speakers,
+            dialogues=dialogues,
+            output_path=temp_audio_path,
+            verbose=verbose
+        )
+        
+        # 加载生成的音频并重采样到目标采样率（SoulX-Podcast输出24000，需要重采样到22050）
+        audio, sr = load_audio(temp_audio_path, AUDIO_SAMPLING_RATE)
+        
+        # 确保音频格式正确（单声道，2D张量 (1, samples)）
+        if audio.dim() == 1:
+            audio = audio.unsqueeze(0)
+        elif audio.dim() > 1 and audio.shape[0] > 1:
+            # 如果是多声道，转换为单声道
+            audio = torch.mean(audio, dim=0, keepdim=True)
+        
+        # 如果采样率不匹配，进行重采样
+        if sr != AUDIO_SAMPLING_RATE:
+            if verbose:
+                print(f"正在将音频从 {sr}Hz 重采样到 {AUDIO_SAMPLING_RATE}Hz...")
+            resampler = torchaudio.transforms.Resample(sr, AUDIO_SAMPLING_RATE)
+            audio = resampler(audio)
+        
+        # 合成所有音频片段（SoulX-Podcast已经生成了完整音频，这里主要是为了后续处理）
         if not output_path:
             output_path = get_output_path()
         else:
@@ -265,51 +229,70 @@ class PodcastGenerator:
             # 确保输出目录存在
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
         
+        main_audio = audio
+        
+        # 如果有背景音乐，混合背景音乐（启用ducking效果）
         if verbose:
-            print(f"正在合成 {len(audio_segments)} 个音频片段...")
+            print(f"背景音乐参数: {background_music}")
+            print(f"背景音乐类型: {type(background_music)}")
         
-        # 合成所有对话音频
-        main_audio = concatenate_audios(
-            audio_segments,
-            silence_intervals=[silence_interval] * (len(audio_segments) - 1),
-            sr=AUDIO_SAMPLING_RATE
-        )
-        
-        # 如果有背景音乐，混合背景音乐
-        if background_music and os.path.exists(background_music):
+        if background_music:
+            # 处理单个文件或文件列表
+            if isinstance(background_music, str):
+                background_music_list = [background_music] if os.path.exists(background_music) else []
+            elif isinstance(background_music, list):
+                # 如果是列表，过滤掉不存在的文件
+                background_music_list = [f for f in background_music if f and isinstance(f, str) and os.path.exists(f)]
+            else:
+                background_music_list = []
+            
             if verbose:
-                print(f"正在加载并混合背景音乐: {background_music}")
-            background_audio, _ = load_audio(background_music, AUDIO_SAMPLING_RATE)
-            main_audio = mix_audio_with_background(
-                main_audio,
-                background_audio,
-                background_volume=background_volume
-            )
-        
-        # 加载开场和结尾音乐
-        intro_audio = None
-        outro_audio = None
-        
-        if intro_music and os.path.exists(intro_music):
-            if verbose:
-                print(f"正在加载开场音乐: {intro_music}")
-            intro_audio, _ = load_audio(intro_music, AUDIO_SAMPLING_RATE)
-        
-        if outro_music and os.path.exists(outro_music):
-            if verbose:
-                print(f"正在加载结尾音乐: {outro_music}")
-            outro_audio, _ = load_audio(outro_music, AUDIO_SAMPLING_RATE)
-        
-        # 添加开场和结尾音乐
-        if intro_audio is not None or outro_audio is not None:
-            if verbose:
-                print("正在添加开场和结尾音乐...")
-            final_audio = add_intro_outro_music(
-                main_audio,
-                intro_music=intro_audio,
-                outro_music=outro_audio,
-                sr=AUDIO_SAMPLING_RATE
-            )
+                print(f"处理后的背景音乐列表: {background_music_list}")
+                print(f"有效文件数量: {len(background_music_list)}")
+            
+            if background_music_list:
+                if verbose:
+                    if len(background_music_list) == 1:
+                        print(f"正在加载并混合背景音乐: {background_music_list[0]}")
+                    else:
+                        print(f"正在加载并混合 {len(background_music_list)} 个背景音乐文件（模式: {background_mode}）")
+                
+                # 加载所有背景音乐
+                background_audios = []
+                for bg_path in background_music_list:
+                    bg_audio, _ = load_audio(bg_path, AUDIO_SAMPLING_RATE)
+                    background_audios.append(bg_audio)
+                
+                # 根据模式处理
+                if len(background_audios) == 1:
+                    background_audio = background_audios[0]
+                else:
+                    if background_mode == "random":
+                        import random
+                        background_audio = random.choice(background_audios)
+                    elif background_mode == "concat":
+                        background_audio = concatenate_audios(background_audios, silence_intervals=[200] * (len(background_audios) - 1), sr=AUDIO_SAMPLING_RATE)
+                    elif background_mode == "mix":
+                        # 混合所有背景音乐
+                        from .utils import load_multiple_audios
+                        background_paths = background_music_list
+                        background_audio = load_multiple_audios(background_paths, target_sr=AUDIO_SAMPLING_RATE, mode="mix")
+                    else:
+                        background_audio = background_audios[0]
+                
+                if verbose:
+                    print("正在混合背景音乐（启用ducking效果：对话时自动压低背景音乐）...")
+                
+                main_audio = mix_audio_with_background(
+                    main_audio,
+                    background_audio,
+                    background_volume=background_volume,
+                    background_mode=background_mode,
+                    enable_ducking=True  # 启用ducking效果
+                )
+                final_audio = main_audio
+            else:
+                final_audio = main_audio
         else:
             final_audio = main_audio
         
@@ -317,6 +300,10 @@ class PodcastGenerator:
             print(f"正在保存音频到: {output_path}")
         
         save_audio(final_audio, output_path, AUDIO_SAMPLING_RATE)
+        
+        # 清理临时文件
+        if os.path.exists(temp_audio_path):
+            os.remove(temp_audio_path)
         
         # 返回绝对路径
         return os.path.abspath(output_path)

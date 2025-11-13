@@ -80,8 +80,6 @@ export { FormatCount } from './src/main/ets/utils/FormatCount';
 
 export { BundleUtils } from './src/main/ets/utils/BundleUtils';
 
-export { SafeRandomGenerate } from './src/main/ets/utils/SafeRandomNumer';
-
 export { BreakpointUtils } from './src/main/ets/utils/BreakpointUtils';
 
 export { NetworkUtil } from './src/main/ets/utils/NetworkUtil';
