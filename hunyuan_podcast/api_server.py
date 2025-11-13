@@ -212,7 +212,7 @@ class MultiRoleRequest(BaseModel):
     text_file_url: Optional[str] = Field(None, description="文本文件云存储URL（.txt或Word文件，如果提供，优先使用）")
     role_voice_urls: Optional[Dict[str, str]] = Field(None, description="角色音色映射，云存储URL（如果使用云存储，键为角色名，值为云存储下载URL）")
     role_voices: Optional[Dict[str, str]] = Field(None, description="[已废弃] 角色音色映射，base64编码的音频文件（已废弃，请使用role_voice_urls）")
-    silence_interval: int = Field(300, description="角色切换静音间隔（毫秒）", ge=100, le=1000)
+    silence_interval: int = Field(600, description="角色切换静音间隔（毫秒），默认600ms以增加角色之间的间隔", ge=200, le=1500)
     podcast_name: Optional[str] = Field(None, description="播客名称（可选）")
     topic: Optional[str] = Field(None, description="本期主题（可选）")
     character_1_name: Optional[str] = Field(None, description="角色1名称（可选）")
@@ -251,7 +251,7 @@ class CharacterRequest(BaseModel):
     """自定义角色播客请求"""
     characters: List[CharacterInfo] = Field(..., description="角色列表", min_items=2, max_items=3)
     topic: Optional[str] = Field(None, description="播客主题（可选）")
-    silence_interval: int = Field(300, description="角色切换静音间隔（毫秒）", ge=100, le=1000)
+    silence_interval: int = Field(600, description="角色切换静音间隔（毫秒），默认600ms以增加角色之间的间隔", ge=200, le=1500)
     job_id: Optional[str] = Field(None, description="可选任务ID，用于前端轮询进度")
 
 
@@ -262,7 +262,7 @@ class DeepPodcastRequest(BaseModel):
     role_voices: Optional[Dict[str, str]] = Field(None, description="[已废弃] 角色音色映射，base64编码的音频文件（已废弃，请使用role_voice_urls）")
     num_characters: int = Field(2, description="角色数量", ge=2, le=3)
     depth_level: str = Field("深度", description="深度级别", pattern="^(深度|中等|浅层)$")
-    silence_interval: int = Field(300, description="角色切换静音间隔（毫秒）", ge=100, le=1000)
+    silence_interval: int = Field(600, description="角色切换静音间隔（毫秒），默认600ms以增加角色之间的间隔", ge=200, le=1500)
     wait_for_upload: bool = Field(False, description="是否等待上传到云存储完成（可选，默认false）")
     upload_timeout: int = Field(120, description="等待上传完成的超时时间（秒），如果为0则根据文件大小自动计算", ge=0, le=600)
     job_id: Optional[str] = Field(None, description="可选任务ID，用于前端轮询进度")
@@ -911,7 +911,7 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 generated_text = api_client.generate_text(
                     prompt=prompt,
                     temperature=0.8,
-                    max_tokens=2500
+                    max_tokens=5000  # 增加到5000以支持4-5分钟的对话内容
                 )
                 
                 generated_text = processor.clean_text(generated_text)

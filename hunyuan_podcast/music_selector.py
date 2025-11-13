@@ -65,19 +65,41 @@ class MusicSelector:
         # 优先尝试从云存储获取
         if self.cloud_client:
             try:
+                print(f"尝试从云存储获取音乐文件 (bucket: {self.cloud_client.bucket}, path: {self.cloud_client.music_path})")
                 cloud_files = self.cloud_client.list_music_files()
                 if cloud_files:
-                    print(f"从云存储获取到 {len(cloud_files)} 个音乐文件")
+                    print(f"✓ 从云存储获取到 {len(cloud_files)} 个音乐文件")
                     # 预下载所有云存储文件到本地缓存
-                    for music_info in cloud_files:
+                    downloaded_count = 0
+                    for i, music_info in enumerate(cloud_files, 1):
                         if 'url' in music_info and music_info['url']:
+                            print(f"  [{i}/{len(cloud_files)}] 下载音乐文件: {music_info.get('name', 'unknown')}")
                             local_path = self.cloud_client.get_music_by_url(music_info['url'])
                             if local_path:
                                 music_info['path'] = local_path
+                                downloaded_count += 1
+                                print(f"    ✓ 下载成功: {local_path}")
+                            else:
+                                print(f"    ✗ 下载失败: {music_info['url']}")
+                        elif 'cloud_path' in music_info and music_info['cloud_path']:
+                            print(f"  [{i}/{len(cloud_files)}] 下载音乐文件: {music_info.get('name', 'unknown')}")
+                            local_path = self.cloud_client.download_music_file(music_info['cloud_path'])
+                            if local_path:
+                                music_info['path'] = local_path
+                                downloaded_count += 1
+                                print(f"    ✓ 下载成功: {local_path}")
+                            else:
+                                print(f"    ✗ 下载失败: {music_info['cloud_path']}")
+                    print(f"✓ 成功下载 {downloaded_count}/{len(cloud_files)} 个音乐文件到本地缓存")
                     self._music_cache = cloud_files
                     return cloud_files
+                else:
+                    print("⚠️ 云存储中没有找到音乐文件，将尝试使用本地文件")
             except Exception as e:
-                print(f"从云存储获取音乐文件失败: {str(e)}，将尝试使用本地文件")
+                import traceback
+                print(f"✗ 从云存储获取音乐文件失败: {str(e)}")
+                print(f"  错误详情: {traceback.format_exc()}")
+                print("  将尝试使用本地文件")
         
         # 如果云存储不可用，使用本地文件系统
         if not os.path.exists(self.music_dir):
