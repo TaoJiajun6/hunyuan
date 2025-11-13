@@ -39,6 +39,7 @@ from .podcast_generator import PodcastGenerator
 from .config import SOULX_PODCAST_MODEL_DIR, SOULX_PODCAST_LLM_ENGINE, SOULX_PODCAST_FP16_FLOW, OUTPUT_DIR
 from .text_processor import TextProcessor
 from .api_client import get_client
+from .input_processor import InputProcessor, get_processor
 
 
 # 配置日志
@@ -208,8 +209,11 @@ async def log_requests(request: Request, call_next):
 
 class MultiRoleRequest(BaseModel):
     """多角色互动播客请求"""
-    text: Optional[str] = Field(None, description="播客文本（支持角色标记或普通文本，如果使用text_file_url，此字段可为空）")
+    text: Optional[str] = Field(None, description="播客文本（支持角色标记或普通文本，如果使用text_file_url或input_url，此字段可为空）")
     text_file_url: Optional[str] = Field(None, description="文本文件云存储URL（.txt或Word文件，如果提供，优先使用）")
+    input_type: Optional[str] = Field(None, description="输入类型，可选值：文字、文字+指令、公众号、公众号+指令、网页、PDF、PDF+指令、文字+英文指令")
+    input_url: Optional[str] = Field(None, description="输入URL（用于公众号、网页、PDF等类型）")
+    instruction: Optional[str] = Field(None, description="指令内容（可选，用于控制播客生成过程，如'生成5分钟播客'、'使用轻松风格'等）")
     role_voice_urls: Optional[Dict[str, str]] = Field(None, description="角色音色映射，云存储URL（如果使用云存储，键为角色名，值为云存储下载URL）")
     role_voices: Optional[Dict[str, str]] = Field(None, description="[已废弃] 角色音色映射，base64编码的音频文件（已废弃，请使用role_voice_urls）")
     silence_interval: int = Field(600, description="角色切换静音间隔（毫秒），默认600ms以增加角色之间的间隔", ge=200, le=1500)
@@ -451,7 +455,7 @@ def download_audio_from_url(url: str, suffix: str = ".wav", timeout: int = 60) -
 
 
 def download_text_from_url(url: str, timeout: int = 60) -> str:
-    """从URL下载文本文件并返回内容（支持.txt和Word文件）
+    """从URL下载文本文件并返回内容（支持.txt、Word文件和PDF文件）
     
     Args:
         url: 文本文件的云存储URL
@@ -500,6 +504,33 @@ def download_text_from_url(url: str, timeout: int = 60) -> str:
                         text = content_bytes.decode('latin-1', errors='ignore')
             logger.info(f"文本文件读取成功: {len(text)} 字符")
             return text
+        elif file_extension == 'pdf' or 'application/pdf' in content_type:
+            # PDF文件，使用input_processor提取文本
+            try:
+                from .input_processor import get_processor
+                input_processor = get_processor()
+                # 保存为临时文件，然后提取文本
+                import tempfile
+                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
+                temp_file.write(content_bytes)
+                temp_file.close()
+                try:
+                    text = input_processor.extract_text_from_pdf_file(temp_file.name)
+                    logger.info(f"PDF文件读取成功: {len(text)} 字符")
+                    return text
+                finally:
+                    # 删除临时文件
+                    try:
+                        import os
+                        os.unlink(temp_file.name)
+                    except:
+                        pass
+            except Exception as e:
+                logger.error(f"PDF文件解析失败: {str(e)}")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"PDF文件解析失败: {str(e)}。请确保已安装pdfplumber或PyPDF2库: pip install pdfplumber"
+                )
         elif file_extension in ['doc', 'docx'] or 'application/msword' in content_type or 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' in content_type:
             # Word文件，需要使用python-docx库
             try:
@@ -804,29 +835,166 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
     start_time = time.time()
     _update_progress(request.job_id, "queued", 1, "任务已排队")
     
-    # 验证文本输入（text或text_file_url至少有一个）
+    # 验证文本输入（text、text_file_url或input_url至少有一个）
     has_text = request.text and request.text.strip()
     has_text_file = request.text_file_url and request.text_file_url.strip()
+    has_input_url = request.input_url and request.input_url.strip()
+    has_input_type = request.input_type and request.input_type.strip()
     
-    if not has_text and not has_text_file:
-        raise HTTPException(status_code=400, detail="text或text_file_url至少需要提供一个")
+    # 如果没有指定input_type，自动检测
+    if not has_input_type:
+        if has_input_url:
+            # 根据URL自动检测类型
+            input_processor = get_processor()
+            request.input_type = input_processor.detect_input_type_from_content("", request.input_url)
+            logger.info(f"自动检测输入类型: {request.input_type}")
+        elif has_text_file:
+            # 如果有文件，可能是PDF类型
+            request.input_type = "PDF"
+            logger.info(f"自动检测输入类型: {request.input_type}")
+        elif has_text:
+            # 根据文本内容检测是否包含指令
+            input_processor = get_processor()
+            request.input_type = input_processor.detect_input_type_from_content(request.text)
+            logger.info(f"自动检测输入类型: {request.input_type}")
+        else:
+            # 默认类型
+            request.input_type = "文字"
     
-    # 获取文本内容
-    if has_text_file:
-        # 从云存储URL读取文本文件
-        logger.info(f"从云存储URL读取文本文件: {request.text_file_url}")
+    # 根据输入类型验证必需的输入
+    input_type = request.input_type or ""
+    text_types = ["文字", "文字+指令", "文字+英文指令"]
+    pdf_types = ["PDF", "PDF+指令"]
+    url_types = ["公众号", "公众号+指令", "网页"]
+    
+    # 文字类型：只需要text，不需要text_file_url
+    if input_type in text_types:
+        if not has_text:
+            raise HTTPException(status_code=400, detail="文字类型需要提供文本内容（text字段）")
+        if has_text_file:
+            logger.warning(f"文字类型不需要text_file_url，将忽略该字段")
+            request.text_file_url = None
+    
+    # PDF类型：只需要text_file_url，不需要text
+    elif input_type in pdf_types:
+        if not has_text_file:
+            raise HTTPException(status_code=400, detail="PDF类型需要上传PDF文件（text_file_url字段）")
+        if has_text:
+            logger.warning(f"PDF类型不需要text，将忽略该字段")
+            request.text = None
+    
+    # 公众号/网页类型：需要input_url
+    elif input_type in url_types:
+        if not has_input_url and not has_text_file:
+            raise HTTPException(status_code=400, detail=f"{input_type}类型需要提供输入URL（input_url字段）或上传文件")
+    
+    # 获取文本内容和指令
+    text_content = ""
+    extracted_instruction = request.instruction
+    
+    # 根据输入类型获取文本内容
+    if input_type in url_types:
+        # 公众号/网页类型：使用输入处理器处理URL
         try:
+            input_processor = get_processor()
+            _update_progress(request.job_id, "processing_input", 3, f"正在处理{input_type}类型输入")
+            text_content, extracted_instruction = input_processor.process_input(
+                input_type=input_type,
+                input_content=None,
+                input_url=request.input_url if has_input_url else None,
+                instruction=request.instruction
+            )
+            logger.info(f"{input_type}类型输入处理成功: {len(text_content)} 字符")
+            if extracted_instruction:
+                logger.info(f"提取的指令: {extracted_instruction}")
+        except Exception as e:
+            logger.error(f"处理{input_type}类型输入失败: {str(e)}")
+            raise HTTPException(status_code=400, detail=f"处理{input_type}类型输入失败: {str(e)}")
+    elif input_type in pdf_types:
+        # PDF类型：从云存储URL读取PDF文件
+        logger.info(f"从云存储URL读取PDF文件: {request.text_file_url}")
+        try:
+            _update_progress(request.job_id, "downloading_text", 3, "正在下载PDF文件")
             text_content = download_text_from_url(request.text_file_url)
-            logger.info(f"文本文件读取成功: {len(text_content)} 字符")
+            logger.info(f"PDF文件读取成功: {len(text_content)} 字符")
+            
+            # 如果输入类型包含指令，尝试解析指令
+            if "指令" in input_type or "instruction" in input_type.lower():
+                input_processor = get_processor()
+                text_content, extracted_instruction = input_processor.parse_instruction(text_content)
+                if extracted_instruction:
+                    logger.info(f"从PDF文件中提取的指令: {extracted_instruction}")
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"读取文本文件失败: {str(e)}")
-            raise HTTPException(status_code=400, detail=f"读取文本文件失败: {str(e)}")
-    else:
-        # 使用直接输入的文本
+            logger.error(f"读取PDF文件失败: {str(e)}")
+            raise HTTPException(status_code=400, detail=f"读取PDF文件失败: {str(e)}")
+    elif input_type in text_types:
+        # 文字类型：使用直接输入的文本
         text_content = request.text
+        
+        # 如果输入类型包含指令，尝试解析指令
+        if "指令" in input_type or "instruction" in input_type.lower():
+            input_processor = get_processor()
+            text_content, extracted_instruction = input_processor.parse_instruction(text_content)
+            if extracted_instruction:
+                logger.info(f"从文本中提取的指令: {extracted_instruction}")
+        
         logger.info(f"使用直接输入的文本: {len(text_content)} 字符")
+    else:
+        # 其他未知类型，使用通用处理
+        if has_input_url or has_input_type:
+            try:
+                input_processor = get_processor()
+                _update_progress(request.job_id, "processing_input", 3, f"正在处理{input_type}类型输入")
+                text_content, extracted_instruction = input_processor.process_input(
+                    input_type=input_type,
+                    input_content=request.text if has_text else None,
+                    input_url=request.input_url if has_input_url else None,
+                    instruction=request.instruction
+                )
+                logger.info(f"{input_type}类型输入处理成功: {len(text_content)} 字符")
+            except Exception as e:
+                logger.error(f"处理{input_type}类型输入失败: {str(e)}")
+                raise HTTPException(status_code=400, detail=f"处理{input_type}类型输入失败: {str(e)}")
+        elif has_text_file:
+            # 从云存储URL读取文本文件（兼容旧逻辑）
+            logger.info(f"从云存储URL读取文本文件: {request.text_file_url}")
+            try:
+                _update_progress(request.job_id, "downloading_text", 3, "正在下载文本文件")
+                text_content = download_text_from_url(request.text_file_url)
+                logger.info(f"文本文件读取成功: {len(text_content)} 字符")
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"读取文本文件失败: {str(e)}")
+                raise HTTPException(status_code=400, detail=f"读取文本文件失败: {str(e)}")
+        elif has_text:
+            text_content = request.text
+            logger.info(f"使用直接输入的文本: {len(text_content)} 字符")
+        else:
+            raise HTTPException(status_code=400, detail="text、text_file_url或input_url至少需要提供一个")
+    
+    # 如果提取了指令，将其应用到播客生成参数
+    if extracted_instruction:
+        # 这里可以将指令应用到生成参数，例如：
+        # - 如果指令包含"5分钟"，设置更长的对话
+        # - 如果指令包含"轻松"，设置轻松的场景类型
+        # 目前先记录，后续可以扩展
+        logger.info(f"将应用指令到播客生成: {extracted_instruction}")
+        
+        # 简单的指令解析和应用
+        instruction_lower = extracted_instruction.lower()
+        if "轻松" in extracted_instruction or "轻松" in instruction_lower or "relaxed" in instruction_lower:
+            if not request.scene_types:
+                request.scene_types = []
+            if "接梗玩梗的轻松交流" not in request.scene_types:
+                request.scene_types.append("接梗玩梗的轻松交流")
+        if "激烈" in extracted_instruction or "激烈" in instruction_lower or "intense" in instruction_lower:
+            if not request.scene_types:
+                request.scene_types = []
+            if "立场冲突的激烈辩论" not in request.scene_types:
+                request.scene_types.append("立场冲突的激烈辩论")
     
     # 验证音色数据（role_voice_urls或role_voices至少有一个）
     has_voice_urls = request.role_voice_urls and len(request.role_voice_urls) > 0
