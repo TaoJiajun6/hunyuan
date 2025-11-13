@@ -194,8 +194,9 @@ class CloudStorageMusicClient:
             本地文件路径，如果下载失败则返回None
         """
         try:
-            # 构建下载URL
-            # 格式：https://ops-server-drcn.agcstorage.link/v0/{bucket}/{path}
+            # 构建下载URL（根据华为AGC云存储API文档）
+            # 格式：https://{domain}/{bucket_name}/{object_name}
+            # 注意：storage_url已经包含了/v0/，所以不需要再加
             download_url = f"{self.storage_url}{self.bucket}/{cloud_path}"
             
             # 生成本地文件名
@@ -209,19 +210,72 @@ class CloudStorageMusicClient:
             
             print(f"正在从云存储下载音乐文件: {download_url}")
             
-            # 下载文件
-            response = requests.get(download_url, timeout=30)
+            # 根据华为AGC云存储API文档，下载文件需要以下Header：
+            # - Authorization: Bearer ${access_token} (必需)
+            # - client_id (必需)
+            # - productId (必需)
+            headers = {
+                'Content-Type': 'application/json'
+            }
+            
+            if not HAS_UPLOAD_CLIENT or not self.client_id or not self.client_secret:
+                print(f"  ✗ 缺少认证信息，无法下载")
+                print(f"  请配置 AGC_CLIENT_ID, AGC_CLIENT_SECRET, AGC_PRODUCT_ID")
+                return None
+            
+            try:
+                # 获取access_token
+                token = get_agc_token(
+                    domain=self.domain,
+                    client_id=self.client_id,
+                    client_secret=self.client_secret
+                )
+                
+                # 添加必需的Header（按照API文档要求）
+                headers['Authorization'] = f'Bearer {token}'
+                headers['client_id'] = self.client_id
+                headers['productId'] = self.product_id or ''
+                
+            except Exception as e:
+                print(f"  ✗ 获取token失败: {str(e)}")
+                return None
+            
+            # 下载文件（使用流式下载）
+            response = requests.get(download_url, timeout=60, stream=True, headers=headers)
             response.raise_for_status()
             
-            # 保存到本地
-            with open(local_path, 'wb') as f:
-                f.write(response.content)
+            # 检查Content-Length
+            content_length = response.headers.get("content-length")
+            if content_length:
+                file_size = int(content_length)
+                file_size_mb = file_size / (1024 * 1024)
+                print(f"  文件大小: {file_size_mb:.2f} MB")
             
-            print(f"音乐文件下载完成: {local_path}")
+            # 流式下载
+            downloaded_size = 0
+            with open(local_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded_size += len(chunk)
+            
+            print(f"✓ 音乐文件下载完成: {local_path} ({downloaded_size / (1024 * 1024):.2f} MB)")
             return local_path
             
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 403:
+                print(f"✗ 下载音乐文件失败: 403 Forbidden - 可能是云存储安全规则限制或认证失败")
+                print(f"  请检查认证信息是否正确")
+            elif e.response.status_code == 400:
+                print(f"✗ 下载音乐文件失败: 400 Bad Request - URL格式可能不正确")
+                print(f"  URL: {download_url}")
+            else:
+                print(f"✗ 下载音乐文件失败: HTTP {e.response.status_code} - {str(e)}")
+            return None
         except Exception as e:
-            print(f"下载音乐文件失败: {str(e)}")
+            print(f"✗ 下载音乐文件失败: {str(e)}")
+            import traceback
+            print(f"  错误详情: {traceback.format_exc()}")
             return None
     
     def get_music_by_url(self, music_url: str) -> Optional[str]:
@@ -241,23 +295,99 @@ class CloudStorageMusicClient:
             
             # 如果文件已存在，直接返回
             if os.path.exists(local_path):
+                print(f"使用缓存的音乐文件: {local_path}")
                 return local_path
             
             print(f"正在从URL下载音乐文件: {music_url}")
             
-            # 下载文件
-            response = requests.get(music_url, timeout=30)
+            # 根据华为AGC云存储API文档，下载文件需要以下Header：
+            # - Authorization: Bearer ${access_token} (必需)
+            # - client_id (必需)
+            # - productId (必需)
+            # URL格式：https://{domain}/{bucket_name}/{object_name}
+            
+            # 检查URL是否是华为AGC云存储的URL
+            is_agc_url = 'agcstorage.link' in music_url or 'ops-server' in music_url
+            
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Content-Type': 'application/json'
+            }
+            
+            # 如果是AGC云存储URL，必须添加认证头
+            if is_agc_url:
+                if not HAS_UPLOAD_CLIENT or not self.client_id or not self.client_secret:
+                    print(f"  ⚠️ AGC云存储URL需要认证，但缺少认证信息")
+                    print(f"  请配置 AGC_CLIENT_ID, AGC_CLIENT_SECRET, AGC_PRODUCT_ID")
+                    return None
+                
+                try:
+                    # 获取access_token
+                    token = get_agc_token(
+                        domain=self.domain,
+                        client_id=self.client_id,
+                        client_secret=self.client_secret
+                    )
+                    
+                    # 添加必需的Header（按照API文档要求）
+                    headers['Authorization'] = f'Bearer {token}'
+                    headers['client_id'] = self.client_id
+                    headers['productId'] = self.product_id or ''
+                    
+                    print(f"  使用认证方式下载（client_id: {self.client_id[:8]}..., productId: {self.product_id or '(empty)'}）")
+                except Exception as e:
+                    print(f"  ✗ 获取token失败: {str(e)}")
+                    return None
+            else:
+                # 非AGC URL，尝试添加认证（如果配置了）
+                if HAS_UPLOAD_CLIENT and self.client_id and self.client_secret:
+                    try:
+                        token = get_agc_token(
+                            domain=self.domain,
+                            client_id=self.client_id,
+                            client_secret=self.client_secret
+                        )
+                        headers['Authorization'] = f'Bearer {token}'
+                        headers['productId'] = self.product_id or ''
+                        headers['client_id'] = self.client_id
+                    except Exception as e:
+                        print(f"  获取token失败，使用无认证方式下载: {str(e)}")
+            
+            response = requests.get(music_url, timeout=60, stream=True, headers=headers)
             response.raise_for_status()
             
-            # 保存到本地
-            with open(local_path, 'wb') as f:
-                f.write(response.content)
+            # 检查Content-Length
+            content_length = response.headers.get("content-length")
+            if content_length:
+                file_size = int(content_length)
+                file_size_mb = file_size / (1024 * 1024)
+                print(f"  文件大小: {file_size_mb:.2f} MB")
             
-            print(f"音乐文件下载完成: {local_path}")
+            # 流式下载
+            downloaded_size = 0
+            with open(local_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded_size += len(chunk)
+            
+            print(f"✓ 音乐文件下载完成: {local_path} ({downloaded_size / (1024 * 1024):.2f} MB)")
             return local_path
             
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 403:
+                print(f"✗ 下载音乐文件失败: 403 Forbidden - 可能是云存储安全规则限制或需要认证")
+                print(f"  请检查华为AGC云存储的安全规则配置，确保下载URL可以公开访问")
+            elif e.response.status_code == 400:
+                print(f"✗ 下载音乐文件失败: 400 Bad Request - URL格式可能不正确")
+                print(f"  尝试通过getDownloadURL API获取正确的下载URL")
+            else:
+                print(f"✗ 下载音乐文件失败: HTTP {e.response.status_code} - {str(e)}")
+            return None
         except Exception as e:
-            print(f"从URL下载音乐文件失败: {str(e)}")
+            print(f"✗ 从URL下载音乐文件失败: {str(e)}")
+            import traceback
+            print(f"  错误详情: {traceback.format_exc()}")
             return None
     
     def _list_files_via_api(self) -> List[Dict[str, str]]:
@@ -422,13 +552,24 @@ class CloudStorageMusicClient:
                 if not any(filename.lower().endswith(ext) for ext in audio_extensions):
                     continue
                 
-                # 构建下载URL（确保路径正确）
-                # 如果file_path已经是完整路径（包含music/），直接使用
-                # 否则需要拼接
-                if file_path.startswith('music/'):
-                    download_url = f"{self.storage_url}{self.bucket}/{file_path}"
-                else:
-                    download_url = f"{self.storage_url}{self.bucket}/{normalized_path}{filename}"
+                # 获取真正的下载URL（通过getDownloadURL API）
+                # 不能直接构建URL，需要通过API获取带签名的下载URL
+                try:
+                    download_url = self._get_download_url(file_path)
+                    if not download_url:
+                        # 如果获取失败，尝试直接构建（作为备选）
+                        print(f"  ⚠️ 获取下载URL失败，使用直接构建的URL")
+                        if file_path.startswith('music/'):
+                            download_url = f"{self.storage_url}{self.bucket}/{file_path}"
+                        else:
+                            download_url = f"{self.storage_url}{self.bucket}/{normalized_path}{filename}"
+                except Exception as e:
+                    print(f"  ⚠️ 获取下载URL异常: {str(e)}，使用直接构建的URL")
+                    # 如果获取失败，尝试直接构建（作为备选）
+                    if file_path.startswith('music/'):
+                        download_url = f"{self.storage_url}{self.bucket}/{file_path}"
+                    else:
+                        download_url = f"{self.storage_url}{self.bucket}/{normalized_path}{filename}"
                 
                 # 从文件名推断风格
                 style = self._infer_style_from_filename(filename)
@@ -471,6 +612,88 @@ class CloudStorageMusicClient:
                         print(f"获取子目录 {subdir_path} 失败: {str(e)}")
         
         return music_files
+    
+    def _get_download_url(self, cloud_path: str) -> Optional[str]:
+        """
+        通过AGC REST API获取文件的下载URL
+        
+        Args:
+            cloud_path: 云存储文件路径（相对于bucket的路径）
+        
+        Returns:
+            下载URL，如果获取失败则返回None
+        """
+        if not HAS_UPLOAD_CLIENT:
+            return None
+        
+        if not self.client_id or not self.client_secret:
+            return None
+        
+        try:
+            # 获取access_token
+            token = get_agc_token(
+                domain=self.domain,
+                client_id=self.client_id,
+                client_secret=self.client_secret
+            )
+            
+            # 构建获取下载URL的API请求
+            # 根据华为AGC云存储API，getDownloadURL接口格式可能为:
+            # GET {storage_url}{bucket}/{path}?getDownloadURL=true
+            # 或者 POST {storage_url}{bucket}/{path} 带特定参数
+            
+            # 尝试GET方式
+            get_url = f"{self.storage_url}{self.bucket}/{cloud_path}"
+            params = {'getDownloadURL': 'true'}
+            
+            headers = {
+                'productId': self.product_id or '',
+                'client_id': self.client_id,
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/json'
+            }
+            
+            print(f"  正在获取下载URL: {cloud_path}")
+            response = requests.get(get_url, params=params, headers=headers, timeout=30)
+            
+            if response.status_code == 200:
+                try:
+                    result = response.json()
+                    # 尝试从响应中提取URL
+                    download_url = result.get('downloadURL') or result.get('download_url') or result.get('url') or result.get('downloadUrl')
+                    if download_url:
+                        print(f"  ✓ 获取下载URL成功")
+                        return download_url
+                except json.JSONDecodeError:
+                    # 如果响应是纯文本URL
+                    if response.text.startswith('http://') or response.text.startswith('https://'):
+                        print(f"  ✓ 获取下载URL成功（文本格式）")
+                        return response.text.strip()
+            
+            # 如果GET方式失败，尝试POST方式
+            post_url = f"{self.storage_url}{self.bucket}/{cloud_path}"
+            post_data = {'action': 'getDownloadURL'}
+            
+            response = requests.post(post_url, json=post_data, headers=headers, timeout=30)
+            
+            if response.status_code == 200:
+                try:
+                    result = response.json()
+                    download_url = result.get('downloadURL') or result.get('download_url') or result.get('url') or result.get('downloadUrl')
+                    if download_url:
+                        print(f"  ✓ 获取下载URL成功（POST方式）")
+                        return download_url
+                except json.JSONDecodeError:
+                    if response.text.startswith('http://') or response.text.startswith('https://'):
+                        print(f"  ✓ 获取下载URL成功（POST方式，文本格式）")
+                        return response.text.strip()
+            
+            print(f"  ⚠️ 获取下载URL失败: HTTP {response.status_code}")
+            return None
+            
+        except Exception as e:
+            print(f"  ⚠️ 获取下载URL异常: {str(e)}")
+            return None
     
     def _infer_style_from_filename(self, filename: str) -> str:
         """
