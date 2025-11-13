@@ -261,6 +261,127 @@ export class FileUtils {
   }
 
   /**
+   * 上传背景音乐文件到云存储的music目录
+   * @param context UIAbility上下文
+   * @param fileUri 文件URI
+   * @param fileName 文件名（可选，如果不提供则从fileUri提取）
+   * @returns 云存储路径和下载URL
+   */
+  static async uploadBackgroundMusicToCloud(
+    context: common.UIAbilityContext,
+    fileUri: string,
+    fileName?: string
+  ): Promise<CloudStorageInfo | null> {
+    // 如果没有提供文件名，从URI中提取
+    if (!fileName) {
+      const uriParts = fileUri.split('/');
+      fileName = uriParts[uriParts.length - 1];
+    }
+    
+    // 生成云存储路径（上传到music目录）
+    const cloudPath = `music/${fileName}`;
+    const cacheFile = context.cacheDir + '/' + fileName;
+    
+    Logger.info(TAG, `开始上传背景音乐到云存储: ${cloudPath}`);
+    
+    // 将文件复制到cache目录
+    let srcFile: fs.File | null = null;
+    let dstFile: fs.File | null = null;
+    try {
+      srcFile = fs.openSync(fileUri, fs.OpenMode.READ_ONLY);
+      dstFile = fs.openSync(cacheFile, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE);
+      fs.copyFileSync(srcFile.fd, dstFile.fd);
+      fs.closeSync(srcFile);
+      fs.closeSync(dstFile);
+      srcFile = null;
+      dstFile = null;
+    } catch (copyError) {
+      Logger.error(TAG, `复制文件失败: ${JSON.stringify(copyError)}`);
+      if (srcFile) fs.closeSync(srcFile);
+      if (dstFile) fs.closeSync(dstFile);
+      return null;
+    }
+    
+    // 检查文件是否存在
+    try {
+      const fileStat = fs.statSync(cacheFile);
+      const fileSizeMB = fileStat.size / (1024 * 1024);
+      Logger.info(TAG, `准备上传背景音乐: ${cacheFile}, 大小: ${fileSizeMB.toFixed(2)}MB`);
+    } catch (statError) {
+      Logger.error(TAG, `文件不存在或无法访问: ${cacheFile}`);
+      return null;
+    }
+    
+    // 上传到云存储
+    const bucket = FileUtils.getStorageBucket();
+    Logger.info(TAG, `开始创建上传任务: localPath=${cacheFile}, cloudPath=${cloudPath}`);
+    
+    return new Promise<CloudStorageInfo | null>((resolve) => {
+      bucket.uploadFile(context, {
+        localPath: cacheFile,
+        cloudPath: cloudPath
+      }).then((task: request.agent.Task) => {
+        Logger.info(TAG, `背景音乐上传任务创建成功`);
+        
+        task.on('progress', (progress: Object) => {
+          const progressInfo = progress as UploadProgressInfo;
+          const state = progressInfo.state;
+          const processed = progressInfo.processed || 0;
+          const sizes = progressInfo.sizes || [0];
+          const fileSize = sizes[0] || 0;
+          const fileSizeMB = fileSize / (1024 * 1024);
+          const processedMB = processed / (1024 * 1024);
+          const progressPercent = fileSize > 0 ? ((processed / fileSize) * 100).toFixed(2) : '0';
+          
+          Logger.info(TAG, `背景音乐上传进度: ${processedMB.toFixed(2)}MB/${fileSizeMB.toFixed(2)}MB (${progressPercent}%)`);
+        });
+        
+        task.on('completed', async (progress: Object) => {
+          const progressInfo = progress as UploadProgressInfo;
+          Logger.info(TAG, `背景音乐上传完成: ${JSON.stringify(progress)}`);
+          
+          try {
+            // 获取下载URL
+            Logger.info(TAG, `开始获取背景音乐下载URL: ${cloudPath}`);
+            const downloadUrl = await bucket.getDownloadURL(cloudPath);
+            Logger.info(TAG, `获取背景音乐下载URL成功: ${downloadUrl}`);
+            
+            // 删除临时文件
+            fs.unlink(cacheFile).catch((err: BusinessError) => {
+              Logger.warn(TAG, `删除临时文件失败: ${err.message}`);
+            });
+            
+            resolve({
+              cloudPath: cloudPath,
+              cloudUrl: downloadUrl
+            });
+          } catch (error) {
+            const err = error as BusinessError;
+            Logger.error(TAG, `获取背景音乐下载URL失败: ${err.message || String(error)}`);
+            resolve(null);
+          }
+        });
+        
+        task.on('failed', (progress: Object) => {
+          Logger.error(TAG, `背景音乐上传失败: ${JSON.stringify(progress)}`);
+          resolve(null);
+        });
+        
+        // 启动上传任务
+        task.start((err: BusinessError) => {
+          if (err) {
+            Logger.error(TAG, `启动背景音乐上传任务失败: ${err.message || String(err)}`);
+            resolve(null);
+          }
+        });
+      }).catch((err: BusinessError) => {
+        Logger.error(TAG, `创建背景音乐上传任务失败: ${err.message || String(err)}`);
+        resolve(null);
+      });
+    });
+  }
+
+  /**
    * 通用文件上传到云存储（供音频和文本文件共用）
    * @param context UIAbility上下文
    * @param fileUri 文件URI

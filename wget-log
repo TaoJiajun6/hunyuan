@@ -1,0 +1,11 @@
+--2025-11-11 16:58:17--  https://caddyserver.com/api/download?os=linux
+Resolving caddyserver.com (caddyserver.com)... 165.227.20.207, 2604:a880:2:d0::21b0:6001
+Connecting to caddyserver.com (caddyserver.com)|165.227.20.207|:443... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: unspecified [application/octet-stream]
+Saving to: 'download?os=linux'
+
+download?os=linux                [<=>                                         ]       0  --.-KB/s               download?os=linux                [ <=>                                        ]  43.99K   127KB/s               download?os=linux                [  <=>                                       ] 139.99K   202KB/s               download?os=linux                [   <=>                                      ] 539.99K   519KB/s               download?os=linux                [    <=>                                     ]   2.07M  1.49MB/s               download?os=linux                [     <=>                                    ]   6.37M  3.67MB/s               download?os=linux                [      <=>                                   ]  11.07M  5.32MB/s               download?os=linux                [       <=>                                  ]  15.78M  6.49MB/s               download?os=linux                [        <=>                                 ]  20.70M  7.45MB/s               download?os=linux                [         <=>                                ]  25.66M  8.21MB/s               download?os=linux                [          <=>                               ]  31.04M  8.94MB/s               download?os=linux                [           <=>                              ]  36.82M  10.6MB/s               download?os=linux                [            <=>                             ]  42.60M  12.2MB/s               download?os=linux                [             <=>                            ]  45.18M  12.7MB/s               download?os=linux                [              <=>                           ]  45.98M  12.5MB/s    in 4.5s    
+
+2025-11-11 16:58:22 (10.2 MB/s) - 'download?os=linux' saved [48210104]
+

@@ -88,9 +88,5 @@
       "name": "module_musicplay",
       "srcPath": "./components/module_musicplay"
     },
-    {
-      "name": "module_share",
-      "srcPath": "./components/module_share"
-    }
   ]
 }

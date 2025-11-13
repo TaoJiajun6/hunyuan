@@ -7,8 +7,6 @@
   "license": "",
   "dependencies": {
     "@hw-agconnect/copilot": "^0.1.0",
-    "@hw-agconnect/auth": "^1.0.0",
-    "@hw-agconnect/hmcore": "^1.0.1",
     "business_mine": "file:../../components/business_mine",
     "lib_common": "file:../../components/lib_common",
     "lib_api": "file:../../components/lib_api",

@@ -39,7 +39,7 @@ export struct PlayerLyrics {
     this.getLrcEntryList();
   }
 
-  @Monitor('musicModel.currentSong')
+  @Monitor('currentSong')
   getLrcEntryList() {
     this.mLrcEntryList = [];
     if (!this.context || !this.musicModel.currentSong) {

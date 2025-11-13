@@ -136,7 +136,9 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default="0.0.0.0", help="API服务主机")
     parser.add_argument("--port", type=int, default=8000, help="API服务端口")
     parser.add_argument("--fp16", action="store_true", help="使用FP16精度（GPU加速）")
+    parser.add_argument("--no-fp16", action="store_true", dest="no_fp16", help="禁用FP16精度（即使检测到GPU）")
     parser.add_argument("--cuda_kernel", action="store_true", help="使用CUDA内核加速")
+    parser.add_argument("--no-cuda-kernel", action="store_true", dest="no_cuda_kernel", help="禁用CUDA内核加速（即使检测到GPU）")
     parser.add_argument("--workers", type=int, default=1, help="UVicorn工作进程数（>=2 可并发处理进度查询）")
     args = parser.parse_args()
     
@@ -144,21 +146,41 @@ if __name__ == "__main__":
     has_gpu = detect_gpu_and_print_info()
     
     # 设置GPU配置环境变量（传递给api_server.py）
-    if args.fp16:
-        os.environ["USE_FP16"] = "true"
-        print("已启用FP16精度")
+    # 如果检测到GPU，默认自动启用fp16和cuda_kernel（除非用户明确禁用）
+    if has_gpu:
+        # 自动启用fp16（除非用户明确禁用）
+        if args.no_fp16:
+            use_fp16 = False
+            print("已禁用FP16精度（用户指定）")
+        else:
+            use_fp16 = args.fp16 or True  # 如果用户指定了--fp16则使用，否则自动启用
+            if args.fp16:
+                print("已启用FP16精度（用户指定）")
+            else:
+                print("✅ 已自动启用FP16精度（检测到GPU）")
+        
+        # 自动启用cuda_kernel（除非用户明确禁用）
+        if args.no_cuda_kernel:
+            use_cuda_kernel = False
+            print("已禁用CUDA内核加速（用户指定）")
+        else:
+            use_cuda_kernel = args.cuda_kernel or True  # 如果用户指定了--cuda_kernel则使用，否则自动启用
+            if args.cuda_kernel:
+                print("已启用CUDA内核加速（用户指定）")
+            else:
+                print("✅ 已自动启用CUDA内核加速（检测到GPU）")
     else:
-        os.environ["USE_FP16"] = "false"
-        if has_gpu:
-            print("💡 提示: 检测到GPU，建议使用 --fp16 参数以加速推理")
+        # CPU模式，不使用GPU优化
+        use_fp16 = args.fp16
+        use_cuda_kernel = args.cuda_kernel
+        if args.fp16:
+            print("⚠️  警告: CPU模式不支持FP16，将忽略 --fp16 参数")
+        if args.cuda_kernel:
+            print("⚠️  警告: CPU模式不支持CUDA内核，将忽略 --cuda_kernel 参数")
     
-    if args.cuda_kernel:
-        os.environ["USE_CUDA_KERNEL"] = "true"
-        print("已启用CUDA内核加速")
-    else:
-        os.environ["USE_CUDA_KERNEL"] = "false"
-        if has_gpu:
-            print("💡 提示: 检测到GPU，建议使用 --cuda_kernel 参数以进一步加速")
+    # 设置环境变量
+    os.environ["USE_FP16"] = "true" if use_fp16 else "false"
+    os.environ["USE_CUDA_KERNEL"] = "true" if use_cuda_kernel else "false"
     
     # 自动检测设备（如果未指定）
     if has_gpu and not os.getenv("DEVICE"):

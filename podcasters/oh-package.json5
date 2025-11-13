@@ -3,8 +3,11 @@
   "description": "Please describe the basic information.",
   "dependencies": {
     "@yunkss/ef_audio": "^1.1.1",
-    "module_musicplay": "file:./components/module_musicplay",
-    "module_share": "file:./components/module_share"
+    "@hw-agconnect/auth": "^1.0.5",
+    "@hw-agconnect/petal-aegis": "^1.4.11-300",
+    "@tencent/qq-open-sdk": "^1.0.3",
+    "@hw-agconnect/hmcore": "^1.0.0",
+    "module_musicplay": "file:./components/module_musicplay"
   },
   "devDependencies": {
     "@ohos/hypium": "1.0.21"
