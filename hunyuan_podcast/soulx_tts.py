@@ -246,6 +246,7 @@ class SoulXTTS:
         fade_duration_ms = 80  # 淡入淡出时长（毫秒），平滑过渡
         
         processed_segments = []
+        
         for i, wav in enumerate(generated_wavs):
             # 确保音频格式正确 (1, samples)
             if wav.dim() == 1:
@@ -253,24 +254,27 @@ class SoulXTTS:
             elif wav.dim() > 1 and wav.shape[0] > 1:
                 wav = torch.mean(wav, dim=0, keepdim=True)
             
+            # 获取音频的设备，确保所有操作在同一设备上
+            device = wav.device
+            
             # 应用淡入淡出效果，让衔接更自然
             fade_samples = int(sr * fade_duration_ms / 1000.0)
             if fade_samples > 0 and wav.shape[1] > fade_samples * 2:
-                # 淡入曲线（从0到1）
-                fade_in_curve = torch.linspace(0, 1, fade_samples).unsqueeze(0)
+                # 淡入曲线（从0到1），确保在正确的设备上
+                fade_in_curve = torch.linspace(0, 1, fade_samples, device=device).unsqueeze(0)
                 wav[:, :fade_samples] *= fade_in_curve
                 
-                # 淡出曲线（从1到0）
-                fade_out_curve = torch.linspace(1, 0, fade_samples).unsqueeze(0)
+                # 淡出曲线（从1到0），确保在正确的设备上
+                fade_out_curve = torch.linspace(1, 0, fade_samples, device=device).unsqueeze(0)
                 fade_out_start = wav.shape[1] - fade_samples
                 wav[:, fade_out_start:] *= fade_out_curve
             
             processed_segments.append(wav)
             
-            # 在片段之间添加静音间隔（除了最后一个）
+            # 在片段之间添加静音间隔（除了最后一个），确保在正确的设备上
             if i < len(generated_wavs) - 1:
                 silence_samples = int(sr * silence_interval_ms / 1000.0)
-                silence = torch.zeros(1, silence_samples)
+                silence = torch.zeros(1, silence_samples, device=device)
                 processed_segments.append(silence)
         
         # 拼接所有处理后的音频片段
