@@ -6,7 +6,7 @@ import os
 import sys
 import logging
 import torch
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 from pathlib import Path
 
 # 设置 HuggingFace 镜像（如果未设置，避免下载时的网络问题）
@@ -165,10 +165,11 @@ class PodcastGenerator:
         role_voices: Optional[Dict[str, str]] = None,
         output_path: Optional[str] = None,
         silence_interval: int = AUDIO_SILENCE_INTERVAL,
-        intro_music: Optional[str] = None,
-        outro_music: Optional[str] = None,
-        background_music: Optional[str] = None,
+        intro_music: Optional[Union[str, List[str]]] = None,
+        outro_music: Optional[Union[str, List[str]]] = None,
+        background_music: Optional[Union[str, List[str]]] = None,
         background_volume: float = 0.3,
+        background_mode: str = "random",
         verbose: bool = False
     ) -> str:
         """
@@ -179,10 +180,11 @@ class PodcastGenerator:
             role_voices: 角色音色映射，如果为None则使用已设置的映射
             output_path: 输出文件路径
             silence_interval: 角色切换时的静音间隔（毫秒）
-            intro_music: 开场音乐文件路径（可选）
-            outro_music: 结尾音乐文件路径（可选）
-            background_music: 背景音乐文件路径（可选）
+            intro_music: 开场音乐文件路径或路径列表（可选）
+            outro_music: 结尾音乐文件路径或路径列表（可选）
+            background_music: 背景音乐文件路径或路径列表（可选）
             background_volume: 背景音乐音量（0.0-1.0），默认0.3
+            background_mode: 背景音乐处理模式（"random"/"concat"/"mix"），默认"random"
             verbose: 是否输出详细信息
         
         Returns:
@@ -275,41 +277,57 @@ class PodcastGenerator:
             sr=AUDIO_SAMPLING_RATE
         )
         
-        # 如果有背景音乐，混合背景音乐
-        if background_music and os.path.exists(background_music):
-            if verbose:
-                print(f"正在加载并混合背景音乐: {background_music}")
-            background_audio, _ = load_audio(background_music, AUDIO_SAMPLING_RATE)
-            main_audio = mix_audio_with_background(
-                main_audio,
-                background_audio,
-                background_volume=background_volume
-            )
-        
-        # 加载开场和结尾音乐
-        intro_audio = None
-        outro_audio = None
-        
-        if intro_music and os.path.exists(intro_music):
-            if verbose:
-                print(f"正在加载开场音乐: {intro_music}")
-            intro_audio, _ = load_audio(intro_music, AUDIO_SAMPLING_RATE)
-        
-        if outro_music and os.path.exists(outro_music):
-            if verbose:
-                print(f"正在加载结尾音乐: {outro_music}")
-            outro_audio, _ = load_audio(outro_music, AUDIO_SAMPLING_RATE)
-        
-        # 添加开场和结尾音乐
-        if intro_audio is not None or outro_audio is not None:
-            if verbose:
-                print("正在添加开场和结尾音乐...")
-            final_audio = add_intro_outro_music(
-                main_audio,
-                intro_music=intro_audio,
-                outro_music=outro_audio,
-                sr=AUDIO_SAMPLING_RATE
-            )
+        # 如果有背景音乐，混合背景音乐（启用ducking效果）
+        if background_music:
+            # 处理单个文件或文件列表
+            if isinstance(background_music, str):
+                background_music_list = [background_music] if os.path.exists(background_music) else []
+            else:
+                background_music_list = [f for f in background_music if f and os.path.exists(f)]
+            
+            if background_music_list:
+                if verbose:
+                    if len(background_music_list) == 1:
+                        print(f"正在加载并混合背景音乐: {background_music_list[0]}")
+                    else:
+                        print(f"正在加载并混合 {len(background_music_list)} 个背景音乐文件（模式: {background_mode}）")
+                
+                # 加载所有背景音乐
+                background_audios = []
+                for bg_path in background_music_list:
+                    bg_audio, _ = load_audio(bg_path, AUDIO_SAMPLING_RATE)
+                    background_audios.append(bg_audio)
+                
+                # 根据模式处理
+                if len(background_audios) == 1:
+                    background_audio = background_audios[0]
+                else:
+                    if background_mode == "random":
+                        import random
+                        background_audio = random.choice(background_audios)
+                    elif background_mode == "concat":
+                        background_audio = concatenate_audios(background_audios, silence_intervals=[200] * (len(background_audios) - 1), sr=AUDIO_SAMPLING_RATE)
+                    elif background_mode == "mix":
+                        # 混合所有背景音乐
+                        from .utils import load_multiple_audios
+                        background_paths = background_music_list
+                        background_audio = load_multiple_audios(background_paths, target_sr=AUDIO_SAMPLING_RATE, mode="mix")
+                    else:
+                        background_audio = background_audios[0]
+                
+                if verbose:
+                    print("正在混合背景音乐（启用ducking效果：对话时自动压低背景音乐）...")
+                
+                main_audio = mix_audio_with_background(
+                    main_audio,
+                    background_audio,
+                    background_volume=background_volume,
+                    background_mode=background_mode,
+                    enable_ducking=True  # 启用ducking效果
+                )
+                final_audio = main_audio
+            else:
+                final_audio = main_audio
         else:
             final_audio = main_audio
         

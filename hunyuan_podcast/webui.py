@@ -6,7 +6,7 @@ import os
 import sys
 import argparse
 import re
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, Tuple, List, Union
 
 # gradio 将在 create_webui 函数中导入，以便提供更好的错误提示
 
@@ -63,18 +63,47 @@ def wrap_multi_role_podcast(
     character_1_name, character_1_personality, character_1_speaking_style,
     character_2_name, character_2_personality, character_2_speaking_style,
     character_3_name, character_3_personality, character_3_speaking_style,
-    scene_types, intro_music, outro_music, background_music, background_volume,
-    progress=None
+    scene_types, auto_select_music, background_music, background_volume,
+    background_mode, progress=None
 ):
     """包装函数，格式化脚本输出"""
+    # 处理多文件上传（Gradio File 组件返回文件对象列表）
+    def process_file_input(file_input):
+        if not file_input:
+            return None
+        if isinstance(file_input, list):
+            # 如果是列表，提取文件路径
+            paths = [f.name if hasattr(f, 'name') else str(f) for f in file_input if f]
+            return paths if paths else None
+        elif hasattr(file_input, 'name'):
+            return file_input.name
+        else:
+            return str(file_input) if file_input else None
+    
+    # 如果启用AI自动选择音乐，则忽略手动上传的音乐
+    background_music_processed = None
+    if auto_select_music:
+        # AI自动选择音乐
+        from .music_selector import MusicSelector
+        selector = MusicSelector()
+        background_music_processed = selector.select_music_by_ai(
+            text=text,
+            podcast_name=podcast_name if podcast_name and podcast_name.strip() else None,
+            topic=topic if topic and topic.strip() else None,
+            scene_types=scene_types if scene_types else None,
+            num_music=1
+        )
+    else:
+        # 手动上传的音乐
+        background_music_processed = process_file_input(background_music)
+    
     audio_path, status, script = generate_multi_role_podcast(
         text, role_a_voice, role_b_voice, role_c_voice, silence_interval,
         podcast_name, topic,
         character_1_name, character_1_personality, character_1_speaking_style,
         character_2_name, character_2_personality, character_2_speaking_style,
         character_3_name, character_3_personality, character_3_speaking_style,
-        scene_types, intro_music, outro_music, background_music, background_volume,
-        progress
+        scene_types, background_music_processed, background_volume, background_mode, progress
     )
     if script:
         formatted_script = format_script_for_display(script)
@@ -304,10 +333,9 @@ def generate_multi_role_podcast(
     character_3_personality: Optional[str] = None,
     character_3_speaking_style: Optional[str] = None,
     scene_types: Optional[List[str]] = None,
-    intro_music: Optional[str] = None,
-    outro_music: Optional[str] = None,
-    background_music: Optional[str] = None,
+    background_music: Optional[Union[str, List[str]]] = None,
     background_volume: float = 0.3,
+    background_mode: str = "random",
     progress=None
 ) -> Tuple[str, str, str]:
     """
@@ -548,6 +576,7 @@ def generate_multi_role_podcast(
                 outro_music=outro_music,
                 background_music=background_music,
                 background_volume=background_volume,
+                background_mode=background_mode,
                 verbose=True
             )
             
@@ -1335,36 +1364,47 @@ def create_webui():
                     )
                     
                     # 音效设置（折叠面板）
-                    with gr.Accordion("🎵 音效设置（可选）", open=False):
-                        intro_music = gr.Audio(
-                            label="🎵 开场音乐",
-                            sources=["upload"],
-                            type="filepath",
-                            info="上传开场音乐文件（WAV/MP3格式），会在播客开始时播放",
+                    with gr.Accordion("🎵 背景音乐设置（可选）", open=False):
+                        gr.Markdown("""
+                        **💡 智能背景音乐功能：**
+                        - ✅ **自动Ducking效果**：角色说话时，背景音乐音量自动降低，确保对话清晰
+                        - ✅ **AI自动匹配**：系统会根据播客内容自动选择最合适的背景音乐
+                        - ✅ **手动上传**：也可以手动上传自定义背景音乐
+                        """)
+                        
+                        auto_select_music = gr.Checkbox(
+                            label="🤖 AI自动选择背景音乐",
+                            value=True,
+                            info="启用后，系统会根据播客内容、主题和场景类型，从音乐库中自动选择最合适的背景音乐"
+                        )
+                        
+                        background_music = gr.File(
+                            label="🎵 手动上传背景音乐（可多选，仅在AI自动选择关闭时生效）",
+                            file_count="multiple",
+                            file_types=[".wav", ".mp3", ".m4a", ".flac"],
+                            info="如果关闭AI自动选择，可以手动上传背景音乐文件。可以上传多个文件，系统会根据下方模式处理。",
                             elem_classes=["audio-container"]
                         )
-                        outro_music = gr.Audio(
-                            label="🎵 结尾音乐",
-                            sources=["upload"],
-                            type="filepath",
-                            info="上传结尾音乐文件（WAV/MP3格式），会在播客结束时播放",
-                            elem_classes=["audio-container"]
+                        
+                        background_mode = gr.Radio(
+                            label="🎛️ 背景音乐处理模式（仅手动上传多个文件时生效）",
+                            choices=[
+                                ("随机选择", "random"),
+                                ("顺序拼接", "concat"),
+                                ("混合播放", "mix")
+                            ],
+                            value="random",
+                            info="当手动上传多个背景音乐时：随机选择 = 随机选一个；顺序拼接 = 按顺序播放；混合播放 = 混合所有音乐"
                         )
-                        background_music = gr.Audio(
-                            label="🎵 背景音乐",
-                            sources=["upload"],
-                            type="filepath",
-                            info="上传背景音乐文件（WAV/MP3格式），会在整个播客过程中作为背景音播放",
-                            elem_classes=["audio-container"]
-                        )
+                        
                         background_volume = gr.Slider(
-                            label="🔊 背景音乐音量",
+                            label="🔊 背景音乐基础音量",
                             minimum=0.0,
                             maximum=1.0,
                             value=0.3,
                             step=0.1,
-                            info="调整背景音乐音量（0.0-1.0），建议范围：0.2-0.4，避免盖过对话声音"
-                    )
+                            info="背景音乐的基础音量（0.0-1.0）。角色说话时，系统会自动降低音量（ducking效果）。建议范围：0.2-0.4"
+                        )
                     
                     gen_button_1 = gr.Button(
                         "🚀 生成播客",
@@ -1444,10 +1484,10 @@ def create_webui():
                     character_3_personality,
                     character_3_speaking_style,
                     scene_types,
-                    intro_music,
-                    outro_music,
+                    auto_select_music,
                     background_music,
-                    background_volume
+                    background_volume,
+                    background_mode
                 ],
                 outputs=[output_audio_1, status_text_1, script_display_1]
             )

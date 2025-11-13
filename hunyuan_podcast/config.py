@@ -35,3 +35,6 @@ _project_root = os.path.dirname(_current_file_dir)
 OUTPUT_DIR = os.path.join(_project_root, "outputs", "podcasts")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+# 音乐文件夹路径
+MUSIC_DIR = os.path.join(_project_root, "index-tts", "music")
+

@@ -314,11 +314,61 @@ def decode_base64_audio(base64_str: str, suffix: str = ".wav") -> str:
         raise HTTPException(status_code=400, detail=f"音频解码失败: {str(e)}")
 
 
+def convert_pcm_to_wav(pcm_path: str, wav_path: str, sample_rate: int = 48000, channels: int = 2, sample_width: int = 2) -> str:
+    """将PCM文件转换为WAV格式
+    
+    Args:
+        pcm_path: PCM文件路径
+        wav_path: 输出WAV文件路径
+        sample_rate: 采样率（默认48000 Hz，与前端录制参数一致）
+        channels: 声道数（默认2，立体声）
+        sample_width: 采样位宽（默认2字节，16位）
+    
+    Returns:
+        WAV文件路径
+    """
+    import wave
+    
+    try:
+        # 读取PCM数据
+        with open(pcm_path, 'rb') as pcm_file:
+            pcm_data = pcm_file.read()
+        
+        # 创建WAV文件
+        with wave.open(wav_path, 'wb') as wav_file:
+            wav_file.setnchannels(channels)  # 声道数
+            wav_file.setsampwidth(sample_width)  # 采样位宽（字节）
+            wav_file.setframerate(sample_rate)  # 采样率
+            wav_file.writeframes(pcm_data)  # 写入PCM数据
+        
+        logger.info(f"PCM文件已转换为WAV: {pcm_path} -> {wav_path}")
+        return wav_path
+    except Exception as e:
+        logger.error(f"PCM转WAV失败: {str(e)}")
+        raise
+
+
+def is_pcm_file(file_path: str) -> bool:
+    """检测文件是否为PCM格式（通过检查文件头）
+    
+    WAV文件以"RIFF"开头，PCM文件没有这个头
+    """
+    try:
+        with open(file_path, 'rb') as f:
+            header = f.read(4)
+            # WAV文件以"RIFF"开头，PCM文件没有这个头
+            return header != b'RIFF'
+    except Exception:
+        return False
+
+
 def download_audio_from_url(url: str, suffix: str = ".wav", timeout: int = 60) -> str:
     """从URL下载音频文件并保存到临时文件
     
     注意：华为AGC云存储的下载URL通常可以直接访问，不需要额外认证。
     如果下载失败（如403 Forbidden），可能需要检查云存储的安全规则配置。
+    
+    如果下载的文件是PCM格式（扩展名为.wav但实际是PCM），会自动转换为WAV格式。
     """
     try:
         logger.info(f"从URL下载音频文件: {url}")
@@ -367,6 +417,23 @@ def download_audio_from_url(url: str, suffix: str = ".wav", timeout: int = 60) -
         
         file_size_mb = downloaded_size / (1024 * 1024)
         logger.info(f"音频文件已下载到临时文件: {temp_file.name}, 大小: {file_size_mb:.2f} MB")
+        
+        # 检测文件格式：如果扩展名是.wav但实际是PCM格式，转换为WAV
+        if suffix == ".wav" and is_pcm_file(temp_file.name):
+            logger.info(f"检测到PCM格式文件，正在转换为WAV格式...")
+            wav_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+            wav_file.close()
+            try:
+                convert_pcm_to_wav(temp_file.name, wav_file.name)
+                # 删除原始PCM文件
+                os.unlink(temp_file.name)
+                logger.info(f"PCM文件已转换为WAV: {wav_file.name}")
+                return wav_file.name
+            except Exception as e:
+                logger.error(f"PCM转WAV失败: {str(e)}，使用原始文件")
+                # 如果转换失败，返回原始文件
+                return temp_file.name
+        
         return temp_file.name
     except requests.exceptions.HTTPError as e:
         if e.response.status_code == 403:
