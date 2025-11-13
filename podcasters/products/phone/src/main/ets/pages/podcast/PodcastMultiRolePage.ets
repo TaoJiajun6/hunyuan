@@ -6,6 +6,11 @@ import { promptAction, AppStorageV2 } from '@kit.ArkUI';
 import { PodcastResultPageParams } from './PodcastResultPage';
 import { common } from '@kit.AbilityKit';
 
+// Select 选项类型定义
+interface SelectOption {
+  value: string;
+}
+
 @Builder
 export function PodcastMultiRolePageBuilder() {
   PodcastMultiRolePage()
@@ -16,6 +21,9 @@ export struct PodcastMultiRolePage {
   @Local text: string = ''; // 保留用于兼容，但优先使用textFileUrl
   @Local textFileUrl: string = ''; // 文本文件云存储URL
   @Local textFileName: string = ''; // 文本文件名
+  @Local inputType: string = '文字'; // 输入类型：文字、文字+指令、公众号、公众号+指令、网页、PDF、PDF+指令、文字+英文指令
+  @Local inputUrl: string = ''; // 输入URL（用于公众号、网页、PDF等类型）
+  @Local instruction: string = ''; // 指令内容（可选）
   @Local roleVoiceUrls: Record<string, string> = {}; // 角色名 -> 云存储URL（必需）
   @Local roleNames: string[] = ['角色A', '角色B'];
   @Local isLoading: boolean = false;
@@ -24,6 +32,18 @@ export struct PodcastMultiRolePage {
   @Local progressMessage: string = '';
   private progressTimer: number = 0;
   @Local windowModel: WindowModel = AppStorageV2.connect(WindowModel, () => new WindowModel())!;
+  
+  // 输入类型选项列表
+  private readonly inputTypeOptions: SelectOption[] = [
+    { value: '文字' },
+    { value: '文字+指令' },
+    { value: '公众号' },
+    { value: '公众号+指令' },
+    { value: '网页' },
+    { value: 'PDF' },
+    { value: 'PDF+指令' },
+    { value: '文字+英文指令' }
+  ];
 
   /**
    * 选择角色音色文件
@@ -99,13 +119,47 @@ export struct PodcastMultiRolePage {
    * 生成播客
    */
   async generatePodcast(): Promise<void> {
-    // 检查文本输入（text或textFileUrl至少有一个）
+    // 检查文本输入（text、textFileUrl或inputUrl至少有一个）
     const hasText = this.text.trim().length > 0;
     const hasTextFile = this.textFileUrl.trim().length > 0;
-    
-    if (!hasText && !hasTextFile) {
+    const hasInputUrl = this.inputUrl.trim().length > 0;
+
+    // 根据输入类型验证
+    const needsInputUrl = ['公众号', '公众号+指令', '网页'].includes(this.inputType);
+    const needsFile = ['PDF', 'PDF+指令'].includes(this.inputType);
+    const needsText = ['文字', '文字+指令', '文字+英文指令'].includes(this.inputType);
+
+    // PDF类型需要文件上传
+    if (needsFile && !hasTextFile) {
       promptAction.showToast({
-        message: '请上传播客文本文件或输入文本',
+        message: '请上传PDF文件',
+        duration: 2000
+      });
+      return;
+    }
+
+    // 公众号、网页类型需要URL
+    if (needsInputUrl && !hasInputUrl && !hasTextFile) {
+      promptAction.showToast({
+        message: `请输入${this.inputType}类型的URL或上传文件`,
+        duration: 2000
+      });
+      return;
+    }
+
+    // 文字类型需要文本内容
+    if (needsText && !hasText) {
+      promptAction.showToast({
+        message: '请输入文本内容',
+        duration: 2000
+      });
+      return;
+    }
+
+    // 通用检查：至少需要一个输入
+    if (!hasText && !hasTextFile && !hasInputUrl) {
+      promptAction.showToast({
+        message: '请上传文件、输入文本或提供输入URL',
         duration: 2000
       });
       return;
@@ -129,12 +183,15 @@ export struct PodcastMultiRolePage {
     this.startProgressPolling();
     try {
       const request: MultiRoleRequest = {
-        text: hasText ? this.text : '', // 如果使用文件，text可以为空
+        text: hasText ? this.text : '', // 如果使用文件或URL，text可以为空
         text_file_url: hasTextFile ? this.textFileUrl : undefined, // 文本文件云存储URL
+        input_type: this.inputType, // 输入类型
+        input_url: hasInputUrl ? this.inputUrl : undefined, // 输入URL
+        instruction: this.instruction.trim().length > 0 ? this.instruction : undefined, // 指令内容
         role_voice_urls: this.roleVoiceUrls, // 强制使用云存储URL
         silence_interval: 300,
         job_id: this.jobId
-      };
+      } as MultiRoleRequest;
 
       const response = await podcastService.generateMultiRolePodcast(request);
 
@@ -156,10 +213,10 @@ export struct PodcastMultiRolePage {
         // 响应失败，但如果进度中有 URL，会在进度轮询中处理
         // 这里只显示错误提示，不阻止使用进度中的 URL
         if (!this.savedAudioUrl) {
-        promptAction.showToast({
+          promptAction.showToast({
             message: response.error || response.message || '生成失败，请检查进度',
-          duration: 3000
-        });
+            duration: 3000
+          });
         }
       }
     } catch (error) {
@@ -187,12 +244,12 @@ export struct PodcastMultiRolePage {
       if (!status) return;
       this.progressPercent = status.percent || 0;
       this.progressMessage = status.message || '';
-      
+
       // 如果进度中包含 audio_url，保存它（即使最终响应失败也能使用）
       if (status.audio_url) {
         this.savedAudioUrl = status.audio_url;
       }
-      
+
       if (status.done) {
         this.stopProgressPolling();
         // 如果最终响应失败，但进度中有 URL，尝试使用进度中的 URL
@@ -238,143 +295,225 @@ export struct PodcastMultiRolePage {
 
         Scroll() {
           Column({ space: 16 }) {
-            // 文本文件上传
+            // 输入类型选择
             Column({ space: 12 }) {
-              Text('播客文本文件')
+              Text('输入类型')
                 .fontSize($r('sys.float.Subtitle_L'))
                 .fontColor($r('sys.color.font_primary'))
                 .fontWeight(FontWeight.Bold)
                 .alignSelf(ItemAlign.Start)
 
-              Row({ space: 12 }) {
-                Column({ space: 4 }) {
-                  Text(this.textFileName || '未选择文件')
-                    .fontSize($r('sys.float.Body_M'))
-                    .fontColor(this.textFileUrl ? $r('sys.color.font_primary') : $r('sys.color.font_secondary'))
-                    .maxLines(1)
+              Select(this.inputTypeOptions)
+                .value(this.inputType)
+                .selected(0)
+                .onSelect((index: number, value: string) => {
+                  this.inputType = value;
+                  // 根据类型清空不需要的字段
+                  if (!['公众号', '公众号+指令', '网页'].includes(value)) {
+                    this.inputUrl = '';
+                  }
+                })
+                .width('100%')
+            }
 
-                  Text('支持.txt、.doc、.docx格式，最大10MB')
-                    .fontSize($r('sys.float.Body_S'))
-                    .fontColor($r('sys.color.font_secondary'))
-                }
-                .layoutWeight(1)
-                .alignItems(HorizontalAlign.Start)
+            // URL输入（当选择公众号、网页等类型时显示，PDF通过文件上传）
+            if (['公众号', '公众号+指令', '网页'].includes(this.inputType)) {
+              Column({ space: 12 }) {
+                Text('输入URL')
+                  .fontSize($r('sys.float.Subtitle_L'))
+                  .fontColor($r('sys.color.font_primary'))
+                  .fontWeight(FontWeight.Bold)
+                  .alignSelf(ItemAlign.Start)
 
-                Button(this.textFileUrl ? '已选择' : '选择文件')
-                  .fontSize($r('sys.float.Body_S'))
-                  .type(ButtonType.Normal)
-                  .backgroundColor(this.textFileUrl ?
-                    $r('sys.color.icon_emphasize') :
-                    $r('sys.color.comp_background_tertiary'))
-                  .fontColor(this.textFileUrl ?
-                    $r('sys.color.font_on_primary') :
-                    $r('sys.color.font_primary'))
-                  .onClick(() => {
-                    this.selectTextFile();
+                TextInput({ 
+                  placeholder: `请输入${this.inputType}的URL`,
+                  text: $$this.inputUrl
+                })
+                  .type(InputType.URL)
+                  .width('100%')
+                  .fontSize($r('sys.float.Body_M'))
+                  .padding(12)
+                  .backgroundColor($r('sys.color.comp_background_tertiary'))
+                  .borderRadius(8)
+              }
+            }
+
+            // 指令输入（当选择包含指令的类型时显示）
+            if (['文字+指令', '公众号+指令', 'PDF+指令', '文字+英文指令'].includes(this.inputType)) {
+              Column({ space: 12 }) {
+                Text('指令内容（可选）')
+                  .fontSize($r('sys.float.Subtitle_L'))
+                  .fontColor($r('sys.color.font_primary'))
+                  .fontWeight(FontWeight.Bold)
+                  .alignSelf(ItemAlign.Start)
+
+                TextArea({ 
+                  placeholder: '例如：生成5分钟播客、使用轻松风格等',
+                  text: $$this.instruction
+                })
+                  .width('100%')
+                  .height(80)
+                  .fontSize($r('sys.float.Body_M'))
+                  .padding(12)
+                  .backgroundColor($r('sys.color.comp_background_tertiary'))
+                  .borderRadius(8)
+              }
+            }
+
+            // 文本输入（文字类型使用）
+            if (['文字', '文字+指令', '文字+英文指令'].includes(this.inputType)) {
+              Column({ space: 12 }) {
+                Text('播客文本')
+                  .fontSize($r('sys.float.Subtitle_L'))
+                  .fontColor($r('sys.color.font_primary'))
+                  .fontWeight(FontWeight.Bold)
+                  .alignSelf(ItemAlign.Start)
+
+                TextArea({
+                  placeholder: '请输入播客文本内容',
+                  text: $$this.text
+                })
+                  .placeholderColor($r('sys.color.font_secondary'))
+                  .placeholderFont({
+                    size: $r('sys.float.Body_L'),
+                    weight: FontWeight.Regular,
                   })
+                  .fontSize($r('sys.float.Body_L'))
+                  .fontColor($r('sys.color.font_primary'))
+                  .fontWeight(FontWeight.Regular)
+                  .borderRadius(8)
+                  .padding({ left: 12, top: 8 })
+                  .constraintSize({ minHeight: 80 })
               }
               .width('100%')
-              .padding(12)
-              .borderRadius(8)
-              .backgroundColor($r('sys.color.comp_background_tertiary'))
-
-              // 保留文本输入框作为备选（可选）
-              TextArea({
-                placeholder: '或直接输入播客文本',
-                text: $$this.text
-              })
-                .placeholderColor($r('sys.color.font_secondary'))
-                .placeholderFont({
-                  size: $r('sys.float.Body_L'),
-                  weight: FontWeight.Regular,
-                })
-                .fontSize($r('sys.float.Body_L'))
-                .fontColor($r('sys.color.font_primary'))
-                .fontWeight(FontWeight.Regular)
-                .borderRadius(8)
-                .padding({ left: 12, top: 8 })
-                .constraintSize({ minHeight: 80 })
+              .alignItems(HorizontalAlign.Start)
             }
-            .width('100%')
-            .alignItems(HorizontalAlign.Start)
 
-            // 角色音色选择
-            Column({ space: 12 }) {
-              Text('角色音色')
-                .fontSize($r('sys.float.Subtitle_L'))
-                .fontColor($r('sys.color.font_primary'))
-                .fontWeight(FontWeight.Bold)
-                .alignSelf(ItemAlign.Start)
+            // 文件上传（PDF类型使用）
+            if (['PDF', 'PDF+指令'].includes(this.inputType)) {
+              Column({ space: 12 }) {
+                Text('播客PDF文件（必需）')
+                  .fontSize($r('sys.float.Subtitle_L'))
+                  .fontColor($r('sys.color.font_primary'))
+                  .fontWeight(FontWeight.Bold)
+                  .alignSelf(ItemAlign.Start)
 
-              ForEach(this.roleNames, (roleName: string) => {
                 Row({ space: 12 }) {
-                  Text(roleName)
-                    .fontSize($r('sys.float.Body_M'))
-                    .fontColor($r('sys.color.font_primary'))
-                    .layoutWeight(1)
+                  Column({ space: 4 }) {
+                    Text(this.textFileName || '未选择文件')
+                      .fontSize($r('sys.float.Body_M'))
+                      .fontColor(this.textFileUrl ? $r('sys.color.font_primary') : $r('sys.color.font_secondary'))
+                      .maxLines(1)
 
-                  Button(this.roleVoiceUrls[roleName] ? '已选择' : '选择音色')
+                    Text('支持.pdf格式，最大50MB')
+                      .fontSize($r('sys.float.Body_S'))
+                      .fontColor($r('sys.color.font_secondary'))
+                  }
+                  .layoutWeight(1)
+                  .alignItems(HorizontalAlign.Start)
+
+                  Button(this.textFileUrl ? '已选择' : '选择文件')
                     .fontSize($r('sys.float.Body_S'))
                     .type(ButtonType.Normal)
-                    .backgroundColor(this.roleVoiceUrls[roleName] ?
+                    .backgroundColor(this.textFileUrl ?
                       $r('sys.color.icon_emphasize') :
                       $r('sys.color.comp_background_tertiary'))
-                    .fontColor(this.roleVoiceUrls[roleName] ?
+                    .fontColor(this.textFileUrl ?
                       $r('sys.color.font_on_primary') :
                       $r('sys.color.font_primary'))
                     .onClick(() => {
-                      this.selectVoiceFile(roleName);
+                      this.selectTextFile();
                     })
                 }
                 .width('100%')
                 .padding(12)
                 .borderRadius(8)
                 .backgroundColor($r('sys.color.comp_background_tertiary'))
-              }, (roleName: string) => roleName)
+              }
+              .width('100%')
+              .alignItems(HorizontalAlign.Start)
             }
-            .width('100%')
-            .alignItems(HorizontalAlign.Start)
-          }
-          .width('100%')
-          .padding({ left: 16, right: 16, top: 16, bottom: 16 })
-        }
-        .layoutWeight(1)
 
-        // 生成按钮
-        Column() {
-          // 进度条与提示
-          if (this.isLoading) {
-            Column({ space: 6 }) {
-              Progress({ value: this.progressPercent })
-                .style({
-                  strokeWidth: 12
-                })
-                .width('100%')
-              Text(this.progressMessage || '生成中...')
-                .fontSize($r('sys.float.Body_S'))
-                .fontColor($r('sys.color.font_secondary'))
-                .alignSelf(ItemAlign.Start)
+            // 角色音色选择
+            Column({ space: 12 }) {
+                Text('角色音色')
+                  .fontSize($r('sys.float.Subtitle_L'))
+                  .fontColor($r('sys.color.font_primary'))
+                  .fontWeight(FontWeight.Bold)
+                  .alignSelf(ItemAlign.Start)
+
+                ForEach(this.roleNames, (roleName: string) => {
+                  Row({ space: 12 }) {
+                    Text(roleName)
+                      .fontSize($r('sys.float.Body_M'))
+                      .fontColor($r('sys.color.font_primary'))
+                      .layoutWeight(1)
+
+                    Button(this.roleVoiceUrls[roleName] ? '已选择' : '选择音色')
+                      .fontSize($r('sys.float.Body_S'))
+                      .type(ButtonType.Normal)
+                      .backgroundColor(this.roleVoiceUrls[roleName] ?
+                        $r('sys.color.icon_emphasize') :
+                        $r('sys.color.comp_background_tertiary'))
+                      .fontColor(this.roleVoiceUrls[roleName] ?
+                        $r('sys.color.font_on_primary') :
+                        $r('sys.color.font_primary'))
+                      .onClick(() => {
+                        this.selectVoiceFile(roleName);
+                      })
+                  }
+                  .width('100%')
+                  .padding(12)
+                  .borderRadius(8)
+                  .backgroundColor($r('sys.color.comp_background_tertiary'))
+                }, (roleName: string) => roleName)
+              }
+              .width('100%')
+              .alignItems(HorizontalAlign.Start)
             }
             .width('100%')
-            .padding({ left: 16, right: 16, bottom: 8 })
-          }
-          Button(this.isLoading ? '生成中...' : '开始生成')
-            .width('100%')
-            .height(40)
-            .enabled(!this.isLoading && 
-              (this.text.trim().length > 0 || this.textFileUrl.length > 0) && 
-              Object.keys(this.roleVoiceUrls).length >= 2)
-            .onClick(() => {
-              this.generatePodcast();
+            .padding({
+              left: 16,
+              right: 16,
+              top: 16,
+              bottom: 16
             })
-        }
-        .padding({ left: 16, right: 16, bottom: this.windowModel.windowBottomPadding + 12 })
-      }
-      .width('100%')
-      .height('100%')
-      .backgroundColor($r('sys.color.background_primary'))
-    }
-    .hideTitleBar(true)
-  }
-}
+          }
+          .layoutWeight(1)
 
+          // 生成按钮
+          Column() {
+            // 进度条与提示
+            if (this.isLoading) {
+              Column({ space: 6 }) {
+                Progress({ value: this.progressPercent })
+                  .style({
+                    strokeWidth: 12
+                  })
+                  .width('100%')
+                Text(this.progressMessage || '生成中...')
+                  .fontSize($r('sys.float.Body_S'))
+                  .fontColor($r('sys.color.font_secondary'))
+                  .alignSelf(ItemAlign.Start)
+              }
+              .width('100%')
+              .padding({ left: 16, right: 16, bottom: 8 })
+            }
+            Button(this.isLoading ? '生成中...' : '开始生成')
+              .width('100%')
+              .height(40)
+              .enabled(!this.isLoading &&
+                (this.text.trim().length > 0 || this.textFileUrl.length > 0) &&
+                Object.keys(this.roleVoiceUrls).length >= 2)
+              .onClick(() => {
+                this.generatePodcast();
+              })
+          }
+          .padding({ left: 16, right: 16, bottom: this.windowModel.windowBottomPadding + 12 })
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor($r('sys.color.background_primary'))
+      }.hideTitleBar(true)
+    }
+  }
