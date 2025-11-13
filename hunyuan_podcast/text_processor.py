@@ -15,7 +15,11 @@ class TextProcessor:
     ROLE_PATTERN = re.compile(r'\[([^\]]+)\]')
     
     # 带情绪标注的角色标记：匹配 [角色名]（情绪地）：内容 或 [角色名]（情绪地）内容
+    # 也匹配动作描述：[角色名]（思考状）：内容 或 [角色名]（点头）：内容
     ROLE_WITH_EMOTION_PATTERN = re.compile(r'\[([^\]]+)\]\s*（([^）]+)地）\s*[:：]?\s*(.*)')
+    
+    # 带动作描述的角色标记：匹配 [角色名]（思考状）：内容 或 [角色名]（点头）：内容（不包含"地"字）
+    ROLE_WITH_ACTION_PATTERN = re.compile(r'\[([^\]]+)\]\s*[（(]([^）)]+?)[）)]\s*[:：]?\s*(.*)')
     
     def __init__(self):
         """初始化文本处理器"""
@@ -23,7 +27,7 @@ class TextProcessor:
     
     def clean_dialogue_content(self, content: str) -> str:
         """
-        清理对话内容，移除可能误包含的情绪描述词
+        清理对话内容，移除可能误包含的情绪描述词和动作描述
         
         Args:
             content: 原始对话内容
@@ -36,6 +40,10 @@ class TextProcessor:
         
         # 移除内容中的音效标注
         content = re.sub(r'\[音效[：:][^\]]+\]', '', content).strip()
+        
+        # 移除括号内的动作描述词（如 (点头)、(思考状)、(Nods)、(Thinking) 等）
+        # 支持中文括号（）和英文括号()，使用非贪婪匹配
+        content = re.sub(r'[（(][^）)]*?[）)]', '', content)
         
         # 移除内容中可能误包含的情绪描述词（防止模型错误生成）
         # 移除类似"我兴奋地说"、"他疑惑地说"等模式
@@ -52,6 +60,9 @@ class TextProcessor:
         
         # 移除开头的"我"、"他"、"她"等代词后跟情绪词的模式
         content = re.sub(r'^[我他她它]\s*[兴奋疑惑严肃激动冷静思考]+[地]?\s*[，,：:]?\s*', '', content)
+        
+        # 清理可能出现的多余空格
+        content = re.sub(r'\s+', ' ', content)
         
         return content.strip()
     
@@ -105,6 +116,28 @@ class TextProcessor:
                     current_content.append(content)
                 continue
             
+            # 尝试匹配带动作描述的格式：[角色名]（思考状）：内容 或 [角色名]（点头）：内容
+            action_match = self.ROLE_WITH_ACTION_PATTERN.match(line)
+            if action_match:
+                role_name = action_match.group(1).strip()
+                action = action_match.group(2).strip()
+                content = action_match.group(3).strip()
+                
+                # 清理对话内容，移除可能误包含的动作描述词和音效标注
+                content = self.clean_dialogue_content(content)
+                
+                # 如果角色改变，保存之前的对话
+                if current_role and current_role != role_name:
+                    if current_content:
+                        dialogues.append((current_role, ' '.join(current_content)))
+                        current_content = []
+                
+                # 更新当前角色和内容（动作描述会被跳过，不包含在内容中）
+                current_role = role_name
+                if content:
+                    current_content.append(content)
+                continue
+            
             # 如果没有情绪标注，使用原有逻辑
             matches = list(self.ROLE_PATTERN.finditer(line))
             
@@ -121,11 +154,13 @@ class TextProcessor:
                 match_start = match.start()
                 match_end = match.end()
                 
-                # 检查是否包含情绪标注（在角色名后）
+                # 检查是否包含情绪标注或动作描述（在角色名后）
                 rest_of_line = line[match_end:]
-                emotion_inline_match = re.match(r'\s*（([^）]+)地）\s*[:：]?\s*(.*)', rest_of_line)
+                # 匹配情绪标注格式：（情绪地）或动作描述格式：（思考状）、（点头）等
+                # 支持中文括号（）和英文括号()
+                emotion_inline_match = re.match(r'\s*[（(][^）)]*?[）)]\s*[:：]?\s*(.*)', rest_of_line)
                 if emotion_inline_match:
-                    # 跳过情绪标注部分
+                    # 跳过情绪标注或动作描述部分
                     emotion_text = emotion_inline_match.group(0)
                     match_end += len(emotion_text)
                     content_start = match_end
@@ -462,6 +497,8 @@ class TextProcessor:
 
 你是一位专业的播客编剧和对话导演。请根据提供的文本素材，将其转化为一段结构完整、互动自然、符合真人交流方式的多角色播客对话脚本。
 
+**重要：本次播客要求时长达到4-5分钟，请生成足够丰富和深入的对话内容。对话总字数建议1500-2500字（纯对话内容），每个角色至少发言15-20次。**
+
 【用户输入区】
 
 1. 播客基本信息
@@ -488,7 +525,7 @@ class TextProcessor:
 [角色B]（接话）：我是[角色B名字]。今天我们要聊一个很有意思的话题：{topic if topic else "[本期主题]"}。
 [角色A]：没错！说到这个话题，我最近发现...[自然引入主题]
 
-[讨论主体 - 基于文本素材展开]
+[讨论主体 - 基于文本素材展开，要充分展开讨论，包含多个角度、深入分析、案例分享、观点碰撞等，确保内容丰富，时长达到4-5分钟]
 
 [角色C]（总结性地）：好了，今天关于{topic if topic else "[本期主题]"}的讨论就到这里。
 [角色A]：感谢大家的收听！如果有什么想法，欢迎在评论区留言。
@@ -502,6 +539,9 @@ class TextProcessor:
 - **角色一致性**：每句台词必须符合角色的性格和说话风格
 - **话题过渡**：话题转换要自然平滑，避免生硬切换
 - **情绪表达**：在括号中标注说话时的情绪和动作，如（兴奋地）、（摇头）、（笑着打断）
+- **对话深度**：每段对话要深入展开，包含具体细节、案例分析、个人经历、专业见解等
+- **互动频率**：角色之间要有频繁的互动，包括提问、回应、补充、质疑、赞同等
+- **内容充实**：避免简短的回答，每个角色的发言都要有实质性内容，能够推动讨论深入
 
 {scene_requirements}
 
@@ -520,7 +560,10 @@ class TextProcessor:
 - 情绪标注示例：兴奋地、疑惑地、严肃地、开玩笑地、激动地、冷静地、思考状等
 - 每行一个角色的发言
 - 角色名称必须使用：{role_list}（不要使用其他名称）
-- 每个角色必须发言至少4-6次，总共至少{num_characters * 4}段对话
+- **对话长度要求**：生成足够长的对话内容，确保播客时长达到4-5分钟
+- **对话数量要求**：每个角色必须发言至少15-20次，总共至少{num_characters * 15}段对话
+- **对话深度要求**：每段对话内容要充实，每句话至少20-50字，包含具体观点、例子、解释或讨论
+- **话题展开要求**：要充分展开讨论，包含多个子话题、深入分析、案例分享、观点碰撞等
 
 **重要提示 - 格式规范**：
 - 格式为：`[角色名]（情绪地）：对话内容`
@@ -543,7 +586,14 @@ class TextProcessor:
 
 **再次强调**：注意示例中，冒号之前的内容（`[角色名]（情绪地）`）只是标记，不会用于TTS生成。TTS只会生成冒号后面的对话内容。生成时请确保对话内容中不包含角色名或情绪标注。
 
-现在请开始生成，直接输出对话内容，不要添加任何其他说明、注释或解释。"""
+**时长要求**：
+- 目标时长：4-5分钟
+- 对话总字数：建议1500-2500字（纯对话内容，不含标记）
+- 对话段数：至少{num_characters * 15}段（每个角色至少15-20次发言）
+- 每段对话：每句话至少20-50字，包含具体观点、例子、解释或讨论
+- 内容深度：要充分展开讨论，包含多个子话题、深入分析、案例分享、观点碰撞等
+
+现在请开始生成，直接输出对话内容，不要添加任何其他说明、注释或解释。请确保生成足够长的对话内容以达到4-5分钟的播客时长。"""
         return prompt
     
     def build_deep_podcast_prompt(

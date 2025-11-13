@@ -10,6 +10,13 @@ import tempfile
 from typing import List, Optional, Dict
 from .config import MUSIC_DIR
 
+# 尝试导入上传客户端以获取token
+try:
+    from .upload_client import get_agc_token, _find_agc_client_json, _load_agc_credentials_from_file
+    HAS_UPLOAD_CLIENT = True
+except ImportError:
+    HAS_UPLOAD_CLIENT = False
+
 
 class CloudStorageMusicClient:
     """云存储音乐客户端"""
@@ -41,6 +48,21 @@ class CloudStorageMusicClient:
         os.makedirs(self.temp_dir, exist_ok=True)
         
         self._music_cache: Optional[List[Dict[str, str]]] = None
+        
+        # AGC认证信息（用于API调用）
+        self.client_id = os.getenv('AGC_CLIENT_ID')
+        self.client_secret = os.getenv('AGC_CLIENT_SECRET')
+        self.product_id = os.getenv('AGC_PRODUCT_ID') or os.getenv('AGC_PRODUCT_ID')
+        self.domain = os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
+        
+        # 如果没有从环境变量获取，尝试从文件读取
+        if not self.client_id or not self.client_secret:
+            agc_json_path = _find_agc_client_json() if HAS_UPLOAD_CLIENT else None
+            if agc_json_path:
+                creds = _load_agc_credentials_from_file(agc_json_path)
+                self.client_id = self.client_id or creds.get('client_id')
+                self.client_secret = self.client_secret or creds.get('client_secret')
+                self.product_id = self.product_id or creds.get('project_id')
     
     def list_music_files(self, music_urls: Optional[List[str]] = None) -> List[Dict[str, str]]:
         """
@@ -53,12 +75,14 @@ class CloudStorageMusicClient:
             音乐文件列表，每个元素包含 {'path': 本地路径, 'name': 文件名, 'style': 推断的风格, 'cloud_path': 云存储路径, 'url': 下载URL}
         """
         if self._music_cache is not None:
+            print(f"使用缓存的音乐文件列表: {len(self._music_cache)} 个文件")
             return self._music_cache
         
         music_files = []
         
         # 如果提供了URL列表，使用这些URL
         if music_urls:
+            print(f"从URL列表处理 {len(music_urls)} 个音乐文件")
             for url in music_urls:
                 try:
                     # 从URL中提取文件名
@@ -77,25 +101,55 @@ class CloudStorageMusicClient:
                         'cloud_path': cloud_path,
                         'url': url
                     })
+                    print(f"  - 添加音乐文件: {filename} (路径: {cloud_path})")
                 except Exception as e:
                     print(f"处理音乐URL失败 {url}: {str(e)}")
             
             if music_files:
                 self._music_cache = music_files
-                print(f"从URL列表获取到 {len(music_files)} 个音乐文件")
+                print(f"✓ 从URL列表获取到 {len(music_files)} 个音乐文件")
                 return music_files
         
+        # 尝试从环境变量读取音乐URL列表
+        music_urls_str = os.getenv('CLOUD_MUSIC_URLS')
+        if music_urls_str:
+            print(f"从环境变量 CLOUD_MUSIC_URLS 读取音乐文件列表")
+            try:
+                import json
+                env_urls = json.loads(music_urls_str)
+                if isinstance(env_urls, list):
+                    return self.list_music_files(music_urls=env_urls)
+            except json.JSONDecodeError:
+                # 如果不是JSON，尝试按逗号分割
+                env_urls = [url.strip() for url in music_urls_str.split(',') if url.strip()]
+                if env_urls:
+                    print(f"从环境变量解析到 {len(env_urls)} 个URL")
+                    return self.list_music_files(music_urls=env_urls)
+        
         # 尝试通过云存储API获取文件列表（需要认证）
-        # 注意：这可能需要配置访问令牌
-        try:
-            # 这里可以扩展为通过API获取文件列表
-            # 目前先返回空列表，提示使用URL列表或本地文件
-            print("提示：云存储文件列表获取需要配置访问权限")
-            print("建议：通过环境变量 CLOUD_MUSIC_URLS 提供音乐文件URL列表，或使用本地音乐文件")
-            return []
-        except Exception as e:
-            print(f"从云存储获取音乐文件列表失败: {str(e)}")
-            return []
+        if HAS_UPLOAD_CLIENT and self.client_id and self.client_secret:
+            try:
+                print(f"尝试通过API获取云存储文件列表 (bucket: {self.bucket}, path: {self.music_path})")
+                api_files = self._list_files_via_api()
+                if api_files:
+                    self._music_cache = api_files
+                    print(f"✓ 通过API获取到 {len(api_files)} 个音乐文件")
+                    return api_files
+            except Exception as e:
+                print(f"⚠️ 通过API获取文件列表失败: {str(e)}")
+                import traceback
+                print(f"  错误详情: {traceback.format_exc()}")
+        
+        # 如果API获取失败，提示用户
+        print("⚠️ 提示：云存储文件列表获取需要配置访问权限")
+        print(f"   当前配置: bucket={self.bucket}, music_path={self.music_path}")
+        if not HAS_UPLOAD_CLIENT:
+            print("   缺少 upload_client 模块，无法使用API方式")
+        elif not self.client_id or not self.client_secret:
+            print("   缺少 AGC_CLIENT_ID 或 AGC_CLIENT_SECRET 环境变量")
+        print("   建议：通过环境变量 CLOUD_MUSIC_URLS 提供音乐文件URL列表，或使用本地音乐文件")
+        print("   格式: CLOUD_MUSIC_URLS='[\"url1\", \"url2\"]' 或 CLOUD_MUSIC_URLS='url1,url2'")
+        return []
     
     def _extract_cloud_path_from_url(self, url: str) -> str:
         """
@@ -198,6 +252,147 @@ class CloudStorageMusicClient:
         except Exception as e:
             print(f"从URL下载音乐文件失败: {str(e)}")
             return None
+    
+    def _list_files_via_api(self) -> List[Dict[str, str]]:
+        """
+        通过AGC REST API列出云存储中的文件
+        
+        Returns:
+            音乐文件列表，每个元素包含 {'path': 本地路径, 'name': 文件名, 'style': 推断的风格, 'cloud_path': 云存储路径, 'url': 下载URL}
+        """
+        if not HAS_UPLOAD_CLIENT:
+            raise RuntimeError("upload_client 模块不可用")
+        
+        if not self.client_id or not self.client_secret:
+            raise RuntimeError("缺少 AGC_CLIENT_ID 或 AGC_CLIENT_SECRET")
+        
+        # 获取access_token
+        print(f"正在获取AGC access_token...")
+        token = get_agc_token(
+            domain=self.domain,
+            client_id=self.client_id,
+            client_secret=self.client_secret
+        )
+        print(f"✓ Token获取成功")
+        
+        # 构建API请求URL
+        # 根据华为AGC云存储API，list接口格式为: GET {storage_url}{bucket}/{path}?list
+        # 或者使用: GET {storage_url}{bucket}?prefix={path}&list
+        list_url = f"{self.storage_url}{self.bucket}"
+        
+        # 规范化路径（移除开头的/，确保以/结尾）
+        normalized_path = self.music_path.lstrip('/')
+        if normalized_path and not normalized_path.endswith('/'):
+            normalized_path += '/'
+        
+        # 构建查询参数
+        params = {}
+        if normalized_path:
+            params['prefix'] = normalized_path
+        params['list'] = 'true'
+        
+        # 构建请求头
+        headers = {
+            'productId': self.product_id or '',
+            'client_id': self.client_id,
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json'
+        }
+        
+        print(f"正在请求文件列表: {list_url} (path: {normalized_path})")
+        
+        # 发送GET请求
+        response = requests.get(list_url, params=params, headers=headers, timeout=30)
+        response.raise_for_status()
+        
+        # 解析响应
+        # 注意：AGC API可能返回XML或JSON格式，需要根据实际响应格式解析
+        try:
+            result = response.json()
+        except json.JSONDecodeError:
+            # 如果返回的是XML，尝试解析XML
+            try:
+                import xml.etree.ElementTree as ET
+                root = ET.fromstring(response.text)
+                # 解析XML格式的响应（根据实际API响应格式调整）
+                files = []
+                for item in root.findall('.//Contents') or root.findall('.//File'):
+                    key_elem = item.find('Key') or item.find('key')
+                    if key_elem is not None:
+                        file_path = key_elem.text
+                        if file_path and file_path.startswith(normalized_path):
+                            files.append(file_path)
+                result = {'files': files, 'directories': []}
+            except Exception as e:
+                print(f"解析响应失败: {str(e)}")
+                print(f"响应内容: {response.text[:500]}")
+                raise
+        
+        # 处理文件列表
+        music_files = []
+        
+        # 支持的音频格式
+        audio_extensions = ['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac']
+        
+        # 处理文件列表
+        files_list = result.get('files', [])
+        if isinstance(files_list, list):
+            for file_path in files_list:
+                # 确保是字符串类型
+                if not isinstance(file_path, str):
+                    continue
+                
+                # 检查是否在music目录下
+                if normalized_path and not file_path.startswith(normalized_path):
+                    continue
+                
+                # 检查是否是音频文件
+                filename = os.path.basename(file_path)
+                if not any(filename.lower().endswith(ext) for ext in audio_extensions):
+                    continue
+                
+                # 构建下载URL
+                download_url = f"{self.storage_url}{self.bucket}/{file_path}"
+                
+                # 从文件名推断风格
+                style = self._infer_style_from_filename(filename)
+                
+                music_files.append({
+                    'path': None,  # 稍后下载时填充
+                    'name': filename,
+                    'style': style,
+                    'cloud_path': file_path,
+                    'url': download_url
+                })
+                print(f"  - 找到音乐文件: {filename} (路径: {file_path})")
+        
+        # 处理子目录（递归获取，但限制深度避免无限循环）
+        directories = result.get('directories', [])
+        if isinstance(directories, list) and directories:
+            print(f"发现 {len(directories)} 个子目录，递归获取...")
+            for subdir in directories:
+                if not isinstance(subdir, str):
+                    continue
+                # 规范化子目录路径
+                subdir_path = subdir.rstrip('/') + '/'
+                if subdir_path.startswith(normalized_path):
+                    # 递归获取子目录文件（使用新的客户端实例避免状态冲突）
+                    sub_client = CloudStorageMusicClient(
+                        storage_url=self.storage_url,
+                        bucket=self.bucket,
+                        music_path=subdir_path
+                    )
+                    sub_client.client_id = self.client_id
+                    sub_client.client_secret = self.client_secret
+                    sub_client.product_id = self.product_id
+                    sub_client.domain = self.domain
+                    try:
+                        sub_files = sub_client._list_files_via_api()
+                        music_files.extend(sub_files)
+                    except Exception as e:
+                        print(f"获取子目录 {subdir_path} 失败: {str(e)}")
+        
+        return music_files
     
     def _infer_style_from_filename(self, filename: str) -> str:
         """

@@ -232,36 +232,61 @@ class PodcastGenerator:
         main_audio = audio
         
         # 如果有背景音乐，混合背景音乐（启用ducking效果）
-        if verbose:
-            print(f"背景音乐参数: {background_music}")
-            print(f"背景音乐类型: {type(background_music)}")
+        print("=" * 60)
+        print("开始处理背景音乐...")
+        print(f"背景音乐参数: {background_music}")
+        print(f"背景音乐类型: {type(background_music)}")
         
         if background_music:
             # 处理单个文件或文件列表
             if isinstance(background_music, str):
-                background_music_list = [background_music] if os.path.exists(background_music) else []
+                if os.path.exists(background_music):
+                    background_music_list = [background_music]
+                    print(f"✓ 找到单个背景音乐文件: {background_music}")
+                else:
+                    background_music_list = []
+                    print(f"✗ 背景音乐文件不存在: {background_music}")
             elif isinstance(background_music, list):
                 # 如果是列表，过滤掉不存在的文件
-                background_music_list = [f for f in background_music if f and isinstance(f, str) and os.path.exists(f)]
+                background_music_list = []
+                for f in background_music:
+                    if f and isinstance(f, str):
+                        if os.path.exists(f):
+                            background_music_list.append(f)
+                            print(f"  ✓ 有效文件: {os.path.basename(f)}")
+                        else:
+                            print(f"  ✗ 文件不存在: {f}")
+                    else:
+                        print(f"  ✗ 无效文件路径: {f}")
             else:
                 background_music_list = []
+                print(f"✗ 背景音乐格式不正确: {type(background_music)}")
             
-            if verbose:
-                print(f"处理后的背景音乐列表: {background_music_list}")
-                print(f"有效文件数量: {len(background_music_list)}")
+            print(f"处理后的背景音乐列表: {background_music_list}")
+            print(f"有效文件数量: {len(background_music_list)}")
             
             if background_music_list:
-                if verbose:
-                    if len(background_music_list) == 1:
-                        print(f"正在加载并混合背景音乐: {background_music_list[0]}")
-                    else:
-                        print(f"正在加载并混合 {len(background_music_list)} 个背景音乐文件（模式: {background_mode}）")
+                if len(background_music_list) == 1:
+                    print(f"正在加载并混合背景音乐: {background_music_list[0]}")
+                else:
+                    print(f"正在加载并混合 {len(background_music_list)} 个背景音乐文件（模式: {background_mode}）")
                 
                 # 加载所有背景音乐
                 background_audios = []
-                for bg_path in background_music_list:
-                    bg_audio, _ = load_audio(bg_path, AUDIO_SAMPLING_RATE)
-                    background_audios.append(bg_audio)
+                for i, bg_path in enumerate(background_music_list, 1):
+                    print(f"  [{i}/{len(background_music_list)}] 加载: {os.path.basename(bg_path)}")
+                    try:
+                        bg_audio, _ = load_audio(bg_path, AUDIO_SAMPLING_RATE)
+                        background_audios.append(bg_audio)
+                        print(f"    ✓ 加载成功，时长: {bg_audio.shape[1] / AUDIO_SAMPLING_RATE:.2f}秒")
+                    except Exception as e:
+                        print(f"    ✗ 加载失败: {str(e)}")
+                        import traceback
+                        print(f"    错误详情: {traceback.format_exc()}")
+                
+                if not background_audios:
+                    print("⚠️ 所有背景音乐文件加载失败，将不使用背景音乐")
+                    background_music_list = []
                 
                 # 根据模式处理
                 if len(background_audios) == 1:
@@ -280,8 +305,7 @@ class PodcastGenerator:
                     else:
                         background_audio = background_audios[0]
                 
-                if verbose:
-                    print("正在混合背景音乐（启用ducking效果：对话时自动压低背景音乐）...")
+                print(f"正在混合背景音乐（ducking效果: 启用，音量: {background_volume}）...")
                 
                 main_audio = mix_audio_with_background(
                     main_audio,
@@ -290,10 +314,13 @@ class PodcastGenerator:
                     background_mode=background_mode,
                     enable_ducking=True  # 启用ducking效果
                 )
+                print("✓ 背景音乐混合完成")
                 final_audio = main_audio
             else:
+                print("⚠️ 背景音乐列表为空，将不使用背景音乐")
                 final_audio = main_audio
         else:
+            print("ℹ️ 未提供背景音乐参数")
             final_audio = main_audio
         
         if verbose:

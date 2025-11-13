@@ -26,7 +26,7 @@ DEFAULT_MAX_TOKENS = 2000
 DEFAULT_TOP_P = 0.9
 
 # 音频合成配置
-AUDIO_SILENCE_INTERVAL = 300  # 角色切换时的静音间隔（毫秒）
+AUDIO_SILENCE_INTERVAL = 600  # 角色切换时的静音间隔（毫秒），默认600ms以增加角色之间的间隔
 AUDIO_SAMPLING_RATE = 22050
 
 # 输出目录（使用绝对路径，确保无论从哪里运行都能正确保存）
