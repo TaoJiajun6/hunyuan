@@ -47,34 +47,42 @@ export struct PlayerControlArea {
   }
 
   // 监听当前播放歌曲
-  @Monitor('musicModel.currentSong.id, musicModel.updateSongInfo')
+  @Monitor('musicModel.currentSong, musicModel.updateSongInfo')
   changeSong() {
-    this.isCollected = this.musicModel.currentSong?.isCollected ?? false;
-    const currentSongId = this.musicModel.currentSong?.id ?? '';
+    if (!this.musicModel.currentSong) {
+      // 如果 currentSong 未初始化，设置默认值
+      this.isCollected = false;
+      this.playlistCount = 0;
+      this.shareCount = 0;
+      this.downloadCount = 0;
+      return;
+    }
+    this.isCollected = this.musicModel.currentSong.isCollected ?? false;
+    const currentSongId = this.musicModel.currentSong.id ?? '';
     // 歌单数量
     const playlistCount = this.musicModel.gedanMap.get(currentSongId) ?? 0;
     if (playlistCount) {
-      this.musicModel.currentSong!.playlistCount = playlistCount;
+      this.musicModel.currentSong.playlistCount = playlistCount;
     }
-    this.playlistCount = this.musicModel.currentSong?.playlistCount ?? 0;
+    this.playlistCount = this.musicModel.currentSong.playlistCount ?? 0;
 
     // 分享数量
     const shareCount = this.musicModel.shareMap.get(currentSongId) ?? 0;
     if (shareCount) {
-      this.musicModel.currentSong!.shareCount = shareCount;
+      this.musicModel.currentSong.shareCount = shareCount;
     }
-    this.shareCount = this.musicModel.currentSong?.shareCount ?? 0;
+    this.shareCount = this.musicModel.currentSong.shareCount ?? 0;
 
     // 下载数量
     const downloadCount = this.musicModel.downloadMap.get(currentSongId) ?? 0;
     if (downloadCount) {
-      this.musicModel.currentSong!.downloadCount = downloadCount;
+      this.musicModel.currentSong.downloadCount = downloadCount;
     }
-    this.downloadCount = this.musicModel.currentSong?.downloadCount ?? 0;
+    this.downloadCount = this.musicModel.currentSong.downloadCount ?? 0;
   }
 
   // 监听当前播放歌曲收藏状态
-  @Monitor('musicModel.currentSong.isCollected')
+  @Monitor('musicModel.currentSong')
   changeCollected() {
     this.isCollected = this.musicModel.currentSong?.isCollected ?? false;
   }
@@ -137,14 +145,22 @@ export struct PlayerControlArea {
     promptAction.showToast({ message: msg });
   }
 
-  public getPic(value: string | Resource): Resource | string {
-    if (value === '') {
-      return ''
+  public getPic(value: string | Resource | undefined): Resource | string {
+    if (!value || value === '') {
+      return $r('app.media.ic_music_icon')
     }
     if (typeof value === 'string' && value.startsWith('http')) {
       return value
     }
-    return getContext().resourceManager.getMediaBase64ByNameSync(value as string)
+    if (typeof value === 'string') {
+      try {
+        return getContext().resourceManager.getMediaBase64ByNameSync(value)
+      } catch (error) {
+        // 如果资源不存在，返回默认图标
+        return $r('app.media.ic_music_icon')
+      }
+    }
+    return value
   }
 
   build() {
@@ -285,23 +301,23 @@ export struct PlayerControlArea {
   @Builder
   shareBuilder() {
     Column({ space: 5 }) {
-      Share({
-        qrCodeInfo: {
-          id: this.musicModel.currentSong?.id ?? '',
-          type: 2,
-          articleFrom: this.musicModel.currentSong?.singer ?? '',
-          title: this.musicModel.currentSong?.title ?? '',
-          createTime: '2025-8-4 10:26',
-          isVideo: false,
-          coverUrl: this.getPic(this.musicModel.currentSong?.label ?? '') as string,
-        },
-        onShareResult: () => {
-          if (this.musicModel.currentSong) {
-            this.musicModel.updateShareNum(this.musicModel.currentSong)
-          }
-          promptAction.showToast({ message: '分享成功' });
-        },
-      })
+      if (this.musicModel.currentSong) {
+        Share({
+          qrCodeInfo: {
+            id: this.musicModel.currentSong.id ?? '',
+            type: 2,
+            articleFrom: this.musicModel.currentSong.singer ?? '',
+            title: this.musicModel.currentSong.title ?? '',
+            createTime: '2025-8-4 10:26',
+            isVideo: false,
+            coverUrl: this.getPic(this.musicModel.currentSong.label) as string,
+          },
+          onShareResult: () => {
+            this.musicModel.updateShareNum(this.musicModel.currentSong!)
+            promptAction.showToast({ message: '分享成功' });
+          },
+        })
+      }
       Text(FormatCountUtil.formatToK(this.shareCount))
         .fontSize(10).fontColor(Color.White)
     }

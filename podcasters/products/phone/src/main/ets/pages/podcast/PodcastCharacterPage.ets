@@ -2,6 +2,7 @@ import { RouterMap, RouterUtils, WindowModel } from 'lib_common';
 import { NavHeaderBar } from 'lib_widget';
 import { podcastService, CharacterRequest, CharacterInfo, PodcastResult } from 'lib_api';
 import { FileUtils } from '../../utils/FileUtils';
+import { AudioRecorderUtils } from '../../utils/AudioRecorderUtils';
 import { promptAction, AppStorageV2 } from '@kit.ArkUI';
 import { PodcastResultPageParams } from './PodcastResultPage';
 import { common } from '@kit.AbilityKit';
@@ -20,6 +21,24 @@ export struct PodcastCharacterPage {
   ];
   @Local isLoading: boolean = false;
   @Local windowModel: WindowModel = AppStorageV2.connect(WindowModel, () => new WindowModel())!;
+  @Local recordingIndex: number = -1; // 当前正在录制的角色索引，-1表示未在录制
+  @Local isRecording: boolean = false; // 是否正在录制
+  @Local recordingDuration: number = 0; // 录音时长（秒）
+  @Local recordingTimer: number = 0; // 录音计时器
+
+  aboutToDisappear(): void {
+    // 页面销毁时，如果正在录制，停止录制并释放资源
+    if (this.isRecording) {
+      this.stopRecordingVoice();
+    }
+    // 清理计时器
+    if (this.recordingTimer) {
+      clearInterval(this.recordingTimer);
+      this.recordingTimer = 0;
+    }
+    // 释放录制器资源
+    AudioRecorderUtils.release();
+  }
 
   /**
    * 复制CharacterInfo对象并更新指定属性
@@ -74,6 +93,121 @@ export struct PodcastCharacterPage {
       });
     }
   }
+
+  /**
+   * 开始录制音色
+   */
+  async startRecordingVoice(index: number): Promise<void> {
+    try {
+      // 如果正在录制其他角色，先停止
+      if (this.isRecording && this.recordingIndex !== index) {
+        await this.stopRecordingVoice();
+      }
+
+      // 如果已经在录制当前角色，直接返回
+      if (this.isRecording && this.recordingIndex === index) {
+        return;
+      }
+
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const fileName = `voice_${this.characters[index].name}_${Date.now()}`;
+
+      // 初始化并开始录制
+      const initSuccess = await AudioRecorderUtils.initRecorder(context);
+      if (!initSuccess) {
+        return;
+      }
+
+      const startSuccess = await AudioRecorderUtils.startRecording(fileName, (progress) => {
+        this.recordingDuration = Math.floor(progress.duration / 1000);
+      });
+
+      if (startSuccess) {
+        this.recordingIndex = index;
+        this.isRecording = true;
+        this.recordingDuration = 0;
+
+        // 启动计时器
+        this.recordingTimer = setInterval(() => {
+          this.recordingDuration++;
+        }, 1000);
+
+        promptAction.showToast({
+          message: `开始录制 ${this.characters[index].name} 的音色`,
+          duration: 1000
+        });
+      }
+    } catch (error) {
+      promptAction.showToast({
+        message: `开始录制失败: ${error}`,
+        duration: 2000
+      });
+    }
+  }
+
+  /**
+   * 停止录制音色并上传
+   */
+  async stopRecordingVoice(): Promise<void> {
+    if (!this.isRecording) {
+      return;
+    }
+
+    try {
+      // 停止计时器
+      if (this.recordingTimer) {
+        clearInterval(this.recordingTimer);
+        this.recordingTimer = 0;
+      }
+
+      // 停止录制并上传
+      const result = await AudioRecorderUtils.stopRecordingAndUpload();
+
+      if (result && result.cloudUrl) {
+        const index = this.recordingIndex;
+        // 创建新数组以触发状态更新
+        const newCharacters: CharacterInfo[] = [];
+        for (let i = 0; i < this.characters.length; i++) {
+          if (i === index) {
+            newCharacters.push(this.copyCharacterInfo(this.characters[i], { voice_url: result.cloudUrl! }));
+          } else {
+            newCharacters.push(this.characters[i]);
+          }
+        }
+        this.characters = newCharacters;
+
+        promptAction.showToast({
+          message: `${this.characters[index].name}音色录制完成并已上传`,
+          duration: 2000
+        });
+      } else {
+        promptAction.showToast({
+          message: '录制失败或上传失败',
+          duration: 2000
+        });
+      }
+    } catch (error) {
+      promptAction.showToast({
+        message: `停止录制失败: ${error}`,
+        duration: 2000
+      });
+    } finally {
+      this.isRecording = false;
+      this.recordingIndex = -1;
+      this.recordingDuration = 0;
+    }
+  }
+
+  /**
+   * 格式化录制时长
+   */
+  formatDuration(seconds: number): string {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
+
+
 
   /**
    * 生成播客
@@ -243,19 +377,46 @@ export struct PodcastCharacterPage {
                       this.characters = newCharacters;
                     })
 
-                  Button(character.voice_url ? '已选择音色' : '选择音色文件')
-                    .width('100%')
-                    .fontSize($r('sys.float.Body_S'))
-                    .type(ButtonType.Normal)
-                    .backgroundColor(character.voice_url ?
-                      $r('sys.color.icon_emphasize') :
-                      $r('sys.color.comp_background_tertiary'))
-                    .fontColor(character.voice_url ?
-                      $r('sys.color.font_on_primary') :
-                      $r('sys.color.font_primary'))
-                    .onClick(() => {
-                      this.selectVoiceFile(index);
-                    })
+                  Row({ space: 8 }) {
+                    Button(character.voice_url ? '已选择音色' : '选择音色文件')
+                      .layoutWeight(1)
+                      .fontSize($r('sys.float.Body_S'))
+                      .type(ButtonType.Normal)
+                      .backgroundColor(character.voice_url ?
+                        $r('sys.color.icon_emphasize') :
+                        $r('sys.color.comp_background_tertiary'))
+                      .fontColor(character.voice_url ?
+                        $r('sys.color.font_on_primary') :
+                        $r('sys.color.font_primary'))
+                      .enabled(!this.isRecording || this.recordingIndex === index)
+                      .onClick(() => {
+                        this.selectVoiceFile(index);
+                      })
+
+                    if (this.isRecording && this.recordingIndex === index) {
+                      Button(`停止录制 (${this.formatDuration(this.recordingDuration)})`)
+                        .layoutWeight(1)
+                        .fontSize($r('sys.float.Body_S'))
+                        .type(ButtonType.Normal)
+                        .backgroundColor($r('sys.color.alert'))
+                        .fontColor($r('sys.color.font_on_primary'))
+                        .onClick(() => {
+                          this.stopRecordingVoice();
+                        })
+                    } else {
+                      Button('录制音色')
+                        .layoutWeight(1)
+                        .fontSize($r('sys.float.Body_S'))
+                        .type(ButtonType.Normal)
+                        .backgroundColor($r('sys.color.comp_background_tertiary'))
+                        .fontColor($r('sys.color.font_primary'))
+                        .enabled(!this.isRecording)
+                        .onClick(() => {
+                          this.startRecordingVoice(index);
+                        })
+                    }
+                  }
+                  .width('100%')
                 }
                 .width('100%')
                 .padding(12)

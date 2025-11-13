@@ -39,6 +39,10 @@ export struct PlayerView {
   aboutToAppear(): void {
     this.naviIndicatorHeight = AppStorage.get('naviIndicatorHeight') as number;
     this.statusBarHeight = AppStorage.get('statusBarHeight') as number;
+    // 确保 currentSong 已初始化
+    if (!this.musicModel.currentSong && this.musicModel.songList.length > 0) {
+      this.musicModel.setCurrentSong(this.musicModel.songList[0]);
+    }
     this.getImageColor();
   }
 
@@ -47,8 +51,11 @@ export struct PlayerView {
    */
   @Monitor('musicModel.currentSong')
   getImageColor() {
-    let currentSong: SongItem = getMusicModel().currentSong as SongItem;
-    ImageUtils.getImageDealData(getContext(this), currentSong?.label as Resource).then((data) => {
+    const currentSong = getMusicModel().currentSong;
+    if (!currentSong || !currentSong.label) {
+      return;
+    }
+    ImageUtils.getImageDealData(getContext(this), currentSong.label as Resource).then((data) => {
       this.imageColor = data.imageColor;
       this.imageLabel = data.blurPixelMap;
     })

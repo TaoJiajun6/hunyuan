@@ -251,7 +251,7 @@ export class FileUtils {
    * @param fileName 文件名
    * @returns 云存储路径和下载URL
    */
-  private static async uploadAudioToCloud(
+  static async uploadAudioToCloud(
     context: common.UIAbilityContext,
     fileUri: string,
     fileName: string
