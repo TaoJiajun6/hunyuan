@@ -33,7 +33,6 @@ export struct PodcastMultiRolePage {
   @Local progressMessage: string = '';
   private progressTimer: number = 0;
   @Local windowModel: WindowModel = AppStorageV2.connect(WindowModel, () => new WindowModel())!;
-  
   // 输入类型选项列表
   private readonly inputTypeOptions: SelectOption[] = [
     { value: '文字' },
@@ -45,42 +44,32 @@ export struct PodcastMultiRolePage {
     { value: '文件+指令' },
     { value: '文字+英文指令' }
   ];
-  
-  // 播客分类选项列表
+  // 播客分类选项列表（已合并重复分类）
   private readonly categoryOptions: SelectOption[] = [
-    { value: '商业' },
-    { value: '科技' },
+    { value: '商业' }, // 包含创业创新
+    { value: '科技' }, // 包含科学科普
     { value: '财经' },
     { value: '新闻' },
     { value: '影视' },
-    { value: '自我成长与自愈' },
-    { value: '职场万象' },
-    { value: '学习类' },
-    { value: '娱乐八卦类' },
-    { value: '考题' },
-    { value: '文化艺术' },
-    { value: '职场类—人际关系' },
-    { value: '学生类—求职就业' },
-    { value: '健康养生' },
-    { value: '运动健身' },
-    { value: '旅游' },
-    { value: '美食' },
+    { value: '音乐' },
+    { value: '文化艺术' }, // 包含读书阅读
+    { value: '历史' },
+    { value: '哲学思考' },
+    { value: '自我成长' }, // 包含自我成长与自愈、心理学
+    { value: '职场' }, // 包含职场万象、职场人际关系、求职就业
+    { value: '学习' }, // 包含学习类、考题
     { value: '教育育儿' },
     { value: '情感恋爱' },
-    { value: '历史' },
-    { value: '心理学' },
-    { value: '音乐' },
-    { value: '体育' },
+    { value: '健康养生' }, // 包含运动健身
+    { value: '旅游' },
+    { value: '美食' },
+    { value: '生活方式' },
+    { value: '娱乐' }, // 包含娱乐八卦、喜剧
     { value: '游戏电竞' },
+    { value: '体育' },
     { value: '时尚美妆' },
     { value: '汽车' },
     { value: '法律' },
-    { value: '创业创新' },
-    { value: '哲学思考' },
-    { value: '科学科普' },
-    { value: '读书阅读' },
-    { value: '生活方式' },
-    { value: '喜剧' },
     { value: '宠物' }
   ];
 
@@ -95,7 +84,17 @@ export struct PodcastMultiRolePage {
       const audioFileInfo = await FileUtils.pickAudioFile(context, true);
       if (audioFileInfo && audioFileInfo.cloudUrl) {
         // 保存云存储URL（重新创建对象以触发响应式更新）
-        const updatedRoleVoiceUrls = { ...this.roleVoiceUrls };
+        // ArkTS不支持展开运算符，需要手动构建新对象
+        // 使用Object.keys获取所有键，然后构建新对象
+        const keys = Object.keys(this.roleVoiceUrls);
+        const updatedRoleVoiceUrls: Record<string, string> = {};
+        // 复制现有的键值对（局部变量的索引访问是允许的）
+        for (let i = 0; i < keys.length; i++) {
+          const key = keys[i];
+          const value = this.roleVoiceUrls[key];
+          updatedRoleVoiceUrls[key] = value;
+        }
+        // 添加新的键值对（局部变量的索引访问是允许的）
         updatedRoleVoiceUrls[roleName] = audioFileInfo.cloudUrl;
         this.roleVoiceUrls = updatedRoleVoiceUrls;
         promptAction.showToast({
@@ -124,21 +123,21 @@ export struct PodcastMultiRolePage {
     try {
       // 获取UIAbility上下文
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      
+
       // 检查当前输入类型，如果是文件类型
       const isFileType = ['文件', '文件+指令'].includes(this.inputType);
-      
+
       // 使用云存储上传（文件必须上传到云存储）
       const textFileInfo = await FileUtils.pickTextFile(context, true);
       if (textFileInfo && textFileInfo.cloudUrl) {
         // 文件类型支持.txt、.doc、.docx、.pdf等格式，不需要特殊验证
         const fileName = textFileInfo.fileName.toLowerCase();
         const fileExtension = fileName.split('.').pop() || '';
-        
+
         // 保存云存储URL
         this.textFileUrl = textFileInfo.cloudUrl;
         this.textFileName = textFileInfo.fileName;
-        
+
         // 如果文件是.txt格式且已读取内容，保存到text字段（用于兼容）
         if (fileExtension === 'txt' && textFileInfo.content) {
           this.text = textFileInfo.content;
@@ -146,12 +145,12 @@ export struct PodcastMultiRolePage {
           // PDF和Word文件不需要保存内容到text字段
           this.text = '';
         }
-        
+
         // 根据文件类型显示不同的提示信息
-        const fileTypeName = fileExtension === 'pdf' ? 'PDF' : 
-                             fileExtension === 'docx' || fileExtension === 'doc' ? 'Word' : 
-                             '文本';
-        
+        const fileTypeName = fileExtension === 'pdf' ? 'PDF' :
+          fileExtension === 'docx' || fileExtension === 'doc' ? 'Word' :
+            '文本';
+
         promptAction.showToast({
           message: `${fileTypeName}文件已选择并上传到云存储: ${textFileInfo.fileName}`,
           duration: 2000
@@ -294,11 +293,15 @@ export struct PodcastMultiRolePage {
   @Local savedScript: string = '';
 
   private startProgressPolling(): void {
-    if (!this.jobId) return;
+    if (!this.jobId) {
+      return;
+    }
     // 每 1 秒轮询一次
     this.progressTimer = setInterval(async () => {
       const status = await podcastService.getProgress(this.jobId);
-      if (!status) return;
+      if (!status) {
+        return;
+      }
       this.progressPercent = status.percent || 0;
       this.progressMessage = status.message || '';
 
@@ -382,7 +385,7 @@ export struct PodcastMultiRolePage {
                   .fontWeight(FontWeight.Bold)
                   .alignSelf(ItemAlign.Start)
 
-                TextInput({ 
+                TextInput({
                   placeholder: `请输入${this.inputType}的URL`,
                   text: $$this.inputUrl
                 })
@@ -404,7 +407,7 @@ export struct PodcastMultiRolePage {
                   .fontWeight(FontWeight.Bold)
                   .alignSelf(ItemAlign.Start)
 
-                TextArea({ 
+                TextArea({
                   placeholder: '例如：生成5分钟播客、使用轻松风格等',
                   text: $$this.instruction
                 })
@@ -464,8 +467,8 @@ export struct PodcastMultiRolePage {
 
             // 文件上传（文件类型必需，其他类型可选）
             Column({ space: 12 }) {
-              Text(['文件', '文件+指令'].includes(this.inputType) ? 
-                '播客文件（必需）' : 
+              Text(['文件', '文件+指令'].includes(this.inputType) ?
+                '播客文件（必需）' :
                 '播客文件（可选，支持.txt、.doc、.docx、.pdf）')
                 .fontSize($r('sys.float.Subtitle_L'))
                 .fontColor($r('sys.color.font_primary'))
@@ -479,8 +482,8 @@ export struct PodcastMultiRolePage {
                     .fontColor(this.textFileUrl ? $r('sys.color.font_primary') : $r('sys.color.font_secondary'))
                     .maxLines(1)
 
-                  Text(['文件', '文件+指令'].includes(this.inputType) ? 
-                    '支持.txt、.doc、.docx、.pdf格式，最大50MB' : 
+                  Text(['文件', '文件+指令'].includes(this.inputType) ?
+                    '支持.txt、.doc、.docx、.pdf格式，最大50MB' :
                     '支持.txt、.doc、.docx、.pdf格式，最大50MB')
                     .fontSize($r('sys.float.Body_S'))
                     .fontColor($r('sys.color.font_secondary'))
@@ -511,84 +514,84 @@ export struct PodcastMultiRolePage {
 
             // 角色音色选择
             Column({ space: 12 }) {
-                Text('角色音色')
-                  .fontSize($r('sys.float.Subtitle_L'))
-                  .fontColor($r('sys.color.font_primary'))
-                  .fontWeight(FontWeight.Bold)
-                  .alignSelf(ItemAlign.Start)
+              Text('角色音色')
+                .fontSize($r('sys.float.Subtitle_L'))
+                .fontColor($r('sys.color.font_primary'))
+                .fontWeight(FontWeight.Bold)
+                .alignSelf(ItemAlign.Start)
 
-                ForEach(this.roleNames, (roleName: string) => {
-                  Row({ space: 12 }) {
-                    Text(roleName)
-                      .fontSize($r('sys.float.Body_M'))
-                      .fontColor($r('sys.color.font_primary'))
-                      .layoutWeight(1)
+              ForEach(this.roleNames, (roleName: string) => {
+                Row({ space: 12 }) {
+                  Text(roleName)
+                    .fontSize($r('sys.float.Body_M'))
+                    .fontColor($r('sys.color.font_primary'))
+                    .layoutWeight(1)
 
-                    Button(this.roleVoiceUrls[roleName] ? '已选择' : '选择音色')
-                      .fontSize($r('sys.float.Body_S'))
-                      .type(ButtonType.Normal)
-                      .backgroundColor(this.roleVoiceUrls[roleName] ?
-                        $r('sys.color.icon_emphasize') :
-                        $r('sys.color.comp_background_tertiary'))
-                      .fontColor(this.roleVoiceUrls[roleName] ?
-                        $r('sys.color.font_on_primary') :
-                        $r('sys.color.font_primary'))
-                      .onClick(() => {
-                        this.selectVoiceFile(roleName);
-                      })
-                  }
-                  .width('100%')
-                  .padding(12)
-                  .borderRadius(8)
-                  .backgroundColor($r('sys.color.comp_background_tertiary'))
-                }, (roleName: string) => roleName)
-              }
-              .width('100%')
-              .alignItems(HorizontalAlign.Start)
+                  Button(this.roleVoiceUrls[roleName] ? '已选择' : '选择音色')
+                    .fontSize($r('sys.float.Body_S'))
+                    .type(ButtonType.Normal)
+                    .backgroundColor(this.roleVoiceUrls[roleName] ?
+                      $r('sys.color.icon_emphasize') :
+                      $r('sys.color.comp_background_tertiary'))
+                    .fontColor(this.roleVoiceUrls[roleName] ?
+                      $r('sys.color.font_on_primary') :
+                      $r('sys.color.font_primary'))
+                    .onClick(() => {
+                      this.selectVoiceFile(roleName);
+                    })
+                }
+                .width('100%')
+                .padding(12)
+                .borderRadius(8)
+                .backgroundColor($r('sys.color.comp_background_tertiary'))
+              }, (roleName: string) => roleName)
             }
             .width('100%')
-            .padding({
-              left: 16,
-              right: 16,
-              top: 16,
-              bottom: 16
-            })
+            .alignItems(HorizontalAlign.Start)
           }
-          .layoutWeight(1)
-
-          // 生成按钮
-          Column() {
-            // 进度条与提示
-            if (this.isLoading) {
-              Column({ space: 6 }) {
-                Progress({ value: this.progressPercent })
-                  .style({
-                    strokeWidth: 12
-                  })
-                  .width('100%')
-                Text(this.progressMessage || '生成中...')
-                  .fontSize($r('sys.float.Body_S'))
-                  .fontColor($r('sys.color.font_secondary'))
-                  .alignSelf(ItemAlign.Start)
-              }
-              .width('100%')
-              .padding({ left: 16, right: 16, bottom: 8 })
-            }
-            Button(this.isLoading ? '生成中...' : '开始生成')
-              .width('100%')
-              .height(40)
-              .enabled(!this.isLoading &&
-                (this.text.trim().length > 0 || this.textFileUrl.length > 0 || this.inputUrl.trim().length > 0) &&
-                Object.keys(this.roleVoiceUrls).length >= 2)
-              .onClick(() => {
-                this.generatePodcast();
-              })
-          }
-          .padding({ left: 16, right: 16, bottom: this.windowModel.windowBottomPadding + 12 })
+          .width('100%')
+          .padding({
+            left: 16,
+            right: 16,
+            top: 16,
+            bottom: 16
+          })
         }
-        .width('100%')
-        .height('100%')
-        .backgroundColor($r('sys.color.background_primary'))
-      }.hideTitleBar(true)
-    }
+        .layoutWeight(1)
+
+        // 生成按钮
+        Column() {
+          // 进度条与提示
+          if (this.isLoading) {
+            Column({ space: 6 }) {
+              Progress({ value: this.progressPercent })
+                .style({
+                  strokeWidth: 12
+                })
+                .width('100%')
+              Text(this.progressMessage || '生成中...')
+                .fontSize($r('sys.float.Body_S'))
+                .fontColor($r('sys.color.font_secondary'))
+                .alignSelf(ItemAlign.Start)
+            }
+            .width('100%')
+            .padding({ left: 16, right: 16, bottom: 8 })
+          }
+          Button(this.isLoading ? '生成中...' : '开始生成')
+            .width('100%')
+            .height(40)
+            .enabled(!this.isLoading &&
+              (this.text.trim().length > 0 || this.textFileUrl.length > 0 || this.inputUrl.trim().length > 0) &&
+              Object.keys(this.roleVoiceUrls).length >= 2)
+            .onClick(() => {
+              this.generatePodcast();
+            })
+        }
+        .padding({ left: 16, right: 16, bottom: this.windowModel.windowBottomPadding + 12 })
+      }
+      .width('100%')
+      .height('100%')
+      .backgroundColor($r('sys.color.background_primary'))
+    }.hideTitleBar(true)
   }
+}
