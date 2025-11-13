@@ -58,7 +58,18 @@ _PROGRESS_CACHE: Dict[str, Dict[str, Any]] = {}
 def _progress_path(job_id: str) -> str:
     return os.path.join(_PROGRESS_DIR, f"{job_id}.json")
 
-def _update_progress(job_id: Optional[str], phase: str, percent: int, message: str, done: bool = False, error: Optional[str] = None):
+def _update_progress(job_id: Optional[str], phase: str, percent: int, message: str, done: bool = False, error: Optional[str] = None, audio_url: Optional[str] = None):
+    """更新任务进度
+    
+    Args:
+        job_id: 任务ID
+        phase: 阶段
+        percent: 百分比 (0-100)
+        message: 消息
+        done: 是否完成
+        error: 错误信息（可选）
+        audio_url: 音频云存储URL（可选，生成完成后提供）
+    """
     if not job_id:
         return
     data = {
@@ -70,6 +81,9 @@ def _update_progress(job_id: Optional[str], phase: str, percent: int, message: s
         "error": error,
         "ts": int(time.time())
     }
+    # 如果提供了 audio_url，添加到进度数据中（用于前端从云存储下载）
+    if audio_url:
+        data["audio_url"] = audio_url
     _PROGRESS_CACHE[job_id] = data
     try:
         with open(_progress_path(job_id), 'w', encoding='utf-8') as f:
@@ -1220,7 +1234,9 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                                         'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
                                     }
                                     logger.info(f"同步 AGC 上传完成: {agc_result}")
-                                    _update_progress(request.job_id, "completed", 100, "生成完成", done=True)
+                                    # 更新进度，包含音频URL以便前端从云存储下载并播放
+                                    audio_url = agc_result.get('url') if isinstance(agc_result, dict) else None
+                                    _update_progress(request.job_id, "completed", 100, "生成完成，已上传到云存储", done=True, audio_url=audio_url)
                                 except concurrent.futures.TimeoutError:
                                     logger.warning(f"同步上传超时（{actual_timeout}秒），文件大小: {file_size_mb:.2f}MB，已改为后台继续上传")
                                     background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
@@ -1232,7 +1248,9 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                                         'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}",
                                         'message': f'上传超时，已在后台继续上传（文件大小: {file_size_mb:.2f}MB）'
                                     }
-                                    _update_progress(request.job_id, "uploading", 95, "上传将在后台完成", done=True)
+                                    # 更新进度，包含音频URL（即使后台上传，也先返回URL以便前端下载）
+                                    audio_url = agc_result.get('url') if isinstance(agc_result, dict) else None
+                                    _update_progress(request.job_id, "uploading", 95, "生成完成，正在后台上传到云存储", done=True, audio_url=audio_url)
                                 except Exception as e:
                                     logger.exception(f"同步上传失败: {e}")
                                     agc_result = {'status': 'failed', 'reason': str(e)}
@@ -1248,7 +1266,9 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                                 'object': object_name,
                                 'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
                             }
-                            _update_progress(request.job_id, "uploading", 95, "后台上传已开始", done=True)
+                            # 更新进度，包含音频URL（即使后台上传，也先返回URL以便前端从云存储下载）
+                            audio_url = agc_result.get('url') if isinstance(agc_result, dict) else None
+                            _update_progress(request.job_id, "uploading", 95, "生成完成，已开始后台上传到云存储", done=True, audio_url=audio_url)
                     except Exception as e:
                         logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
                 else:

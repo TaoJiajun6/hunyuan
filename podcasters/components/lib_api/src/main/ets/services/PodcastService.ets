@@ -25,7 +25,7 @@ export class PodcastConfig {
   // 5. 直连服务器IP（推荐，避免网关超时）：设置为服务器的公网/内网IP和端口
   //    例如：'http://9.165.4.87:8000' 或 'http://192.168.1.100:8000'
   //    注意：确保服务器防火墙允许8000端口访问
-  static readonly API_BASE_URL: string = 'http://43.134.54.169:8000/'; // 请替换为实际的服务器IP地址
+  static readonly API_BASE_URL: string = 'http://43.156.233.98:8000/'; // 请替换为实际的服务器IP地址
   static readonly API_TIMEOUT: number = 600000; // 10分钟超时（考虑大文件上传和播客生成时间）
 
 
@@ -360,6 +360,12 @@ export class PodcastService {
   async getProgress(jobId: string): Promise<ProgressStatus | null> {
     return new Promise<ProgressStatus | null>((resolve) => {
       try {
+        // 验证 jobId 是否有效（不能为空字符串、null 或 undefined）
+        if (!jobId || jobId.trim().length === 0) {
+          Logger.warn(TAG, `getProgress: jobId 为空，跳过请求`);
+          resolve(null);
+          return;
+        }
         const httpRequest = http.createHttp();
         const url = this.buildApiUrl(`/api/v1/podcast/progress/${jobId}`);
         const options: http.HttpRequestOptions = {

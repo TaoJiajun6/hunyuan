@@ -293,11 +293,16 @@ export struct PodcastMultiRolePage {
   @Local savedScript: string = '';
 
   private startProgressPolling(): void {
-    if (!this.jobId) {
+    if (!this.jobId || this.jobId.trim().length === 0) {
       return;
     }
     // 每 1 秒轮询一次
     this.progressTimer = setInterval(async () => {
+      // 在每次轮询时检查 jobId 是否仍然有效
+      if (!this.jobId || this.jobId.trim().length === 0) {
+        this.stopProgressPolling();
+        return;
+      }
       const status = await podcastService.getProgress(this.jobId);
       if (!status) {
         return;
@@ -312,28 +317,47 @@ export struct PodcastMultiRolePage {
 
       if (status.done) {
         this.stopProgressPolling();
-        // 如果最终响应失败，但进度中有 URL，尝试使用进度中的 URL
-        if (!this.isLoading && this.savedAudioUrl) {
-          // 延迟一下，等待最终响应处理完成
-          setTimeout(() => {
-            if (this.savedAudioUrl) {
-              // 使用进度中的 URL 创建结果并跳转
-              const result: PodcastResult = {
-                audio_url: this.savedAudioUrl,
-                audio_path: '',
-                file_size_mb: 0,
-                script: this.savedScript || '脚本内容请从进度中查看'
-              };
-              const params = new PodcastResultPageParams(
-                result,
-                '多角色互动播客',
-                this.savedScript || ''
-              );
-              RouterUtils.pushPathByName(RouterMap.PODCAST_RESULT_PAGE, params);
-              this.savedAudioUrl = '';
-              this.savedScript = '';
-            }
-          }, 500);
+        // 生成完成，如果进度中有 audio_url（云存储URL），立即跳转到结果页面
+        // 结果页面会自动从云存储下载音频并播放
+        if (status.audio_url && !this.isLoading) {
+          console.info(`[PodcastMultiRolePage] 播客生成完成，音频URL: ${status.audio_url}，跳转到结果页面`);
+          // 使用进度中的云存储URL和脚本创建结果并跳转
+          // AudioPlayer 会自动从云存储下载音频并播放
+          const result: PodcastResult = {
+            audio_url: status.audio_url, // 云存储URL，前端将从云存储下载
+            audio_path: '',
+            file_size_mb: 0,
+            script: this.savedScript || '脚本内容请从进度中查看'
+          };
+          const params = new PodcastResultPageParams(
+            result,
+            '多角色互动播客',
+            this.savedScript || ''
+          );
+          RouterUtils.pushPathByName(RouterMap.PODCAST_RESULT_PAGE, params);
+          // 清除保存的数据
+          this.savedAudioUrl = '';
+          this.savedScript = '';
+          // 停止加载状态（如果有）
+          this.isLoading = false;
+        } else if (this.savedAudioUrl && !this.isLoading) {
+          // 如果进度中没有 audio_url，但之前保存了，也跳转
+          console.info(`[PodcastMultiRolePage] 使用保存的音频URL: ${this.savedAudioUrl}，跳转到结果页面`);
+          const result: PodcastResult = {
+            audio_url: this.savedAudioUrl, // 云存储URL，前端将从云存储下载
+            audio_path: '',
+            file_size_mb: 0,
+            script: this.savedScript || '脚本内容请从进度中查看'
+          };
+          const params = new PodcastResultPageParams(
+            result,
+            '多角色互动播客',
+            this.savedScript || ''
+          );
+          RouterUtils.pushPathByName(RouterMap.PODCAST_RESULT_PAGE, params);
+          this.savedAudioUrl = '';
+          this.savedScript = '';
+          this.isLoading = false;
         }
       }
     }, 1000);
