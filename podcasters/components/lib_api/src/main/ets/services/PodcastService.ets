@@ -63,8 +63,11 @@ export interface CharacterInfo {
  * 多角色播客请求
  */
 export interface MultiRoleRequest {
-  text?: string; // 播客文本（如果使用text_file_url，此字段可为空）
+  text?: string; // 播客文本（如果使用text_file_url或input_url，此字段可为空）
   text_file_url?: string; // 文本文件云存储URL（.txt或Word文件，如果提供，优先使用）
+  input_type?: string; // 输入类型，可选值：文字、文字+指令、公众号、公众号+指令、网页、PDF、PDF+指令、文字+英文指令
+  input_url?: string; // 输入URL（用于公众号、网页、PDF等类型）
+  instruction?: string; // 指令内容（可选，用于控制播客生成过程）
   role_voice_urls: Record<string, string>; // 角色名 -> 云存储URL（必需，后端强制要求）
   role_voices?: Record<string, string>; // [已废弃] 角色名 -> base64音频（已废弃，请使用role_voice_urls）
   silence_interval?: number;
@@ -149,8 +152,11 @@ export interface ProgressStatus {
  * 多角色播客请求体（API请求用）
  */
 class MultiRoleRequestBody {
-  text?: string; // 播客文本（如果使用text_file_url，此字段可为空）
+  text?: string; // 播客文本（如果使用text_file_url或input_url，此字段可为空）
   text_file_url?: string; // 文本文件云存储URL
+  input_type?: string; // 输入类型
+  input_url?: string; // 输入URL（用于公众号、网页、PDF等类型）
+  instruction?: string; // 指令内容
   role_voices?: Record<string, string>; // base64音频（如果不使用云存储）
   role_voice_urls?: Record<string, string>; // 云存储URL（如果使用云存储）
   silence_interval: number;
@@ -171,6 +177,9 @@ class MultiRoleRequestBody {
   constructor(
     text: string | undefined,
     text_file_url: string | undefined,
+    input_type: string | undefined,
+    input_url: string | undefined,
+    instruction: string | undefined,
     role_voices: Record<string, string> | undefined,
     role_voice_urls: Record<string, string> | undefined,
     silence_interval: number,
@@ -190,6 +199,9 @@ class MultiRoleRequestBody {
   ) {
     this.text = text;
     this.text_file_url = text_file_url;
+    this.input_type = input_type;
+    this.input_url = input_url;
+    this.instruction = instruction;
     this.role_voices = role_voices;
     this.role_voice_urls = role_voice_urls;
     this.silence_interval = silence_interval;
@@ -481,14 +493,15 @@ export class PodcastService {
   async generateMultiRolePodcast(request: MultiRoleRequest): Promise<ApiResponse<PodcastResult>> {
     return new Promise<ApiResponse<PodcastResult>>((resolve) => {
       try {
-        // 验证请求参数（text或text_file_url至少有一个）
+        // 验证请求参数（text、text_file_url或input_url至少有一个）
         const hasText = request.text && request.text.trim().length > 0;
-        //const hasTextFile = request.text_file_url && request.text_file_url.trim().length > 0;
+        const hasTextFile = request.text_file_url && request.text_file_url.trim().length > 0;
+        const hasInputUrl = request.input_url && request.input_url.trim().length > 0;
         
-        if (!hasText) {
+        if (!hasText && !hasTextFile && !hasInputUrl) {
           resolve({
             success: false,
-            message: '播客文本不能为空，请上传文本文件或输入文本',
+            message: '播客文本不能为空，请上传文本文件、输入文本或提供输入URL',
             error: '文本内容为空',
           });
           return;
@@ -510,6 +523,9 @@ export class PodcastService {
         const requestBody = new MultiRoleRequestBody(
           request.text, // text
           request.text_file_url, // text_file_url
+          request.input_type, // input_type
+          request.input_url, // input_url
+          request.instruction, // instruction
           undefined, // role_voices已废弃
           roleVoiceUrls, // role_voice_urls - 使用云存储URL
           request.silence_interval || 300, // silence_interval
@@ -530,9 +546,9 @@ export class PodcastService {
 
         const roleCount = Object.keys(roleVoiceUrls).length;
         const textLength = request.text ? request.text.length : 0;
-        const hasTextFile = request.text_file_url ? '是' : '否';
+        const textFileStatus = request.text_file_url ? '是' : '否';
         Logger.info(TAG,
-          `开始生成多角色播客: 文本长度=${textLength}, 文本文件=${hasTextFile}, 角色数=${roleCount}, 使用云存储`);
+          `开始生成多角色播客: 文本长度=${textLength}, 文本文件=${textFileStatus}, 角色数=${roleCount}, 使用云存储`);
 
         const httpRequest = http.createHttp();
         const requestData = JSON.stringify(requestBody);

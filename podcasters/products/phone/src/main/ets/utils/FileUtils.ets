@@ -637,7 +637,7 @@ export class FileUtils {
 
   /**
    * 选择文本文件并上传到云存储
-   * 支持.txt和Word文件（.doc, .docx）
+   * 支持.txt、Word文件（.doc, .docx）和PDF文件（.pdf）
    * @param context UIAbility上下文，如果未提供则使用GlobalContext获取
    * @param uploadToCloud 是否上传到云存储，默认true
    * @returns 文本文件信息，包括URI、文件名、云存储URL等
@@ -662,8 +662,8 @@ export class FileUtils {
       const documentViewPicker = new picker.DocumentViewPicker(uiContext);
       const documentSelectOptions = new picker.DocumentSelectOptions();
       
-      // 设置文件类型过滤器（支持文本文件和Word文件）
-      documentSelectOptions.fileSuffixFilters = ['.txt', '.doc', '.docx'];
+      // 设置文件类型过滤器（支持文本文件、Word文件和PDF文件）
+      documentSelectOptions.fileSuffixFilters = ['.txt', '.doc', '.docx', '.pdf'];
       documentSelectOptions.maxSelectNumber = 1;
       
       const documentSelectResult = await documentViewPicker.select(documentSelectOptions);
@@ -700,10 +700,10 @@ export class FileUtils {
 
       const fileSizeMB = fileSize / (1024 * 1024);
 
-      // 检查文件大小（限制10MB）
-      if (fileSize > 10 * 1024 * 1024) {
+      // 检查文件大小（限制50MB，因为PDF文件可能较大）
+      if (fileSize > 50 * 1024 * 1024) {
         promptAction.showToast({
-          message: `文件过大: ${fileSizeMB.toFixed(2)}MB (限制: 10MB)`,
+          message: `文件过大: ${fileSizeMB.toFixed(2)}MB (限制: 50MB)`,
           duration: 2000
         });
         return null;
@@ -748,6 +748,7 @@ export class FileUtils {
       }
 
       // 不使用云存储，读取文件内容（仅支持.txt文件）
+      // PDF和Word文件必须上传到云存储，由后端处理
       if (fileName.endsWith('.txt')) {
         let file: fs.File | null = null;
         try {
@@ -796,9 +797,9 @@ export class FileUtils {
           }
         }
       } else {
-        // Word文件需要上传到云存储，由后端处理
+        // Word和PDF文件需要上传到云存储，由后端处理
         promptAction.showToast({
-          message: 'Word文件需要上传到云存储，请启用云存储上传',
+          message: `${fileName.endsWith('.pdf') ? 'PDF' : 'Word'}文件需要上传到云存储，请启用云存储上传`,
           duration: 2000
         });
         return null;
