@@ -36,7 +36,7 @@ except Exception:
     agc_upload_client = None
 
 from .podcast_generator import PodcastGenerator
-from .config import INDEXTTS_CONFIG_PATH, INDEXTTS_MODEL_DIR, OUTPUT_DIR
+from .config import SOULX_PODCAST_MODEL_DIR, SOULX_PODCAST_LLM_ENGINE, SOULX_PODCAST_FP16_FLOW, OUTPUT_DIR
 from .text_processor import TextProcessor
 from .api_client import get_client
 
@@ -90,7 +90,7 @@ MAX_REQUEST_BODY_SIZE = 100 * 1024 * 1024  # 100MB
 
 app = FastAPI(
     title="混元AI播客生成API",
-    description="基于混元大模型和IndexTTS-2的智能播客音频生成API",
+    description="基于混元大模型和SoulX-Podcast的智能播客音频生成API",
     version="1.0.0"
 )
 
@@ -106,8 +106,6 @@ app.add_middleware(
 # 全局生成器实例
 generator: Optional[PodcastGenerator] = None
 # GPU配置（从环境变量或启动参数获取）
-use_fp16 = os.getenv("USE_FP16", "false").lower() == "true"
-use_cuda_kernel = os.getenv("USE_CUDA_KERNEL", "false").lower() == "true"
 device = os.getenv("DEVICE", None)
 
 
@@ -116,12 +114,11 @@ def get_generator() -> PodcastGenerator:
     global generator
     if generator is None:
         logger.info("初始化PodcastGenerator...")
-        logger.info(f"GPU配置: use_fp16={use_fp16}, use_cuda_kernel={use_cuda_kernel}, device={device}")
+        logger.info(f"模型配置: model_dir={SOULX_PODCAST_MODEL_DIR}, llm_engine={SOULX_PODCAST_LLM_ENGINE}, fp16_flow={SOULX_PODCAST_FP16_FLOW}, device={device}")
         generator = PodcastGenerator(
-            tts_config_path=INDEXTTS_CONFIG_PATH,
-            tts_model_dir=INDEXTTS_MODEL_DIR,
-            use_fp16=use_fp16,
-            use_cuda_kernel=use_cuda_kernel,
+            tts_model_dir=SOULX_PODCAST_MODEL_DIR,
+            llm_engine=SOULX_PODCAST_LLM_ENGINE,
+            fp16_flow=SOULX_PODCAST_FP16_FLOW,
             device=device
         )
         logger.info("PodcastGenerator初始化完成")

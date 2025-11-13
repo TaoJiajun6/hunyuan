@@ -17,9 +17,7 @@ try:
 except ImportError:
     HAS_LIBROSA = False
     print("⚠️  警告：librosa 未安装，某些音频处理功能可能受限")
-    print("💡 安装方法：")
-    print("   如果使用 uv 环境: cd index-tts && uv pip install librosa")
-    print("   如果使用标准环境: pip install librosa")
+    print("💡 安装方法：pip install librosa")
 
 
 def ensure_dir(directory: str) -> None:
