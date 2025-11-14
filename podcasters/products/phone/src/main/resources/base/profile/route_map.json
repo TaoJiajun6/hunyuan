@@ -69,11 +69,6 @@
       "name": "PodcastDeepPage",
       "pageSourceFile": "src/main/ets/pages/podcast/PodcastDeepPage.ets",
       "buildFunction": "PodcastDeepPageBuilder"
-    },
-    {
-      "name": "PodcastResultPage",
-      "pageSourceFile": "src/main/ets/pages/podcast/PodcastResultPage.ets",
-      "buildFunction": "PodcastResultPageBuilder"
     }
   ]
 }

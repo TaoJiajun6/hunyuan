@@ -593,11 +593,18 @@ class CloudStorageMusicClient:
                     sub_client.product_id = self.product_id
                     sub_client.domain = self.domain
                     try:
+                        print(f"  正在获取子目录: {subdir_path}")
                         sub_files = sub_client._list_files_via_api()
+                        print(f"  ✓ 从子目录 {subdir_path} 获取到 {len(sub_files)} 个音乐文件")
                         music_files.extend(sub_files)
                     except Exception as e:
-                        print(f"获取子目录 {subdir_path} 失败: {str(e)}")
+                        print(f"  ✗ 获取子目录 {subdir_path} 失败: {str(e)}")
         
+        # 如果files_list中包含子目录中的文件（扁平化列表），也需要处理
+        # 有些API可能直接返回所有文件（包括子目录），而不是返回目录结构
+        # 这种情况下，files_list中已经包含了所有文件，不需要递归
+        
+        print(f"✓ 总共从云存储 music/ 目录获取到 {len(music_files)} 个音乐文件（包括所有子目录）")
         return music_files
     
     def _get_download_url(self, cloud_path: str) -> Optional[str]:

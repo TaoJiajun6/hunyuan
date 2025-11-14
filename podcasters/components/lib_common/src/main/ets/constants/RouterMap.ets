@@ -14,7 +14,6 @@ export enum RouterMap {
   PODCAST_MULTI_ROLE_PAGE = 'PodcastMultiRolePage',
   PODCAST_CHARACTER_PAGE = 'PodcastCharacterPage',
   PODCAST_DEEP_PAGE = 'PodcastDeepPage',
-  PODCAST_RESULT_PAGE = 'PodcastResultPage',
 
   // 账号模块
   HUAWEI_LOGIN_PAGE = 'HuaweiLoginPage',
