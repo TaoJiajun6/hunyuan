@@ -2,7 +2,7 @@ import { RouterMap, RouterUtils } from 'lib_common';
 import { NavHeaderBar } from 'lib_widget';
 import { MusicPlayController } from 'module_musicplay';
 import { CloudStorageMusicUtils } from '../../common/CloudStorageMusicUtils';
-import { MediaService } from 'module_musicplay';
+import { MediaService, getMusicModel } from 'module_musicplay';
 import { promptAction } from '@kit.ArkUI';
 import { FileUtils } from '../../utils/FileUtils';
 import { picker } from '@kit.CoreFileKit';
@@ -18,6 +18,55 @@ export function PodcastPageBuilder() {
 export struct PodcastPage {
   @Local isLoading: boolean = false;
   @Local isUploadingMusic: boolean = false;
+  @Local hasAutoImported: boolean = false; // 标记是否已自动导入过
+
+  /**
+   * 页面加载时自动导入播放列表（如果为空）
+   */
+  async aboutToAppear(): Promise<void> {
+    // 检查播放列表是否为空，如果为空则自动导入
+    const musicModel = getMusicModel();
+    const songList = musicModel.getSongList();
+    
+    if (songList.length === 0 && !this.hasAutoImported) {
+      Logger.info('PodcastPage', '播放列表为空，自动从云存储导入音频');
+      this.hasAutoImported = true;
+      // 静默导入，不显示加载提示（避免影响用户体验）
+      await this.importAudioFromCloudSilently();
+    }
+  }
+
+  /**
+   * 静默导入音频（不显示加载提示）
+   */
+  private async importAudioFromCloudSilently(): Promise<void> {
+    if (this.isLoading) {
+      return;
+    }
+
+    try {
+      this.isLoading = true;
+
+      // 从云存储导入音频
+      const songItems = await CloudStorageMusicUtils.importAudioFromCloudStorage('outputs/podcasts/');
+
+      if (songItems.length === 0) {
+        Logger.info('PodcastPage', '未找到音频文件');
+        return;
+      }
+
+      // 添加到播放列表
+      for (const songItem of songItems) {
+        MediaService.getInstance().addToSongList(songItem);
+      }
+
+      Logger.info('PodcastPage', `自动导入 ${songItems.length} 个音频文件到播放列表`);
+    } catch (error) {
+      Logger.error('PodcastPage', `自动导入失败: ${error}`);
+    } finally {
+      this.isLoading = false;
+    }
+  }
 
   /**
    * 上传背景音乐到云存储

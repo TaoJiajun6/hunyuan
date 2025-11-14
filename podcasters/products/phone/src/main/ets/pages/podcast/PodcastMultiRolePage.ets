@@ -235,31 +235,39 @@ export struct PodcastMultiRolePage {
     this.progressPercent = 1;
     this.progressMessage = '任务已提交';
     
-    // SSE进度回调
+    // 进度回调
     const onProgress = (progress: ProgressStatus) => {
-      this.progressPercent = progress.percent || 0;
+      // 直接更新进度，但限制每次最大增量，避免突然跳跃
+      const targetPercent = progress.percent || 0;
+      const maxIncrement = 10; // 每次最多增加10%
+      if (targetPercent > this.progressPercent) {
+        const increment = Math.min(targetPercent - this.progressPercent, maxIncrement);
+        this.progressPercent = Math.min(this.progressPercent + increment, 100);
+      } else {
+        // 如果目标进度小于当前进度（可能是重置），直接更新
+        this.progressPercent = targetPercent;
+      }
       this.progressMessage = progress.message || '';
       
       // 如果任务完成且有音频URL，保存并跳转
       if (progress.done && progress.audio_url) {
         this.savedAudioUrl = progress.audio_url;
-        // 如果已有保存的script，可以跳转到结果页
-        if (this.savedScript) {
-          const resultData: PodcastResult = {
-            audio_path: '',
-            file_size_mb: 0,
-            script: this.savedScript,
-            audio_url: progress.audio_url
-          };
-          const params = new PodcastResultPageParams(
-            resultData,
-            '多角色互动播客',
-            this.savedScript
-          );
-          RouterUtils.pushPathByName(RouterMap.PODCAST_RESULT_PAGE, params);
-          this.savedAudioUrl = '';
-          this.savedScript = '';
-        }
+        // 跳转到结果页（即使没有script也跳转，script可以从响应中获取）
+        const resultData: PodcastResult = {
+          audio_path: '',
+          file_size_mb: 0,
+          script: this.savedScript || '脚本内容请从响应中查看',
+          audio_url: progress.audio_url
+        };
+        const params = new PodcastResultPageParams(
+          resultData,
+          '多角色互动播客',
+          this.savedScript || ''
+        );
+        RouterUtils.pushPathByName(RouterMap.PODCAST_RESULT_PAGE, params);
+        this.savedAudioUrl = '';
+        this.savedScript = '';
+        this.isLoading = false;
       }
       
       // 如果任务失败，显示错误
@@ -347,7 +355,16 @@ export struct PodcastMultiRolePage {
       if (!status) {
         return;
       }
-      this.progressPercent = status.percent || 0;
+      // 直接更新进度，但限制每次最大增量，避免突然跳跃
+      const targetPercent = status.percent || 0;
+      const maxIncrement = 10; // 每次最多增加10%
+      if (targetPercent > this.progressPercent) {
+        const increment = Math.min(targetPercent - this.progressPercent, maxIncrement);
+        this.progressPercent = Math.min(this.progressPercent + increment, 100);
+      } else {
+        // 如果目标进度小于当前进度（可能是重置），直接更新
+        this.progressPercent = targetPercent;
+      }
       this.progressMessage = status.message || '';
 
       // 如果进度中包含 audio_url，保存它（即使最终响应失败也能使用）
@@ -410,6 +427,7 @@ export struct PodcastMultiRolePage {
     }
   }
 
+
   build() {
     NavDestination() {
       Column() {
@@ -435,6 +453,11 @@ export struct PodcastMultiRolePage {
                   // 根据类型清空不需要的字段
                   if (!['公众号', '公众号+指令', '网页'].includes(value)) {
                     this.inputUrl = '';
+                  }
+                  // 如果不是文件类型，清空文件相关字段
+                  if (!['文件', '文件+指令'].includes(value)) {
+                    this.textFileUrl = '';
+                    this.textFileName = '';
                   }
                 })
                 .width('100%')
@@ -529,53 +552,51 @@ export struct PodcastMultiRolePage {
               .alignItems(HorizontalAlign.Start)
             }
 
-            // 文件上传（文件类型必需，其他类型可选）
-            Column({ space: 12 }) {
-              Text(['文件', '文件+指令'].includes(this.inputType) ?
-                '播客文件（必需）' :
-                '播客文件（可选，支持.txt、.doc、.docx、.pdf）')
-                .fontSize($r('sys.float.Subtitle_L'))
-                .fontColor($r('sys.color.font_primary'))
-                .fontWeight(FontWeight.Bold)
-                .alignSelf(ItemAlign.Start)
+            // 文件上传（仅在文件类型时显示）
+            if (['文件', '文件+指令'].includes(this.inputType)) {
+              Column({ space: 12 }) {
+                Text('播客文件（必需）')
+                  .fontSize($r('sys.float.Subtitle_L'))
+                  .fontColor($r('sys.color.font_primary'))
+                  .fontWeight(FontWeight.Bold)
+                  .alignSelf(ItemAlign.Start)
 
-              Row({ space: 12 }) {
-                Column({ space: 4 }) {
-                  Text(this.textFileName || '未选择文件')
-                    .fontSize($r('sys.float.Body_M'))
-                    .fontColor(this.textFileUrl ? $r('sys.color.font_primary') : $r('sys.color.font_secondary'))
-                    .maxLines(1)
+                Row({ space: 12 }) {
+                  Column({ space: 4 }) {
+                    Text(this.textFileName || '未选择文件')
+                      .fontSize($r('sys.float.Body_M'))
+                      .fontColor(this.textFileUrl ? $r('sys.color.font_primary') : $r('sys.color.font_secondary'))
+                      .maxLines(1)
 
-                  Text(['文件', '文件+指令'].includes(this.inputType) ?
-                    '支持.txt、.doc、.docx、.pdf格式，最大50MB' :
-                    '支持.txt、.doc、.docx、.pdf格式，最大50MB')
+                    Text('支持.txt、.doc、.docx、.pdf格式，最大50MB')
+                      .fontSize($r('sys.float.Body_S'))
+                      .fontColor($r('sys.color.font_secondary'))
+                  }
+                  .layoutWeight(1)
+                  .alignItems(HorizontalAlign.Start)
+
+                  Button(this.textFileUrl ? '已选择' : '选择文件')
                     .fontSize($r('sys.float.Body_S'))
-                    .fontColor($r('sys.color.font_secondary'))
+                    .type(ButtonType.Normal)
+                    .borderRadius(10)
+                    .backgroundColor(this.textFileUrl ?
+                      $r('sys.color.icon_emphasize') :
+                      $r('sys.color.comp_background_tertiary'))
+                    .fontColor(this.textFileUrl ?
+                      $r('sys.color.font_on_primary') :
+                      $r('sys.color.font_primary'))
+                    .onClick(() => {
+                      this.selectTextFile();
+                    })
                 }
-                .layoutWeight(1)
-                .alignItems(HorizontalAlign.Start)
-
-                Button(this.textFileUrl ? '已选择' : '选择文件')
-                  .fontSize($r('sys.float.Body_S'))
-                  .type(ButtonType.Normal)
-                  .borderRadius(10)
-                  .backgroundColor(this.textFileUrl ?
-                    $r('sys.color.icon_emphasize') :
-                    $r('sys.color.comp_background_tertiary'))
-                  .fontColor(this.textFileUrl ?
-                    $r('sys.color.font_on_primary') :
-                    $r('sys.color.font_primary'))
-                  .onClick(() => {
-                    this.selectTextFile();
-                  })
+                .width('100%')
+                .padding(12)
+                .borderRadius(8)
+                .backgroundColor($r('sys.color.comp_background_tertiary'))
               }
               .width('100%')
-              .padding(12)
-              .borderRadius(8)
-              .backgroundColor($r('sys.color.comp_background_tertiary'))
+              .alignItems(HorizontalAlign.Start)
             }
-            .width('100%')
-            .alignItems(HorizontalAlign.Start)
 
             // 角色音色选择
             Column({ space: 12 }) {

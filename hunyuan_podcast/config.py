@@ -20,7 +20,7 @@ def _load_dotenv_if_exists():
         if not env_path.exists():
             return
         
-        print(f"📝 检测到 .env 文件，正在加载环境变量: {env_path}")
+        print(f"检测到 .env 文件，正在加载环境变量: {env_path}")
         for line in env_path.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if not line or line.startswith("#") or "=" not in line:
