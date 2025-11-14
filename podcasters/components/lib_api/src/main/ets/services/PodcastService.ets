@@ -366,7 +366,7 @@ export class PodcastService {
           resolve(null);
           return;
         }
-        const httpRequest = http.createHttp();
+6        const httpRequest = http.createHttp();
         const url = this.buildApiUrl(`/api/v1/podcast/progress/${jobId}`);
         const options: http.HttpRequestOptions = {
           method: http.RequestMethod.GET,
