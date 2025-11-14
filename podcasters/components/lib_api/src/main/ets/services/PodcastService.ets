@@ -400,7 +400,7 @@ export class PodcastService {
 
   /**
    * 启动进度轮询
-   * 使用HTTP GET请求定期获取任务进度（每2秒一次）
+   * 使用HTTP GET请求定期获取任务进度（每5秒一次）
    * 注意：HarmonyOS的http模块不支持SSE流式读取，因此使用轮询方式
    * @param jobId 任务ID
    * @param onProgress 进度回调
@@ -440,7 +440,7 @@ export class PodcastService {
 
       // 继续轮询（如果还在运行）
       if (isPolling) {
-        pollingInterval = setTimeout(poll, 2000) as number; // 每2秒轮询一次
+        pollingInterval = setTimeout(poll, 5000) as number; // 每5秒轮询一次
       }
     };
 
