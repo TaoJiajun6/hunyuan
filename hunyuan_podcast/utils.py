@@ -547,14 +547,53 @@ def mix_audio_with_background(
         ducking_curve = 1.0 - ducking_strength * (1.0 - ducking_ratio)
         
         # 添加平滑处理，避免音量突变
-        # 使用简单的移动平均平滑
+        # 使用内存高效的移动平均平滑（避免长音频时的内存溢出）
         smooth_window = int(sr * 0.1)  # 100ms平滑窗口
         if smooth_window > 1 and ducking_curve.shape[1] > smooth_window:
-            # 使用卷积进行平滑
-            kernel = torch.ones(1, 1, smooth_window, device=ducking_curve.device, dtype=ducking_curve.dtype) / smooth_window
-            ducking_curve_padded = torch.nn.functional.pad(ducking_curve.unsqueeze(0), (smooth_window // 2, smooth_window // 2), mode='reflect')
-            ducking_curve_smooth = torch.nn.functional.conv1d(ducking_curve_padded, kernel, padding=0)
-            ducking_curve = ducking_curve_smooth.squeeze(0)
+            # 对于长音频，使用分块移动平均避免内存溢出
+            # 先检查数据长度，如果太长则使用降采样方法
+            curve_length = ducking_curve.shape[1]
+            max_samples_for_conv = 1000000  # 1M样本以下才使用卷积
+            
+            if curve_length > max_samples_for_conv:
+                # 对于超长音频，使用降采样+上采样的方式
+                # 降采样到合理的长度进行处理
+                downsample_factor = max(1, curve_length // max_samples_for_conv)
+                downsampled_length = curve_length // downsample_factor
+                
+                # 降采样：使用平均池化
+                ducking_curve_2d = ducking_curve.unsqueeze(0)  # (1, 1, length)
+                # 重塑为可以平均池化的形状
+                pad_length = (downsample_factor - (curve_length % downsample_factor)) % downsample_factor
+                if pad_length > 0:
+                    ducking_curve_padded = torch.nn.functional.pad(ducking_curve_2d, (0, pad_length), mode='constant', value=1.0)
+                else:
+                    ducking_curve_padded = ducking_curve_2d
+                
+                # 重塑为 (1, 1, downsampled_length, downsample_factor) 然后平均
+                new_length = ducking_curve_padded.shape[2] // downsample_factor
+                ducking_curve_reshaped = ducking_curve_padded[:, :, :new_length * downsample_factor].reshape(1, 1, new_length, downsample_factor)
+                ducking_curve_downsampled = ducking_curve_reshaped.mean(dim=3)  # (1, 1, downsampled_length)
+                
+                # 对降采样后的数据进行平滑
+                smooth_window_down = max(1, smooth_window // downsample_factor)
+                if smooth_window_down > 1 and new_length > smooth_window_down:
+                    kernel = torch.ones(1, 1, smooth_window_down, device=ducking_curve.device, dtype=ducking_curve.dtype) / smooth_window_down
+                    ducking_curve_padded_small = torch.nn.functional.pad(ducking_curve_downsampled, (smooth_window_down // 2, smooth_window_down // 2), mode='reflect')
+                    ducking_curve_smooth_down = torch.nn.functional.conv1d(ducking_curve_padded_small, kernel, padding=0)
+                    ducking_curve_downsampled = ducking_curve_smooth_down
+                
+                # 上采样回原始长度
+                ducking_curve_smooth_2d = ducking_curve_downsampled.squeeze(0)  # (1, downsampled_length)
+                # 使用线性插值上采样
+                ducking_curve_smooth_2d = torch.nn.functional.interpolate(ducking_curve_smooth_2d.unsqueeze(0), size=curve_length, mode='linear', align_corners=False)
+                ducking_curve = ducking_curve_smooth_2d.squeeze(0)
+            else:
+                # 对于较短的音频，使用原来的卷积方法
+                kernel = torch.ones(1, 1, smooth_window, device=ducking_curve.device, dtype=ducking_curve.dtype) / smooth_window
+                ducking_curve_padded = torch.nn.functional.pad(ducking_curve.unsqueeze(0), (smooth_window // 2, smooth_window // 2), mode='reflect')
+                ducking_curve_smooth = torch.nn.functional.conv1d(ducking_curve_padded, kernel, padding=0)
+                ducking_curve = ducking_curve_smooth.squeeze(0)
         
         # 应用到对话部分的背景音量曲线
         background_volume_curve[:, dialogue_start:dialogue_end] = ducking_curve

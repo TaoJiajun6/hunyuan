@@ -454,7 +454,7 @@ def generate_multi_role_podcast(
                     generated_text = api_client.generate_text(
                         prompt=prompt,
                         temperature=0.8,
-                        max_tokens=5000  # 增加到5000以支持4-5分钟的对话内容
+                        max_tokens=3000  # 降低以加快生成速度，仍支持3-4分钟对话
                     )
                     
                     if verbose:
@@ -725,7 +725,7 @@ def generate_character_podcast(
             generated_text = api_client.generate_text(
                 prompt=prompt,
                 temperature=0.8,
-                max_tokens=2500
+                max_tokens=2000  # 降低以加快生成速度
             )
             
             if progress:

@@ -20,12 +20,10 @@ interface SelectOption {
 @ComponentV2
 export struct PodcastCharacterPage {
   @Local text: string = ''; // 文本素材（文字输入）
-  @Local textFileUrl: string = ''; // 文本文件云存储URL
-  @Local textFileName: string = ''; // 文本文件名
   @Local category: string = ''; // 播客分类（可选）
   @Local characters: CharacterInfo[] = [
-    { name: '角色A', voice_url: '' },
-    { name: '角色B', voice_url: '' }
+    { name: '', voice_url: '' },
+    { name: '', voice_url: '' }
   ];
   @Local isLoading: boolean = false;
   @Local jobId: string = '';
@@ -156,55 +154,6 @@ export struct PodcastCharacterPage {
     } else if (this.recordingIndex === index) {
       this.recordingIndex = -1;
       this.isRecording = false;
-    }
-  }
-
-  /**
-   * 选择文本素材文件（支持.txt、.doc、.docx、.pdf）
-   */
-  async selectTextFile(): Promise<void> {
-    try {
-      // 获取UIAbility上下文
-      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-
-      // 使用云存储上传（文件必须上传到云存储）
-      const textFileInfo = await FileUtils.pickTextFile(context, true);
-      if (textFileInfo && textFileInfo.cloudUrl) {
-        // 保存云存储URL
-        this.textFileUrl = textFileInfo.cloudUrl;
-        this.textFileName = textFileInfo.fileName;
-
-        // 如果文件是.txt格式且已读取内容，保存到text字段（用于兼容）
-        const fileName = textFileInfo.fileName.toLowerCase();
-        const fileExtension = fileName.split('.').pop() || '';
-        if (fileExtension === 'txt' && textFileInfo.content) {
-          this.text = textFileInfo.content;
-        } else {
-          // PDF和Word文件不需要保存内容到text字段
-          this.text = '';
-        }
-
-        // 根据文件类型显示不同的提示信息
-        const fileTypeName = fileExtension === 'pdf' ? 'PDF' :
-          fileExtension === 'docx' || fileExtension === 'doc' ? 'Word' :
-            '文本';
-
-        promptAction.showToast({
-          message: `${fileTypeName}文件已选择并上传到云存储: ${textFileInfo.fileName}`,
-          duration: 2000
-        });
-      } else {
-        // 上传失败或未获取到URL
-        promptAction.showToast({
-          message: '文件上传失败，请重试',
-          duration: 2000
-        });
-      }
-    } catch (error) {
-      promptAction.showToast({
-        message: `选择文件失败: ${error}`,
-        duration: 2000
-      });
     }
   }
 
@@ -376,13 +325,12 @@ export struct PodcastCharacterPage {
       return;
     }
 
-    // 检查文本素材输入（text或textFileUrl至少有一个）
+    // 检查文本素材输入
     const hasText = this.text.trim().length > 0;
-    const hasTextFile = this.textFileUrl.trim().length > 0;
 
-    if (!hasText && !hasTextFile) {
+    if (!hasText) {
       promptAction.showToast({
-        message: '请输入文本素材或上传文本文件',
+        message: '请输入文本素材',
         duration: 2000
       });
       return;
@@ -409,15 +357,19 @@ export struct PodcastCharacterPage {
     };
     
     try {
-      const request: CharacterRequest = {
+      // 构建请求对象
+      let request: CharacterRequest = {
         characters: this.characters,
-        text: hasText ? this.text : undefined, // 文本素材（文字输入）
-        text_file_url: hasTextFile ? this.textFileUrl : undefined, // 文本文件云存储URL
+        text: this.text, // 文本素材（必需）
         silence_interval: 300,
-        category: this.category.trim().length > 0 ? this.category : undefined, // 播客分类
         background_volume: 0.3, // 背景音乐音量，默认0.3
         job_id: this.jobId
       };
+      
+      // 根据条件添加可选属性
+      if (this.category.trim().length > 0) {
+        request.category = this.category; // 播客分类
+      }
 
       const response = await podcastService.generateCharacterPodcast(request, this.jobId, onProgress);
 
@@ -480,49 +432,6 @@ export struct PodcastCharacterPage {
             .width('100%')
             .alignItems(HorizontalAlign.Start)
 
-            // 文本文件上传
-            Column({ space: 12 }) {
-              Text('文本文件（可选，支持.txt、.doc、.docx、.pdf）')
-                .fontSize($r('sys.float.Subtitle_L'))
-                .fontColor($r('sys.color.font_primary'))
-                .fontWeight(FontWeight.Bold)
-                .alignSelf(ItemAlign.Start)
-
-              Row({ space: 12 }) {
-                Column({ space: 4 }) {
-                  Text(this.textFileName || '未选择文件')
-                    .fontSize($r('sys.float.Body_M'))
-                    .fontColor(this.textFileUrl ? $r('sys.color.font_primary') : $r('sys.color.font_secondary'))
-                    .maxLines(1)
-
-                  Text('支持.txt、.doc、.docx、.pdf格式，最大50MB')
-                    .fontSize($r('sys.float.Body_S'))
-                    .fontColor($r('sys.color.font_secondary'))
-                }
-                .layoutWeight(1)
-                .alignItems(HorizontalAlign.Start)
-
-                Button(this.textFileUrl ? '已选择' : '选择文件')
-                  .fontSize($r('sys.float.Body_S'))
-                  .type(ButtonType.Normal)
-                  .backgroundColor(this.textFileUrl ?
-                    $r('sys.color.icon_emphasize') :
-                    $r('sys.color.comp_background_tertiary'))
-                  .fontColor(this.textFileUrl ?
-                    $r('sys.color.font_on_primary') :
-                    $r('sys.color.font_primary'))
-                  .onClick(() => {
-                    this.selectTextFile();
-                  })
-              }
-              .width('100%')
-              .padding(12)
-              .borderRadius(8)
-              .backgroundColor($r('sys.color.comp_background_tertiary'))
-            }
-            .width('100%')
-            .alignItems(HorizontalAlign.Start)
-
             // 播客分类选择
             Column({ space: 12 }) {
               Text('播客分类（可选）')
@@ -550,6 +459,7 @@ export struct PodcastCharacterPage {
                 Button('+ 新增角色')
                   .fontSize($r('sys.float.Body_S'))
                   .type(ButtonType.Normal)
+                  .borderRadius(10)
                   .backgroundColor($r('sys.color.icon_emphasize'))
                   .fontColor($r('sys.color.font_on_primary'))
                   .enabled(this.characters.length < 4)
@@ -570,12 +480,11 @@ export struct PodcastCharacterPage {
                     if (this.characters.length > 2) {
                       Button('-')
                         .fontSize($r('sys.float.Body_L'))
-                        .type(ButtonType.Normal)
-                        .backgroundColor($r('sys.color.alert'))
+                        .type(ButtonType.Circle)
+                        .backgroundColor(Color.Red)
                         .fontColor($r('sys.color.font_on_primary'))
-                        .width(32)
-                        .height(32)
-                        .borderRadius(16)
+                        .width(36)
+                        .aspectRatio(1)
                         .enabled(!this.isRecording || this.recordingIndex !== index)
                         .onClick(() => {
                           this.removeCharacter(index);
@@ -664,6 +573,7 @@ export struct PodcastCharacterPage {
                       .layoutWeight(1)
                       .fontSize($r('sys.float.Body_S'))
                       .type(ButtonType.Normal)
+                      .borderRadius(10)
                       .backgroundColor(character.voice_url ?
                         $r('sys.color.icon_emphasize') :
                         $r('sys.color.comp_background_tertiary'))
@@ -680,6 +590,7 @@ export struct PodcastCharacterPage {
                         .layoutWeight(1)
                         .fontSize($r('sys.float.Body_S'))
                         .type(ButtonType.Normal)
+                        .borderRadius(10)
                         .backgroundColor($r('sys.color.alert'))
                         .fontColor($r('sys.color.font_on_primary'))
                         .onClick(() => {
@@ -690,6 +601,7 @@ export struct PodcastCharacterPage {
                         .layoutWeight(1)
                         .fontSize($r('sys.float.Body_S'))
                         .type(ButtonType.Normal)
+                        .borderRadius(10)
                         .backgroundColor($r('sys.color.comp_background_tertiary'))
                         .fontColor($r('sys.color.font_primary'))
                         .enabled(!this.isRecording)
@@ -736,7 +648,7 @@ export struct PodcastCharacterPage {
             .width('100%')
             .height(40)
             .enabled(!this.isLoading &&
-              (this.text.trim().length > 0 || this.textFileUrl.length > 0) &&
+              this.text.trim().length > 0 &&
               this.characters.every(char => char.voice_url))
             .onClick(() => {
               this.generatePodcast();

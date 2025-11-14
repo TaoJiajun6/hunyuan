@@ -191,7 +191,7 @@ export struct PodcastDeepPage {
                 .alignSelf(ItemAlign.Start)
 
               TextArea({
-                placeholder: '请输入播客主题，如：人工智能的未来发展',
+                placeholder: '请输入播客主题',
                 text: $$this.topic
               })
                 .placeholderColor($r('sys.color.font_secondary'))
@@ -218,6 +218,23 @@ export struct PodcastDeepPage {
                 .alignSelf(ItemAlign.Start)
 
               Row({ space: 8 }) {
+                Button() {
+                  Text('1个角色')
+                    .fontSize($r('sys.float.Body_M'))
+                    .fontColor(this.numCharacters === 1 ?
+                      $r('sys.color.font_on_primary') :
+                      $r('sys.color.font_primary'))
+                }
+                .width(100)
+                .height(36)
+                .borderRadius(18)
+                .backgroundColor(this.numCharacters === 1 ?
+                  $r('sys.color.icon_emphasize') :
+                  $r('sys.color.comp_background_tertiary'))
+                .onClick(() => {
+                  this.numCharacters = 1;
+                })
+
                 Button() {
                   Text('2个角色')
                     .fontSize($r('sys.float.Body_M'))
@@ -322,6 +339,7 @@ export struct PodcastDeepPage {
                   Button(this.roleVoiceUrls[roleName] ? '已选择' : '选择音色')
                     .fontSize($r('sys.float.Body_S'))
                     .type(ButtonType.Normal)
+                    .borderRadius(10)
                     .backgroundColor(this.roleVoiceUrls[roleName] ?
                       $r('sys.color.icon_emphasize') :
                       $r('sys.color.comp_background_tertiary'))

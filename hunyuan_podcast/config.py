@@ -67,8 +67,8 @@ SOULX_PODCAST_LLM_ENGINE = os.getenv("SOULX_PODCAST_LLM_ENGINE", "hf")  # "hf" �
 SOULX_PODCAST_FP16_FLOW = os.getenv("SOULX_PODCAST_FP16_FLOW", "True").lower() == "true"
 
 # 默认参数
-DEFAULT_TEMPERATURE = 0.7
-DEFAULT_MAX_TOKENS = 2000
+DEFAULT_TEMPERATURE = 0.7  # 降低温度以加快生成速度
+DEFAULT_MAX_TOKENS = 2000  # 降低最大token数以加快生成速度
 DEFAULT_TOP_P = 0.9
 
 # 音频合成配置

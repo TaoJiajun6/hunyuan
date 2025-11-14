@@ -378,8 +378,8 @@ class PodcastGenerator:
         # 调用混元模型生成对话文本
         generated_text = self.api_client.generate_text(
             prompt=prompt,
-            temperature=0.8,
-            max_tokens=2000
+            temperature=0.7,  # 降低温度以加快生成速度
+            max_tokens=1500  # 降低以加快生成速度
         )
         
         if verbose:
@@ -436,7 +436,7 @@ class PodcastGenerator:
         generated_text = self.api_client.generate_text(
             prompt=prompt,
             temperature=0.7,
-            max_tokens=2500
+            max_tokens=2000  # 降低以加快生成速度
         )
         
         if verbose:
@@ -483,8 +483,8 @@ class PodcastGenerator:
         # 调用混元模型生成对话文本
         generated_text = self.api_client.generate_text(
             prompt=prompt,
-            temperature=0.8,
-            max_tokens=2000
+            temperature=0.7,  # 降低温度以加快生成速度
+            max_tokens=1500  # 降低以加快生成速度
         )
         
         if verbose:

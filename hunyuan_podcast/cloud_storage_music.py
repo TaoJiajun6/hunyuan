@@ -552,24 +552,11 @@ class CloudStorageMusicClient:
                 if not any(filename.lower().endswith(ext) for ext in audio_extensions):
                     continue
                 
-                # 获取真正的下载URL（通过getDownloadURL API）
-                # 不能直接构建URL，需要通过API获取带签名的下载URL
-                try:
-                    download_url = self._get_download_url(file_path)
-                    if not download_url:
-                        # 如果获取失败，尝试直接构建（作为备选）
-                        print(f"  ⚠️ 获取下载URL失败，使用直接构建的URL")
-                        if file_path.startswith('music/'):
-                            download_url = f"{self.storage_url}{self.bucket}/{file_path}"
-                        else:
-                            download_url = f"{self.storage_url}{self.bucket}/{normalized_path}{filename}"
-                except Exception as e:
-                    print(f"  ⚠️ 获取下载URL异常: {str(e)}，使用直接构建的URL")
-                    # 如果获取失败，尝试直接构建（作为备选）
-                    if file_path.startswith('music/'):
-                        download_url = f"{self.storage_url}{self.bucket}/{file_path}"
-                    else:
-                        download_url = f"{self.storage_url}{self.bucket}/{normalized_path}{filename}"
+                # 直接构建下载URL（不再通过API获取）
+                if file_path.startswith('music/'):
+                    download_url = f"{self.storage_url}{self.bucket}/{file_path}"
+                else:
+                    download_url = f"{self.storage_url}{self.bucket}/{normalized_path}{filename}"
                 
                 # 从文件名推断风格
                 style = self._infer_style_from_filename(filename)

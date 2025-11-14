@@ -164,7 +164,8 @@ async def log_requests(request: Request, call_next):
     path = request.url.path
     
     # 过滤进度查询请求（GET /api/v1/podcast/progress/xxx），避免日志被轮询覆盖
-    # 但保留SSE连接请求的日志（/stream端点）
+    # 注意：HarmonyOS客户端使用HTTP轮询获取进度，因此需要过滤这些请求以避免日志被覆盖
+    # 保留SSE连接请求的日志（/stream端点），虽然HarmonyOS不支持，但Web客户端可能使用
     is_progress_poll = (
         method == "GET" and 
         path.startswith("/api/v1/podcast/progress/") and 
@@ -318,8 +319,7 @@ class CharacterInfo(BaseModel):
 class CharacterRequest(BaseModel):
     """自定义角色播客请求"""
     characters: List[CharacterInfo] = Field(..., description="角色列表", min_items=2, max_items=4)
-    text: Optional[str] = Field(None, description="文本素材（如果使用text_file_url，此字段可为空）")
-    text_file_url: Optional[str] = Field(None, description="文本文件云存储URL（.txt或Word文件，如果提供，优先使用）")
+    text: str = Field(..., description="文本素材（必需）")
     topic: Optional[str] = Field(None, description="播客主题（可选，主要用于背景音乐选择，如果不提供文本素材则作为对话主题）")
     silence_interval: int = Field(800, description="角色切换静音间隔（毫秒），默认800ms以增加角色之间的间隔，让对话更清晰", ge=200, le=1500)
     category: Optional[str] = Field(None, description="播客分类（可选），用于背景音乐选择，如：商业、科技、财经、新闻、影视、音乐、文化艺术、历史、哲学思考、自我成长、职场、学习、教育育儿、情感恋爱、健康养生、旅游、美食、生活方式、娱乐、游戏电竞、体育、时尚美妆、汽车、法律、宠物等")
@@ -332,7 +332,7 @@ class DeepPodcastRequest(BaseModel):
     topic: str = Field(..., description="播客主题")
     role_voice_urls: Dict[str, str] = Field(..., description="角色音色映射，云存储URL（必需，键为角色名，值为云存储下载URL）")
     role_voices: Optional[Dict[str, str]] = Field(None, description="[已废弃] 角色音色映射，base64编码的音频文件（已废弃，请使用role_voice_urls）")
-    num_characters: int = Field(2, description="角色数量", ge=2, le=3)
+    num_characters: int = Field(2, description="角色数量", ge=1, le=3)
     depth_level: str = Field("深度", description="深度级别", pattern="^(深度|中等|浅层)$")
     silence_interval: int = Field(800, description="角色切换静音间隔（毫秒），默认800ms以增加角色之间的间隔，让对话更清晰", ge=200, le=1500)
     category: Optional[str] = Field(None, description="播客分类（可选），用于背景音乐选择，如：商业、科技、财经、新闻、影视、音乐、文化艺术、历史、哲学思考、自我成长、职场、学习、教育育儿、情感恋爱、健康养生、旅游、美食、生活方式、娱乐、游戏电竞、体育、时尚美妆、汽车、法律、宠物等")
@@ -1193,8 +1193,8 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 text_generation_start = time.time()
                 generated_text = api_client.generate_text(
                     prompt=prompt,
-                    temperature=0.8,
-                    max_tokens=5000  # 增加到5000以支持4-5分钟的对话内容
+                    temperature=0.6,  # 降低温度以加快生成速度
+                    max_tokens=4000  
                 )
                 text_generation_time = time.time() - text_generation_start
                 retrieval_timings["对话文本生成"] = text_generation_time
@@ -1498,24 +1498,21 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
     生成自定义角色播客（子题目2）
     
     - **characters**: 角色列表（至少2个，最多4个），每个角色必须提供voice_url（云存储URL）
-    - **text**: 文本素材（可选，如果使用text_file_url，此字段可为空）
-    - **text_file_url**: 文本文件云存储URL（可选，如果提供，优先使用）
-    - **topic**: 播客主题（可选，主要用于背景音乐选择，如果不提供文本素材则作为对话主题）
+    - **text**: 文本素材（必需）
+    - **topic**: 播客主题（可选，主要用于背景音乐选择）
     - **silence_interval**: 角色切换静音间隔（毫秒）
     
     注意：本接口仅支持云存储URL，不再支持base64编码的音频文件
     """
     start_time = time.time()
     
-    # 检查输入：至少需要文本素材或主题
+    # 检查输入：必须提供文本素材
     has_text = request.text and request.text.strip()
-    has_text_file = request.text_file_url and request.text_file_url.strip()
-    has_topic = request.topic and request.topic.strip()
     
-    if not has_text and not has_text_file and not has_topic:
-        raise HTTPException(status_code=400, detail="至少需要提供文本素材（text或text_file_url）或主题（topic）")
+    if not has_text:
+        raise HTTPException(status_code=400, detail="必须提供文本素材（text字段）")
     
-    logger.info(f"开始生成自定义角色播客: 角色数量={len(request.characters)}, 文本素材={'是' if (has_text or has_text_file) else '否'}, 主题={request.topic}, 使用云存储")
+    logger.info(f"开始生成自定义角色播客: 角色数量={len(request.characters)}, 文本素材长度={len(request.text)}, 主题={request.topic}, 使用云存储")
     
     try:
         gen = get_generator()
@@ -1545,19 +1542,8 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
                 }
             
             # 获取文本素材
-            text_material = None
-            if has_text_file:
-                logger.info(f"从云存储URL读取文本文件: {request.text_file_url}")
-                try:
-                    _update_progress(request.job_id, "downloading_text", 3, "正在下载文本文件")
-                    text_material = download_text_from_url(request.text_file_url)
-                    logger.info(f"文本文件读取成功: {len(text_material)} 字符")
-                except Exception as e:
-                    logger.error(f"读取文本文件失败: {str(e)}")
-                    raise HTTPException(status_code=400, detail=f"读取文本文件失败: {str(e)}")
-            elif has_text:
-                text_material = request.text
-                logger.info(f"使用直接输入的文本素材: {len(text_material)} 字符")
+            text_material = request.text
+            logger.info(f"使用直接输入的文本素材: {len(text_material)} 字符")
             
             # 生成对话文本
             logger.info("调用混元大模型生成高度拟人化角色互动对话...")
@@ -1571,7 +1557,7 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
             generated_text = api_client.generate_text(
                 prompt=prompt,
                 temperature=0.8,
-                max_tokens=2500
+                max_tokens=2000  # 降低以加快生成速度
             )
             text_generation_time = time.time() - text_generation_start
             logger.info(f"对话文本生成完成，耗时: {text_generation_time:.2f}s，文本长度: {len(generated_text)}")
@@ -1767,7 +1753,7 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
     
     - **topic**: 播客主题
     - **role_voice_urls**: 角色音色映射，键为角色名，值为云存储下载URL（必需）
-    - **num_characters**: 角色数量（2-3个）
+    - **num_characters**: 角色数量（1-3个）
     - **depth_level**: 深度级别（深度/中等/浅层）
     - **silence_interval**: 角色切换静音间隔（毫秒）
     
@@ -1816,7 +1802,7 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
             generated_text = api_client.generate_text(
                 prompt=prompt,
                 temperature=0.7,
-                max_tokens=2500
+                max_tokens=2000  # 降低以加快生成速度
             )
             text_generation_time = time.time() - text_generation_start
             logger.info(f"对话文本生成完成，耗时: {text_generation_time:.2f}s，文本长度: {len(generated_text)}")
@@ -1847,13 +1833,13 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
                     logger.info(f"✓ 自动选择背景音乐: {os.path.basename(background_music_path)}")
                     # 验证文件是否存在
                     if not os.path.exists(background_music_path):
-                        logger.warning(f"⚠️ 背景音乐文件不存在: {background_music_path}")
+                        logger.warning(f" 背景音乐文件不存在: {background_music_path}")
                         background_music_path = None
                 else:
-                    logger.warning("⚠️ 未找到合适的背景音乐，将不使用背景音乐")
+                    logger.warning(" 未找到合适的背景音乐，将不使用背景音乐")
                     background_music_path = None
             except Exception as e:
-                logger.warning(f"⚠️ 自动选择背景音乐失败: {str(e)}，将不使用背景音乐")
+                logger.warning(f" 自动选择背景音乐失败: {str(e)}，将不使用背景音乐")
                 import traceback
                 logger.debug(f"错误详情: {traceback.format_exc()}")
                 background_music_path = None
@@ -2075,8 +2061,12 @@ async def get_podcast_file(file_id: str):
 @app.get("/api/v1/podcast/progress/{job_id}")
 async def get_progress(job_id: str):
     """
-    获取任务进度（兼容轮询方式，但不推荐使用）
-    推荐使用 SSE 端点：/api/v1/podcast/progress/{job_id}/stream
+    获取任务进度（HTTP轮询方式）
+    
+    注意：
+    - HarmonyOS客户端必须使用此端点进行轮询
+    - Web客户端可以使用SSE端点：/api/v1/podcast/progress/{job_id}/stream 获得更好的实时性
+    - 此端点的请求日志已被过滤，避免覆盖其他重要日志
     """
     try:
         return _get_progress(job_id)
