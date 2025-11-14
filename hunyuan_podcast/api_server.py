@@ -317,9 +317,13 @@ class CharacterInfo(BaseModel):
 
 class CharacterRequest(BaseModel):
     """自定义角色播客请求"""
-    characters: List[CharacterInfo] = Field(..., description="角色列表", min_items=2, max_items=3)
-    topic: Optional[str] = Field(None, description="播客主题（可选）")
+    characters: List[CharacterInfo] = Field(..., description="角色列表", min_items=2, max_items=4)
+    text: Optional[str] = Field(None, description="文本素材（如果使用text_file_url，此字段可为空）")
+    text_file_url: Optional[str] = Field(None, description="文本文件云存储URL（.txt或Word文件，如果提供，优先使用）")
+    topic: Optional[str] = Field(None, description="播客主题（可选，主要用于背景音乐选择，如果不提供文本素材则作为对话主题）")
     silence_interval: int = Field(800, description="角色切换静音间隔（毫秒），默认800ms以增加角色之间的间隔，让对话更清晰", ge=200, le=1500)
+    category: Optional[str] = Field(None, description="播客分类（可选），用于背景音乐选择，如：商业、科技、财经、新闻、影视、音乐、文化艺术、历史、哲学思考、自我成长、职场、学习、教育育儿、情感恋爱、健康养生、旅游、美食、生活方式、娱乐、游戏电竞、体育、时尚美妆、汽车、法律、宠物等")
+    background_volume: float = Field(0.3, description="背景音乐音量（0.0-1.0）", ge=0.0, le=1.0)
     job_id: Optional[str] = Field(None, description="可选任务ID，用于前端轮询进度")
 
 
@@ -331,6 +335,8 @@ class DeepPodcastRequest(BaseModel):
     num_characters: int = Field(2, description="角色数量", ge=2, le=3)
     depth_level: str = Field("深度", description="深度级别", pattern="^(深度|中等|浅层)$")
     silence_interval: int = Field(800, description="角色切换静音间隔（毫秒），默认800ms以增加角色之间的间隔，让对话更清晰", ge=200, le=1500)
+    category: Optional[str] = Field(None, description="播客分类（可选），用于背景音乐选择，如：商业、科技、财经、新闻、影视、音乐、文化艺术、历史、哲学思考、自我成长、职场、学习、教育育儿、情感恋爱、健康养生、旅游、美食、生活方式、娱乐、游戏电竞、体育、时尚美妆、汽车、法律、宠物等")
+    background_volume: float = Field(0.3, description="背景音乐音量（0.0-1.0）", ge=0.0, le=1.0)
     wait_for_upload: bool = Field(False, description="是否等待上传到云存储完成（可选，默认false）")
     upload_timeout: int = Field(120, description="等待上传完成的超时时间（秒），如果为0则根据文件大小自动计算", ge=0, le=600)
     job_id: Optional[str] = Field(None, description="可选任务ID，用于前端轮询进度")
@@ -1392,6 +1398,7 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                                     # 更新进度，包含音频URL以便前端从云存储下载并播放
                                     audio_url = agc_result.get('url') if isinstance(agc_result, dict) else None
                                     _update_progress(request.job_id, "completed", 100, "生成完成，已上传到云存储", done=True, audio_url=audio_url)
+                                    # 同步上传成功，不再启动后台上传任务
                                 except concurrent.futures.TimeoutError:
                                     logger.warning(f"同步上传超时（{actual_timeout}秒），文件大小: {file_size_mb:.2f}MB，已改为后台继续上传")
                                     background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
@@ -1490,14 +1497,25 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
     """
     生成自定义角色播客（子题目2）
     
-    - **characters**: 角色列表（至少2个，最多3个），每个角色必须提供voice_url（云存储URL）
-    - **topic**: 播客主题（可选）
+    - **characters**: 角色列表（至少2个，最多4个），每个角色必须提供voice_url（云存储URL）
+    - **text**: 文本素材（可选，如果使用text_file_url，此字段可为空）
+    - **text_file_url**: 文本文件云存储URL（可选，如果提供，优先使用）
+    - **topic**: 播客主题（可选，主要用于背景音乐选择，如果不提供文本素材则作为对话主题）
     - **silence_interval**: 角色切换静音间隔（毫秒）
     
     注意：本接口仅支持云存储URL，不再支持base64编码的音频文件
     """
     start_time = time.time()
-    logger.info(f"开始生成自定义角色播客: 角色数量={len(request.characters)}, 主题={request.topic}, 使用云存储")
+    
+    # 检查输入：至少需要文本素材或主题
+    has_text = request.text and request.text.strip()
+    has_text_file = request.text_file_url and request.text_file_url.strip()
+    has_topic = request.topic and request.topic.strip()
+    
+    if not has_text and not has_text_file and not has_topic:
+        raise HTTPException(status_code=400, detail="至少需要提供文本素材（text或text_file_url）或主题（topic）")
+    
+    logger.info(f"开始生成自定义角色播客: 角色数量={len(request.characters)}, 文本素材={'是' if (has_text or has_text_file) else '否'}, 主题={request.topic}, 使用云存储")
     
     try:
         gen = get_generator()
@@ -1526,11 +1544,27 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
                     "relationship": char.relationship or ""
                 }
             
+            # 获取文本素材
+            text_material = None
+            if has_text_file:
+                logger.info(f"从云存储URL读取文本文件: {request.text_file_url}")
+                try:
+                    _update_progress(request.job_id, "downloading_text", 3, "正在下载文本文件")
+                    text_material = download_text_from_url(request.text_file_url)
+                    logger.info(f"文本文件读取成功: {len(text_material)} 字符")
+                except Exception as e:
+                    logger.error(f"读取文本文件失败: {str(e)}")
+                    raise HTTPException(status_code=400, detail=f"读取文本文件失败: {str(e)}")
+            elif has_text:
+                text_material = request.text
+                logger.info(f"使用直接输入的文本素材: {len(text_material)} 字符")
+            
             # 生成对话文本
-            logger.info("调用混元大模型生成对话文本...")
+            logger.info("调用混元大模型生成高度拟人化角色互动对话...")
             prompt = processor.build_character_prompt(
                 character_descriptions,
-                request.topic if request.topic else None
+                text_material=text_material,
+                topic=request.topic if not text_material else None  # 如果有文本素材，不使用主题
             )
             
             text_generation_start = time.time()
@@ -1544,6 +1578,41 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
             
             cleaned_text = processor.clean_text(generated_text)
             
+            # 自动选择背景音乐（在AI生成对话之后，使用完整的文本内容）
+            background_music_path = None
+            try:
+                _update_progress(request.job_id, "selecting_music", 22, "正在选择背景音乐")
+                logger.info("开始自动选择背景音乐...")
+                music_selection_start = time.time()
+                music_selector = MusicSelector(use_cloud_storage=True)
+                # 将category转换为scene_types列表
+                scene_types = [request.category] if request.category else None
+                selected_music = music_selector.select_music_by_ai(
+                    text=cleaned_text,  # 使用完整的文本内容（包括AI生成的对话）
+                    podcast_name=None,
+                    topic=request.topic,
+                    scene_types=scene_types,
+                    num_music=1
+                )
+                music_selection_time = time.time() - music_selection_start
+                logger.info(f"背景音乐选择完成，耗时: {music_selection_time:.2f}s")
+                
+                if selected_music and len(selected_music) > 0:
+                    background_music_path = selected_music[0]
+                    logger.info(f"✓ 自动选择背景音乐: {os.path.basename(background_music_path)}")
+                    # 验证文件是否存在
+                    if not os.path.exists(background_music_path):
+                        logger.warning(f"⚠️ 背景音乐文件不存在: {background_music_path}")
+                        background_music_path = None
+                else:
+                    logger.warning("⚠️ 未找到合适的背景音乐，将不使用背景音乐")
+                    background_music_path = None
+            except Exception as e:
+                logger.warning(f"⚠️ 自动选择背景音乐失败: {str(e)}，将不使用背景音乐")
+                import traceback
+                logger.debug(f"错误详情: {traceback.format_exc()}")
+                background_music_path = None
+            
             # 生成播客
             logger.info("开始生成播客音频...")
             generation_start = time.time()
@@ -1551,6 +1620,9 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
                 text=cleaned_text,
                 role_voices=role_voices,
                 silence_interval=request.silence_interval,
+                background_music=background_music_path,
+                background_volume=request.background_volume,
+                background_mode="single",  # 单个背景音乐，使用single模式
                 verbose=True
             )
             generation_time = time.time() - generation_start
@@ -1751,6 +1823,41 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
             
             cleaned_text = processor.clean_text(generated_text)
             
+            # 自动选择背景音乐（在AI生成对话之后，使用完整的文本内容）
+            background_music_path = None
+            try:
+                _update_progress(request.job_id, "selecting_music", 22, "正在选择背景音乐")
+                logger.info("开始自动选择背景音乐...")
+                music_selection_start = time.time()
+                music_selector = MusicSelector(use_cloud_storage=True)
+                # 将category转换为scene_types列表
+                scene_types = [request.category] if request.category else None
+                selected_music = music_selector.select_music_by_ai(
+                    text=cleaned_text,  # 使用完整的文本内容（包括AI生成的对话）
+                    podcast_name=None,
+                    topic=request.topic,
+                    scene_types=scene_types,
+                    num_music=1
+                )
+                music_selection_time = time.time() - music_selection_start
+                logger.info(f"背景音乐选择完成，耗时: {music_selection_time:.2f}s")
+                
+                if selected_music and len(selected_music) > 0:
+                    background_music_path = selected_music[0]
+                    logger.info(f"✓ 自动选择背景音乐: {os.path.basename(background_music_path)}")
+                    # 验证文件是否存在
+                    if not os.path.exists(background_music_path):
+                        logger.warning(f"⚠️ 背景音乐文件不存在: {background_music_path}")
+                        background_music_path = None
+                else:
+                    logger.warning("⚠️ 未找到合适的背景音乐，将不使用背景音乐")
+                    background_music_path = None
+            except Exception as e:
+                logger.warning(f"⚠️ 自动选择背景音乐失败: {str(e)}，将不使用背景音乐")
+                import traceback
+                logger.debug(f"错误详情: {traceback.format_exc()}")
+                background_music_path = None
+            
             # 生成播客
             logger.info("开始生成播客音频...")
             generation_start = time.time()
@@ -1758,6 +1865,9 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
                 text=cleaned_text,
                 role_voices=role_voices,
                 silence_interval=request.silence_interval,
+                background_music=background_music_path,
+                background_volume=request.background_volume,
+                background_mode="single",  # 单个背景音乐，使用single模式
                 verbose=True
             )
             generation_time = time.time() - generation_start
@@ -1996,36 +2106,53 @@ async def stream_progress(job_id: str):
     """
     async def event_generator():
         # 创建SSE队列
-        queue = asyncio.Queue()
+        queue = asyncio.Queue(maxsize=10)  # 设置队列大小，避免内存无限增长
         _PROGRESS_SSE_QUEUES[job_id] = queue
+        
+        last_heartbeat_time = time.time()
+        heartbeat_interval = 25.0  # 25秒发送一次心跳（小于30秒超时）
         
         try:
             # 先发送当前进度（如果有）
             current_progress = _get_progress(job_id)
             if current_progress.get("phase") != "unknown":
                 yield f"data: {json.dumps(current_progress, ensure_ascii=False)}\n\n"
+                logger.info(f"SSE连接已建立，job_id={job_id}，已发送当前进度")
             
             # 持续监听进度更新
             while True:
                 try:
-                    # 等待进度更新，设置超时以避免连接挂起
-                    progress_data = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    # 等待进度更新，设置超时以定期发送心跳
+                    wait_timeout = heartbeat_interval - (time.time() - last_heartbeat_time)
+                    wait_timeout = max(1.0, min(wait_timeout, heartbeat_interval))  # 确保至少1秒，最多25秒
+                    
+                    progress_data = await asyncio.wait_for(queue.get(), timeout=wait_timeout)
                     yield f"data: {json.dumps(progress_data, ensure_ascii=False)}\n\n"
+                    last_heartbeat_time = time.time()  # 更新心跳时间
                     
                     # 如果任务完成或失败，关闭连接
                     if progress_data.get("done", False):
+                        logger.info(f"SSE任务完成，job_id={job_id}，关闭连接")
                         break
                 except asyncio.TimeoutError:
-                    # 发送心跳保持连接
-                    yield f": heartbeat\n\n"
+                    # 定期发送心跳保持连接
+                    current_time = time.time()
+                    if current_time - last_heartbeat_time >= heartbeat_interval:
+                        yield f": heartbeat {int(current_time)}\n\n"
+                        last_heartbeat_time = current_time
+                        logger.debug(f"SSE发送心跳，job_id={job_id}")
                     continue
         except asyncio.CancelledError:
             # 客户端断开连接
+            logger.info(f"SSE客户端断开连接，job_id={job_id}")
             pass
+        except Exception as e:
+            logger.error(f"SSE事件生成器异常，job_id={job_id}，错误: {str(e)}")
         finally:
             # 清理SSE队列
             if job_id in _PROGRESS_SSE_QUEUES:
                 del _PROGRESS_SSE_QUEUES[job_id]
+                logger.info(f"SSE队列已清理，job_id={job_id}")
     
     return StreamingResponse(
         event_generator(),

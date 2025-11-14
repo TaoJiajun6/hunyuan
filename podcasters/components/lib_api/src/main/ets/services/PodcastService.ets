@@ -26,7 +26,7 @@ export class PodcastConfig {
   // 5. 直连服务器IP（推荐，避免网关超时）：设置为服务器的公网/内网IP和端口
   //    例如：'http://9.165.4.87:8000' 或 'http://192.168.1.100:8000'
   //    注意：确保服务器防火墙允许8000端口访问
-  static readonly API_BASE_URL: string = 'http://43.156.84.42:8000/'; // 请替换为实际的服务器IP地址
+  static readonly API_BASE_URL: string = 'http://43.134.95.42:8000/'; // 请替换为实际的服务器IP地址
   static readonly API_TIMEOUT: number = 600000; // 10分钟超时（考虑大文件上传和播客生成时间）
 
   
@@ -93,8 +93,13 @@ export interface MultiRoleRequest {
  */
 export interface CharacterRequest {
   characters: CharacterInfo[];
-  topic?: string;
+  text?: string; // 文本素材（如果使用text_file_url，此字段可为空）
+  text_file_url?: string; // 文本文件云存储URL（.txt或Word文件，如果提供，优先使用）
+  topic?: string; // 播客主题（可选，主要用于背景音乐选择，如果不提供文本素材则作为对话主题）
   silence_interval?: number;
+  category?: string; // 播客分类（可选），用于背景音乐选择
+  background_volume?: number; // 背景音乐音量（0.0-1.0），默认0.3
+  job_id?: string; // 可选任务ID，用于轮询进度
 }
 
 /**
@@ -107,6 +112,9 @@ export interface DeepPodcastRequest {
   num_characters?: number; // 2-3
   depth_level?: string; // "深度" | "中等" | "浅层"
   silence_interval?: number;
+  category?: string; // 播客分类（可选），用于背景音乐选择
+  background_volume?: number; // 背景音乐音量（0.0-1.0），默认0.3
+  job_id?: string; // 可选任务ID，用于轮询进度
 }
 
 /**
@@ -594,13 +602,16 @@ export class PodcastService {
               request.job_id,
               onProgress,
               (error) => {
-                Logger.error(TAG, `SSE进度推送错误: ${error.message}`);
+                Logger.warn(TAG, `SSE进度推送错误: ${error.message}，将回退到轮询方式`);
+                // SSE连接失败时，不阻止请求继续，但会失去实时推送
+                // 前端可以通过轮询接口获取进度（如果实现了fallback）
               }
             );
             sseClient.connect();
             Logger.info(TAG, `已启动SSE进度推送: job_id=${request.job_id}`);
           } catch (sseError) {
             Logger.warn(TAG, `SSE连接失败，将使用轮询方式: ${JSON.stringify(sseError)}`);
+            // SSE连接失败不影响主请求，只是失去实时推送功能
           }
         }
 

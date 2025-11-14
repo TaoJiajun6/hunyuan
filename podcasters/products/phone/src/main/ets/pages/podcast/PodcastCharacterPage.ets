@@ -12,9 +12,17 @@ export function PodcastCharacterPageBuilder() {
   PodcastCharacterPage()
 }
 
+// Select 选项类型定义
+interface SelectOption {
+  value: string;
+}
+
 @ComponentV2
 export struct PodcastCharacterPage {
-  @Local topic: string = '';
+  @Local text: string = ''; // 文本素材（文字输入）
+  @Local textFileUrl: string = ''; // 文本文件云存储URL
+  @Local textFileName: string = ''; // 文本文件名
+  @Local category: string = ''; // 播客分类（可选）
   @Local characters: CharacterInfo[] = [
     { name: '角色A', voice_url: '' },
     { name: '角色B', voice_url: '' }
@@ -28,6 +36,34 @@ export struct PodcastCharacterPage {
   @Local isRecording: boolean = false; // 是否正在录制
   @Local recordingDuration: number = 0; // 录音时长（秒）
   @Local recordingTimer: number = 0; // 录音计时器
+  // 播客分类选项列表
+  private readonly categoryOptions: SelectOption[] = [
+    { value: '商业' },
+    { value: '科技' },
+    { value: '财经' },
+    { value: '新闻' },
+    { value: '影视' },
+    { value: '音乐' },
+    { value: '文化艺术' },
+    { value: '历史' },
+    { value: '哲学思考' },
+    { value: '自我成长' },
+    { value: '职场' },
+    { value: '学习' },
+    { value: '教育育儿' },
+    { value: '情感恋爱' },
+    { value: '健康养生' },
+    { value: '旅游' },
+    { value: '美食' },
+    { value: '生活方式' },
+    { value: '娱乐' },
+    { value: '游戏电竞' },
+    { value: '体育' },
+    { value: '时尚美妆' },
+    { value: '汽车' },
+    { value: '法律' },
+    { value: '宠物' }
+  ];
 
   aboutToDisappear(): void {
     // 页面销毁时，如果正在录制，停止录制并释放资源
@@ -56,6 +92,120 @@ export struct PodcastCharacterPage {
       relationship: updates.relationship !== undefined ? updates.relationship : character.relationship,
       voice_url: updates.voice_url !== undefined ? updates.voice_url : character.voice_url
     };
+  }
+
+  /**
+   * 新增角色（最多4个角色）
+   */
+  addCharacter(): void {
+    // 最多允许4个角色
+    if (this.characters.length >= 4) {
+      promptAction.showToast({
+        message: '最多只能添加4个角色',
+        duration: 2000
+      });
+      return;
+    }
+    
+    // 生成新角色名称：角色A, 角色B, 角色C, 角色D
+    const newCharacterName = `角色${String.fromCharCode(65 + this.characters.length)}`; // 角色A-D
+    
+    const newCharacter: CharacterInfo = {
+      name: newCharacterName,
+      voice_url: ''
+    };
+    // 创建新数组以触发状态更新
+    const newCharacters: CharacterInfo[] = [];
+    for (let i = 0; i < this.characters.length; i++) {
+      newCharacters.push(this.copyCharacterInfo(this.characters[i], {}));
+    }
+    newCharacters.push(newCharacter);
+    this.characters = newCharacters;
+  }
+
+  /**
+   * 删除角色
+   */
+  removeCharacter(index: number): void {
+    // 至少保留2个角色
+    if (this.characters.length <= 2) {
+      promptAction.showToast({
+        message: '至少需要保留2个角色',
+        duration: 2000
+      });
+      return;
+    }
+    
+    // 如果正在录制要删除的角色，先停止录制
+    if (this.isRecording && this.recordingIndex === index) {
+      this.stopRecordingVoice();
+    }
+    
+    // 创建新数组，移除指定索引的角色
+    const newCharacters: CharacterInfo[] = [];
+    for (let i = 0; i < this.characters.length; i++) {
+      if (i !== index) {
+        newCharacters.push(this.copyCharacterInfo(this.characters[i], {}));
+      }
+    }
+    this.characters = newCharacters;
+    
+    // 如果删除的角色索引小于当前录制索引，需要调整录制索引
+    if (this.recordingIndex > index) {
+      this.recordingIndex = this.recordingIndex - 1;
+    } else if (this.recordingIndex === index) {
+      this.recordingIndex = -1;
+      this.isRecording = false;
+    }
+  }
+
+  /**
+   * 选择文本素材文件（支持.txt、.doc、.docx、.pdf）
+   */
+  async selectTextFile(): Promise<void> {
+    try {
+      // 获取UIAbility上下文
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+
+      // 使用云存储上传（文件必须上传到云存储）
+      const textFileInfo = await FileUtils.pickTextFile(context, true);
+      if (textFileInfo && textFileInfo.cloudUrl) {
+        // 保存云存储URL
+        this.textFileUrl = textFileInfo.cloudUrl;
+        this.textFileName = textFileInfo.fileName;
+
+        // 如果文件是.txt格式且已读取内容，保存到text字段（用于兼容）
+        const fileName = textFileInfo.fileName.toLowerCase();
+        const fileExtension = fileName.split('.').pop() || '';
+        if (fileExtension === 'txt' && textFileInfo.content) {
+          this.text = textFileInfo.content;
+        } else {
+          // PDF和Word文件不需要保存内容到text字段
+          this.text = '';
+        }
+
+        // 根据文件类型显示不同的提示信息
+        const fileTypeName = fileExtension === 'pdf' ? 'PDF' :
+          fileExtension === 'docx' || fileExtension === 'doc' ? 'Word' :
+            '文本';
+
+        promptAction.showToast({
+          message: `${fileTypeName}文件已选择并上传到云存储: ${textFileInfo.fileName}`,
+          duration: 2000
+        });
+      } else {
+        // 上传失败或未获取到URL
+        promptAction.showToast({
+          message: '文件上传失败，请重试',
+          duration: 2000
+        });
+      }
+    } catch (error) {
+      promptAction.showToast({
+        message: `选择文件失败: ${error}`,
+        duration: 2000
+      });
+    }
   }
 
   /**
@@ -226,6 +376,18 @@ export struct PodcastCharacterPage {
       return;
     }
 
+    // 检查文本素材输入（text或textFileUrl至少有一个）
+    const hasText = this.text.trim().length > 0;
+    const hasTextFile = this.textFileUrl.trim().length > 0;
+
+    if (!hasText && !hasTextFile) {
+      promptAction.showToast({
+        message: '请输入文本素材或上传文本文件',
+        duration: 2000
+      });
+      return;
+    }
+
     this.isLoading = true;
     // 生成一个任务ID用于SSE进度推送
     this.jobId = `${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
@@ -249,8 +411,12 @@ export struct PodcastCharacterPage {
     try {
       const request: CharacterRequest = {
         characters: this.characters,
-        topic: this.topic || undefined,
-        silence_interval: 300
+        text: hasText ? this.text : undefined, // 文本素材（文字输入）
+        text_file_url: hasTextFile ? this.textFileUrl : undefined, // 文本文件云存储URL
+        silence_interval: 300,
+        category: this.category.trim().length > 0 ? this.category : undefined, // 播客分类
+        background_volume: 0.3, // 背景音乐音量，默认0.3
+        job_id: this.jobId
       };
 
       const response = await podcastService.generateCharacterPodcast(request, this.jobId, onProgress);
@@ -287,17 +453,17 @@ export struct PodcastCharacterPage {
 
         Scroll() {
           Column({ space: 16 }) {
-            // 主题输入
+            // 文本素材输入
             Column({ space: 12 }) {
-              Text('播客主题（可选）')
+              Text('文本素材')
                 .fontSize($r('sys.float.Subtitle_L'))
                 .fontColor($r('sys.color.font_primary'))
                 .fontWeight(FontWeight.Bold)
                 .alignSelf(ItemAlign.Start)
 
               TextArea({
-                placeholder: '请输入播客主题，如：人工智能的发展',
-                text: $$this.topic
+                placeholder: '请输入文本素材内容，N个角色将基于此素材进行高度拟人化的互动对话',
+                text: $$this.text
               })
                 .placeholderColor($r('sys.color.font_secondary'))
                 .placeholderFont({
@@ -309,26 +475,114 @@ export struct PodcastCharacterPage {
                 .fontWeight(FontWeight.Regular)
                 .borderRadius(8)
                 .padding({ left: 12, top: 8 })
-                .constraintSize({ minHeight: 60 })
+                .constraintSize({ minHeight: 80 })
             }
             .width('100%')
             .alignItems(HorizontalAlign.Start)
 
-            // 角色配置
+            // 文本文件上传
             Column({ space: 12 }) {
-              Text('角色配置')
+              Text('文本文件（可选，支持.txt、.doc、.docx、.pdf）')
                 .fontSize($r('sys.float.Subtitle_L'))
                 .fontColor($r('sys.color.font_primary'))
                 .fontWeight(FontWeight.Bold)
                 .alignSelf(ItemAlign.Start)
 
+              Row({ space: 12 }) {
+                Column({ space: 4 }) {
+                  Text(this.textFileName || '未选择文件')
+                    .fontSize($r('sys.float.Body_M'))
+                    .fontColor(this.textFileUrl ? $r('sys.color.font_primary') : $r('sys.color.font_secondary'))
+                    .maxLines(1)
+
+                  Text('支持.txt、.doc、.docx、.pdf格式，最大50MB')
+                    .fontSize($r('sys.float.Body_S'))
+                    .fontColor($r('sys.color.font_secondary'))
+                }
+                .layoutWeight(1)
+                .alignItems(HorizontalAlign.Start)
+
+                Button(this.textFileUrl ? '已选择' : '选择文件')
+                  .fontSize($r('sys.float.Body_S'))
+                  .type(ButtonType.Normal)
+                  .backgroundColor(this.textFileUrl ?
+                    $r('sys.color.icon_emphasize') :
+                    $r('sys.color.comp_background_tertiary'))
+                  .fontColor(this.textFileUrl ?
+                    $r('sys.color.font_on_primary') :
+                    $r('sys.color.font_primary'))
+                  .onClick(() => {
+                    this.selectTextFile();
+                  })
+              }
+              .width('100%')
+              .padding(12)
+              .borderRadius(8)
+              .backgroundColor($r('sys.color.comp_background_tertiary'))
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
+
+            // 播客分类选择
+            Column({ space: 12 }) {
+              Text('播客分类（可选）')
+                .fontSize($r('sys.float.Subtitle_L'))
+                .fontColor($r('sys.color.font_primary'))
+                .fontWeight(FontWeight.Bold)
+                .alignSelf(ItemAlign.Start)
+
+              Select(this.categoryOptions)
+                .value(this.category || '')
+                .onSelect((index: number, value: string) => {
+                  this.category = value;
+                })
+                .width('100%')
+            }
+
+            // 角色配置
+            Column({ space: 12 }) {
+              Row() {
+                Text('角色配置')
+                  .fontSize($r('sys.float.Subtitle_L'))
+                  .fontColor($r('sys.color.font_primary'))
+                  .fontWeight(FontWeight.Bold)
+                Blank()
+                Button('+ 新增角色')
+                  .fontSize($r('sys.float.Body_S'))
+                  .type(ButtonType.Normal)
+                  .backgroundColor($r('sys.color.icon_emphasize'))
+                  .fontColor($r('sys.color.font_on_primary'))
+                  .enabled(this.characters.length < 4)
+                  .onClick(() => {
+                    this.addCharacter();
+                  })
+              }
+              .width('100%')
+
               ForEach(this.characters, (character: CharacterInfo, index: number) => {
                 Column({ space: 8 }) {
-                  Text(`角色${index + 1}`)
-                    .fontSize($r('sys.float.Body_M'))
-                    .fontColor($r('sys.color.font_primary'))
-                    .fontWeight(FontWeight.Bold)
-                    .alignSelf(ItemAlign.Start)
+                  Row() {
+                    Text(`角色${index + 1}`)
+                      .fontSize($r('sys.float.Body_M'))
+                      .fontColor($r('sys.color.font_primary'))
+                      .fontWeight(FontWeight.Bold)
+                    Blank()
+                    if (this.characters.length > 2) {
+                      Button('-')
+                        .fontSize($r('sys.float.Body_L'))
+                        .type(ButtonType.Normal)
+                        .backgroundColor($r('sys.color.alert'))
+                        .fontColor($r('sys.color.font_on_primary'))
+                        .width(32)
+                        .height(32)
+                        .borderRadius(16)
+                        .enabled(!this.isRecording || this.recordingIndex !== index)
+                        .onClick(() => {
+                          this.removeCharacter(index);
+                        })
+                    }
+                  }
+                  .width('100%')
 
                   TextInput({
                     placeholder: '角色名称',
@@ -341,13 +595,15 @@ export struct PodcastCharacterPage {
                     .padding({ left: 12 })
                     .height(40)
                     .onChange((value: string) => {
-                      // 创建新数组以触发状态更新
+                      // 创建新数组以触发状态更新，确保每个角色对象都是新对象
                       const newCharacters: CharacterInfo[] = [];
                       for (let i = 0; i < this.characters.length; i++) {
                         if (i === index) {
+                          // 为当前角色创建新对象
                           newCharacters.push(this.copyCharacterInfo(this.characters[i], { name: value }));
                         } else {
-                          newCharacters.push(this.characters[i]);
+                          // 其他角色也要复制，确保数组引用完全改变
+                          newCharacters.push(this.copyCharacterInfo(this.characters[i], {}));
                         }
                       }
                       this.characters = newCharacters;
@@ -364,13 +620,15 @@ export struct PodcastCharacterPage {
                     .padding({ left: 12 })
                     .height(40)
                     .onChange((value: string) => {
-                      // 创建新数组以触发状态更新
+                      // 创建新数组以触发状态更新，确保每个角色对象都是新对象
                       const newCharacters: CharacterInfo[] = [];
                       for (let i = 0; i < this.characters.length; i++) {
                         if (i === index) {
+                          // 为当前角色创建新对象
                           newCharacters.push(this.copyCharacterInfo(this.characters[i], { identity: value }));
                         } else {
-                          newCharacters.push(this.characters[i]);
+                          // 其他角色也要复制，确保数组引用完全改变
+                          newCharacters.push(this.copyCharacterInfo(this.characters[i], {}));
                         }
                       }
                       this.characters = newCharacters;
@@ -387,13 +645,15 @@ export struct PodcastCharacterPage {
                     .padding({ left: 12 })
                     .height(40)
                     .onChange((value: string) => {
-                      // 创建新数组以触发状态更新
+                      // 创建新数组以触发状态更新，确保每个角色对象都是新对象
                       const newCharacters: CharacterInfo[] = [];
                       for (let i = 0; i < this.characters.length; i++) {
                         if (i === index) {
+                          // 为当前角色创建新对象
                           newCharacters.push(this.copyCharacterInfo(this.characters[i], { personality: value }));
                         } else {
-                          newCharacters.push(this.characters[i]);
+                          // 其他角色也要复制，确保数组引用完全改变
+                          newCharacters.push(this.copyCharacterInfo(this.characters[i], {}));
                         }
                       }
                       this.characters = newCharacters;
@@ -444,7 +704,7 @@ export struct PodcastCharacterPage {
                 .padding(12)
                 .borderRadius(8)
                 .backgroundColor($r('sys.color.comp_background_tertiary'))
-              }, (character: CharacterInfo, index: number) => `${character.name}_${index}`)
+              }, (character: CharacterInfo, index: number) => `character_${index}`)
             }
             .width('100%')
             .alignItems(HorizontalAlign.Start)
@@ -475,7 +735,9 @@ export struct PodcastCharacterPage {
           Button(this.isLoading ? '生成中...' : '开始生成')
             .width('100%')
             .height(40)
-            .enabled(!this.isLoading && this.characters.every(char => char.voice_url))
+            .enabled(!this.isLoading &&
+              (this.text.trim().length > 0 || this.textFileUrl.length > 0) &&
+              this.characters.every(char => char.voice_url))
             .onClick(() => {
               this.generatePodcast();
             })

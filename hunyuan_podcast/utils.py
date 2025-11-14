@@ -302,8 +302,8 @@ def mix_audio_with_background(
     fade_out_ms: int = 500,
     background_mode: str = "single",
     enable_ducking: bool = True,
-    ducking_threshold: float = 0.01,
-    ducking_ratio: float = 0.3,
+    ducking_threshold: float = 0.02,  # 提高阈值，让对话间隔更明显
+    ducking_ratio: float = 0.15,  # 降低到15%，让对话时音乐更明显地被压低
     intro_duration_ms: int = 5000,
     outro_duration_ms: int = 5000,
     remove_background_silence: bool = True
@@ -330,8 +330,8 @@ def mix_audio_with_background(
             - "concat": 按顺序拼接多个背景音乐
             - "mix": 混合多个背景音乐
         enable_ducking: 是否启用ducking效果（对话时自动压低背景音乐），默认True
-        ducking_threshold: ducking触发阈值（前景音频音量超过此值时触发），默认0.01
-        ducking_ratio: ducking时背景音乐音量降低比例（0.0-1.0），默认0.3（降低到30%）
+        ducking_threshold: ducking触发阈值（前景音频音量超过此值时触发），默认0.02
+        ducking_ratio: ducking时背景音乐音量降低比例（0.0-1.0），默认0.15（降低到15%，对话间隔时恢复）
         intro_duration_ms: 开场音乐播放时长（毫秒），默认5000（5秒）
         outro_duration_ms: 结束音乐播放时长（毫秒），默认5000（5秒）
         remove_background_silence: 是否去除背景音乐中的静音段，默认True
@@ -500,14 +500,61 @@ def mix_audio_with_background(
             foreground_envelope = foreground_envelope / max_envelope
         
         # 创建ducking曲线：当前景音频音量高时，背景音量降低
+        # 对话间隔时（音量低），背景音乐恢复；对话时（音量高），背景音乐压低
         ducking_curve = torch.ones_like(foreground_envelope)
-        mask = foreground_envelope > ducking_threshold
-        if mask.any():
-            # 计算ducking强度
-            ducking_strength = (foreground_envelope - ducking_threshold) / (1.0 - ducking_threshold)
-            ducking_strength = torch.clamp(ducking_strength, 0, 1)
-            # 应用ducking：背景音量降低到 ducking_ratio
-            ducking_curve = 1.0 - ducking_strength * (1.0 - ducking_ratio)
+        
+        # 计算ducking强度：基于前景音频音量
+        # 当音量超过阈值时，应用ducking（压低音乐）；当音量低于阈值时，恢复背景音乐
+        ducking_strength = torch.zeros_like(foreground_envelope)
+        
+        # 对于所有样本，计算ducking强度
+        # 当envelope > threshold时，ducking_strength应该接近1（压低音乐）
+        # 当envelope <= threshold时，ducking_strength应该接近0（恢复音乐）
+        
+        # 使用平滑的过渡函数，避免突然的音量变化
+        # 当envelope在threshold附近时，使用平滑过渡
+        # 当envelope远大于threshold时，ducking_strength = 1（完全压低）
+        # 当envelope远小于threshold时，ducking_strength = 0（完全恢复）
+        
+        # 计算ducking强度：使用sigmoid-like函数进行平滑过渡
+        # 当envelope > threshold时，ducking_strength逐渐增加到1
+        # 当envelope < threshold时，ducking_strength逐渐减少到0
+        
+        # 使用线性映射，但在threshold附近添加平滑过渡区域
+        transition_width = ducking_threshold * 0.5  # 过渡区域宽度
+        lower_bound = ducking_threshold - transition_width
+        upper_bound = ducking_threshold + transition_width
+        
+        # 对于超过upper_bound的部分，完全压低（ducking_strength = 1）
+        mask_high = foreground_envelope > upper_bound
+        ducking_strength[mask_high] = 1.0
+        
+        # 对于低于lower_bound的部分，完全恢复（ducking_strength = 0）
+        mask_low = foreground_envelope < lower_bound
+        ducking_strength[mask_low] = 0.0
+        
+        # 对于在过渡区域的部分，使用线性插值
+        # 过渡区域：从lower_bound到upper_bound，ducking_strength从0线性增加到1
+        mask_transition = (foreground_envelope >= lower_bound) & (foreground_envelope <= upper_bound)
+        if mask_transition.any():
+            # 在过渡区域内，从0线性插值到1
+            transition_values = (foreground_envelope[mask_transition] - lower_bound) / (upper_bound - lower_bound)
+            ducking_strength[mask_transition] = transition_values
+        
+        # 应用ducking：背景音量 = 1.0 - ducking_strength * (1.0 - ducking_ratio)
+        # 当ducking_strength=1时（对话时），背景音量 = ducking_ratio（最低，15%）
+        # 当ducking_strength=0时（间隔时），背景音量 = 1.0（正常，100%）
+        ducking_curve = 1.0 - ducking_strength * (1.0 - ducking_ratio)
+        
+        # 添加平滑处理，避免音量突变
+        # 使用简单的移动平均平滑
+        smooth_window = int(sr * 0.1)  # 100ms平滑窗口
+        if smooth_window > 1 and ducking_curve.shape[1] > smooth_window:
+            # 使用卷积进行平滑
+            kernel = torch.ones(1, 1, smooth_window, device=ducking_curve.device, dtype=ducking_curve.dtype) / smooth_window
+            ducking_curve_padded = torch.nn.functional.pad(ducking_curve.unsqueeze(0), (smooth_window // 2, smooth_window // 2), mode='reflect')
+            ducking_curve_smooth = torch.nn.functional.conv1d(ducking_curve_padded, kernel, padding=0)
+            ducking_curve = ducking_curve_smooth.squeeze(0)
         
         # 应用到对话部分的背景音量曲线
         background_volume_curve[:, dialogue_start:dialogue_end] = ducking_curve

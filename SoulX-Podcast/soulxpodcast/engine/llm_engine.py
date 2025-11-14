@@ -7,8 +7,8 @@ from dataclasses import fields, asdict
 
 import torch
 import torch.multiprocessing as mp
-from transformers import AutoTokenizer, AutoModelForCausalLM, StoppingCriteriaList
-from transformers import EosTokenCriteria, RepetitionPenaltyLogitsProcessor
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import RepetitionPenaltyLogitsProcessor
 try:    
     from vllm import LLM
     from vllm import SamplingParams as VllmSamplingParams
@@ -41,7 +41,8 @@ class HFLLMEngine:
         past_key_values=None,
     ) -> dict:
         
-        stopping_criteria = StoppingCriteriaList([EosTokenCriteria(eos_token_id=self.config.hf_config.eos_token_id)])
+        # 使用 eos_token_id 参数而不是自定义 stopping_criteria，避免重复警告
+        # transformers 库会自动创建 EosTokenCriteria
         if sampling_param.use_ras:
             sample_hf_engine_handler = partial(_ras_sample_hf_engine, 
                     use_ras=sampling_param.use_ras, 
@@ -62,7 +63,7 @@ class HFLLMEngine:
                 min_new_tokens=sampling_param.min_tokens,
                 max_new_tokens=sampling_param.max_tokens,
                 temperature=sampling_param.temperature,
-                stopping_criteria=stopping_criteria,
+                eos_token_id=self.config.hf_config.eos_token_id,  # 使用 eos_token_id 参数，让 transformers 自动处理
                 past_key_values=past_key_values,
                 custom_generate=sample_hf_engine_handler,
                 use_cache=True,
