@@ -37,9 +37,22 @@ def _load_dotenv_if_exists():
 # 在导入配置之前加载 .env 文件
 _load_dotenv_if_exists()
 
-# 硅基流动API配置
-# 请在此处直接配置您的API密钥（从 https://cloud.siliconflow.cn 获取）
-SILICONFLOW_API_KEY = "sk-tpoapasxdwjyexqfagbiigtvwsoydwravbptrmrrmwjfdwbh"  # 请替换为您的实际API密钥
+# 腾讯云混元API配置（直接调用，速度更快）
+# 请在此处直接配置您的API密钥（从 https://console.cloud.tencent.com/hunyuan/start 获取）
+HUNYUAN_API_KEY = os.getenv("HUNYUAN_API_KEY", "sk-9sdLTaRofvCIXznmikNf5WBlO8Tnmn7vkXwXtOJg3X5b5I4A")  # 腾讯云混元 API Key
+HUNYUAN_API_BASE = "https://api.hunyuan.cloud.tencent.com/v1"
+# 使用 hunyuan-a13b（混元第一个混合推理模型，80B总参数，13B激活，兼顾效果及推理性能）
+HUNYUAN_MODEL = os.getenv("HUNYUAN_MODEL", "hunyuan-a13b")  # 默认使用 hunyuan-a13b
+# 快思考模式开关（hunyuan-a13b 默认是慢思考模式，开启快思考模式可提升速度）
+HUNYUAN_FAST_THINKING = os.getenv("HUNYUAN_FAST_THINKING", "True").lower() == "true"  # 默认开启快思考模式
+
+# 兼容旧配置（如果设置了环境变量，优先使用）
+# 如果 HUNYUAN_API_KEY 未设置，尝试从旧配置读取
+if not HUNYUAN_API_KEY:
+    HUNYUAN_API_KEY = os.getenv("SILICONFLOW_API_KEY", "")
+
+# 硅基流动API配置（保留作为备用，如果腾讯云API不可用）
+SILICONFLOW_API_KEY = os.getenv("SILICONFLOW_API_KEY", "sk-tpoapasxdwjyexqfagbiigtvwsoydwravbptrmrrmwjfdwbh")
 SILICONFLOW_API_BASE = "https://api.siliconflow.cn/v1"
 SILICONFLOW_MODEL = "tencent/Hunyuan-A13B-Instruct"
 
