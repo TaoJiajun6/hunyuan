@@ -37,8 +37,8 @@ class HunyuanClient:
                 raise ValueError("未设置 HUNYUAN_API_KEY，请从 https://console.cloud.tencent.com/hunyuan/start 获取API密钥")
         else:
             # 使用硅基流动API（备用）
-            self.api_key = api_key or SILICONFLOW_API_KEY
-            self.api_base = api_base or SILICONFLOW_API_BASE
+        self.api_key = api_key or SILICONFLOW_API_KEY
+        self.api_base = api_base or SILICONFLOW_API_BASE
             self.model = model or SILICONFLOW_MODEL
             self.fast_thinking = False  # 硅基流动API不支持快思考模式
         
@@ -108,10 +108,10 @@ class HunyuanClient:
             extra_body["enable_enhancement"] = False  # 关闭功能增强以提升速度
         else:
             # 硅基流动API的扩展参数
-            if enable_thinking is not None:
-                extra_body["enable_thinking"] = enable_thinking
-            if thinking_budget is not None:
-                extra_body["thinking_budget"] = thinking_budget
+        if enable_thinking is not None:
+            extra_body["enable_thinking"] = enable_thinking
+        if thinking_budget is not None:
+            extra_body["thinking_budget"] = thinking_budget
         
         if extra_body:
             kwargs["extra_body"] = extra_body
@@ -187,10 +187,10 @@ class HunyuanClient:
                 extra_body["enable_enhancement"] = False
             else:
                 # 硅基流动API的扩展参数
-                if enable_thinking is not None:
-                    extra_body["enable_thinking"] = enable_thinking
-                if thinking_budget is not None:
-                    extra_body["thinking_budget"] = thinking_budget
+            if enable_thinking is not None:
+                extra_body["enable_thinking"] = enable_thinking
+            if thinking_budget is not None:
+                extra_body["thinking_budget"] = thinking_budget
             
             if extra_body:
                 kwargs["extra_body"] = extra_body
@@ -283,10 +283,10 @@ class HunyuanClient:
                 extra_body["enable_enhancement"] = False
             else:
                 # 硅基流动API的扩展参数
-                if enable_thinking is not None:
-                    extra_body["enable_thinking"] = enable_thinking
-                if thinking_budget is not None:
-                    extra_body["thinking_budget"] = thinking_budget
+            if enable_thinking is not None:
+                extra_body["enable_thinking"] = enable_thinking
+            if thinking_budget is not None:
+                extra_body["thinking_budget"] = thinking_budget
             
             if extra_body:
                 kwargs["extra_body"] = extra_body

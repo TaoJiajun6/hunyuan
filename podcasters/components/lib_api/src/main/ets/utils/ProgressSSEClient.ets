@@ -65,26 +65,52 @@ export class ProgressSSEClient {
           'Accept': 'text/event-stream',
           'Cache-Control': 'no-cache',
         },
-        // SSE连接需要保持长时间连接，设置更长的超时时间
-        // 使用与API_TIMEOUT相同的值（10分钟），确保能够接收完整的进度更新
-        readTimeout: PodcastConfig.API_TIMEOUT, // 10分钟读取超时（600000ms）
+        // 注意：HarmonyOS的http模块不支持真正的流式读取
+        // 响应会在连接建立后一次性返回，而不是持续推送
+        // 因此使用较短的超时时间，避免长时间等待
+        // 如果SSE连接失败，会自动回退到轮询方式
+        readTimeout: 60000, // 60秒读取超时（足够接收初始数据）
         connectTimeout: 30000, // 30秒连接超时（足够建立连接）
       };
 
       this.requestTask.request(url, options, (err: BusinessError, data: http.HttpResponse) => {
         if (err) {
-          // 检查是否是超时错误（错误码2300028）
-          const isTimeout = err.code === 2300028 || err.message?.includes('Timeout') || err.message?.includes('timeout');
-          if (isTimeout) {
-            Logger.warn(TAG, `SSE连接超时: ${JSON.stringify(err)}，这可能是正常的（连接保持时间较长）`);
-            // 超时不一定意味着失败，可能是连接保持时间较长
-            // 不立即触发错误，让调用方决定是否回退到轮询
+          // 检查错误类型
+          const errorCode = err.code || 0;
+          const errorMessage = err.message || '';
+          
+          // CURL错误码23：Failed writing received data to disk/application
+          // 这通常表示HarmonyOS的http模块不支持流式读取，导致数据写入失败
+          const isWriteError = errorCode === 2300023 || errorMessage.includes('Failed writing') || errorMessage.includes('writing received data');
+          
+          // 超时错误（错误码2300028）
+          const isTimeout = errorCode === 2300028 || errorMessage.includes('Timeout') || errorMessage.includes('timeout');
+          
+          if (isWriteError) {
+            // HarmonyOS的http模块不支持流式读取，这是已知限制
+            Logger.warn(TAG, `SSE连接失败（流式读取不支持）: ${JSON.stringify(err)}，将回退到轮询方式`);
+            // 创建一个特殊的错误，标识这是流式读取不支持的情况
+            const sseError = new Error('SSE流式读取不支持，请使用轮询方式');
+            (sseError as any).isSSENotSupported = true;
+            (sseError as any).originalError = err;
+            this.isConnected = false;
+            this.onError(sseError);
+            return;
+          } else if (isTimeout) {
+            Logger.warn(TAG, `SSE连接超时: ${JSON.stringify(err)}，将回退到轮询方式`);
+            // 超时也回退到轮询
+            const timeoutError = new Error('SSE连接超时，请使用轮询方式');
+            (timeoutError as any).isTimeout = true;
+            (timeoutError as any).originalError = err;
+            this.isConnected = false;
+            this.onError(timeoutError);
+            return;
           } else {
             Logger.error(TAG, `SSE连接失败: ${JSON.stringify(err)}`);
+            this.isConnected = false;
+            this.onError(new Error(err.message || 'SSE连接失败'));
+            return;
           }
-          this.isConnected = false;
-          this.onError(new Error(err.message || 'SSE连接失败'));
-          return;
         }
 
         if (data && data.responseCode === 200) {

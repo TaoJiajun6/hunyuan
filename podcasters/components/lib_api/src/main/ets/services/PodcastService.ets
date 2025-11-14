@@ -1,7 +1,6 @@
 import { http } from '@kit.NetworkKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { Logger } from 'lib_common';
-import { ProgressSSEClient } from '../utils/ProgressSSEClient';
 
 const TAG = '[PodcastService]';
 
@@ -26,7 +25,7 @@ export class PodcastConfig {
   // 5. 直连服务器IP（推荐，避免网关超时）：设置为服务器的公网/内网IP和端口
   //    例如：'http://9.165.4.87:8000' 或 'http://192.168.1.100:8000'
   //    注意：确保服务器防火墙允许8000端口访问
-  static readonly API_BASE_URL: string = 'http://43.134.95.42:8000/'; // 请替换为实际的服务器IP地址
+  static readonly API_BASE_URL: string = 'http://43.153.201.92:8000/'; // 请替换为实际的服务器IP地址
   static readonly API_TIMEOUT: number = 600000; // 10分钟超时（考虑大文件上传和播客生成时间）
 
   
@@ -93,9 +92,8 @@ export interface MultiRoleRequest {
  */
 export interface CharacterRequest {
   characters: CharacterInfo[];
-  text?: string; // 文本素材（如果使用text_file_url，此字段可为空）
-  text_file_url?: string; // 文本文件云存储URL（.txt或Word文件，如果提供，优先使用）
-  topic?: string; // 播客主题（可选，主要用于背景音乐选择，如果不提供文本素材则作为对话主题）
+  text: string; // 文本素材（必需）
+  topic?: string; // 播客主题（可选，主要用于背景音乐选择）
   silence_interval?: number;
   category?: string; // 播客分类（可选），用于背景音乐选择
   background_volume?: number; // 背景音乐音量（0.0-1.0），默认0.3
@@ -109,7 +107,7 @@ export interface DeepPodcastRequest {
   topic: string;
   role_voice_urls: Record<string, string>; // 角色名 -> 云存储URL
   
-  num_characters?: number; // 2-3
+  num_characters?: number; // 1-3
   depth_level?: string; // "深度" | "中等" | "浅层"
   silence_interval?: number;
   category?: string; // 播客分类（可选），用于背景音乐选择
@@ -401,6 +399,65 @@ export class PodcastService {
   }
 
   /**
+   * 启动进度轮询
+   * 使用HTTP GET请求定期获取任务进度（每2秒一次）
+   * 注意：HarmonyOS的http模块不支持SSE流式读取，因此使用轮询方式
+   * @param jobId 任务ID
+   * @param onProgress 进度回调
+   * @returns 返回清理函数，用于停止轮询
+   */
+  private startProgressPolling(
+    jobId: string,
+    onProgress: (progress: ProgressStatus) => void
+  ): () => void {
+    let pollingInterval: number | null = null;
+    let isPolling = true;
+
+    const poll = async () => {
+      if (!isPolling) {
+        return;
+      }
+
+      try {
+        const progress = await this.getProgress(jobId);
+        if (progress) {
+          onProgress(progress);
+          
+          // 如果任务完成，停止轮询
+          if (progress.done) {
+            Logger.info(TAG, `任务完成，停止轮询: job_id=${jobId}`);
+            isPolling = false;
+            if (pollingInterval !== null) {
+              clearTimeout(pollingInterval);
+              pollingInterval = null;
+            }
+            return;
+          }
+        }
+      } catch (error) {
+        Logger.error(TAG, `轮询进度失败: ${JSON.stringify(error)}`);
+      }
+
+      // 继续轮询（如果还在运行）
+      if (isPolling) {
+        pollingInterval = setTimeout(poll, 2000) as unknown as number; // 每2秒轮询一次
+      }
+    };
+
+    // 立即开始第一次轮询
+    poll();
+
+    // 返回清理函数
+    return () => {
+      isPolling = false;
+      if (pollingInterval !== null) {
+        clearTimeout(pollingInterval);
+        pollingInterval = null;
+      }
+    };
+  }
+
+  /**
    * 处理HTTP响应
    */
   private handleResponse<T>(
@@ -509,7 +566,7 @@ export class PodcastService {
   /**
    * 生成多角色互动播客
    * @param request 播客生成请求
-   * @param onProgress 进度回调（可选，用于SSE实时进度推送）
+   * @param onProgress 进度回调（可选，通过HTTP轮询获取进度更新）
    */
   async generateMultiRolePodcast(
     request: MultiRoleRequest,
@@ -594,25 +651,13 @@ export class PodcastService {
 
         Logger.info(TAG, `请求URL: ${apiUrl}, 请求体大小: ${requestData.length} bytes`);
 
-        // 如果提供了job_id和进度回调，启动SSE连接
-        let sseClient: ProgressSSEClient | null = null;
+        // 如果提供了job_id和进度回调，启动HTTP轮询获取进度
+        // 注意：HarmonyOS的http模块不支持SSE流式读取，因此直接使用轮询方式
+        let stopPolling: (() => void) | null = null;
+        
         if (request.job_id && onProgress) {
-          try {
-            sseClient = new ProgressSSEClient(
-              request.job_id,
-              onProgress,
-              (error) => {
-                Logger.warn(TAG, `SSE进度推送错误: ${error.message}，将回退到轮询方式`);
-                // SSE连接失败时，不阻止请求继续，但会失去实时推送
-                // 前端可以通过轮询接口获取进度（如果实现了fallback）
-              }
-            );
-            sseClient.connect();
-            Logger.info(TAG, `已启动SSE进度推送: job_id=${request.job_id}`);
-          } catch (sseError) {
-            Logger.warn(TAG, `SSE连接失败，将使用轮询方式: ${JSON.stringify(sseError)}`);
-            // SSE连接失败不影响主请求，只是失去实时推送功能
-          }
+          stopPolling = this.startProgressPolling(request.job_id, onProgress);
+          Logger.info(TAG, `已启动HTTP轮询进度更新: job_id=${request.job_id}`);
         }
 
         httpRequest.request(
@@ -621,9 +666,9 @@ export class PodcastService {
           (err: BusinessError, data: http.HttpResponse) => {
             httpRequest.destroy();
             
-            // 关闭SSE连接
-            if (sseClient) {
-              sseClient.close();
+            // 停止轮询（如果正在运行）
+            if (stopPolling) {
+              stopPolling();
             }
             
             const result = this.handleResponse<PodcastResult>(err, data || null, '多角色播客生成失败');
@@ -649,8 +694,8 @@ export class PodcastService {
   /**
    * 生成自定义角色播客
    * @param request 播客生成请求
-   * @param jobId 任务ID（可选，用于SSE进度推送）
-   * @param onProgress 进度回调（可选，用于SSE实时进度推送）
+   * @param jobId 任务ID（可选，用于HTTP轮询进度更新）
+   * @param onProgress 进度回调（可选，通过HTTP轮询获取进度更新）
    */
   async generateCharacterPodcast(
     request: CharacterRequest,
@@ -669,10 +714,10 @@ export class PodcastService {
           return;
         }
 
-        if (request.characters.length > 3) {
+        if (request.characters.length > 4) {
           resolve({
             success: false,
-            message: '最多支持3个角色',
+            message: '最多支持4个角色',
             error: '角色数量过多',
           });
           return;
@@ -726,22 +771,13 @@ export class PodcastService {
 
         Logger.info(TAG, `请求URL: ${apiUrl}, 请求体大小: ${requestData.length} bytes`);
 
-        // 如果提供了jobId和进度回调，启动SSE连接
-        let sseClient: ProgressSSEClient | null = null;
+        // 如果提供了jobId和进度回调，启动HTTP轮询获取进度
+        // 注意：HarmonyOS的http模块不支持SSE流式读取，因此直接使用轮询方式
+        let stopPolling: (() => void) | null = null;
+        
         if (jobId && onProgress) {
-          try {
-            sseClient = new ProgressSSEClient(
-              jobId,
-              onProgress,
-              (error) => {
-                Logger.error(TAG, `SSE进度推送错误: ${error.message}`);
-              }
-            );
-            sseClient.connect();
-            Logger.info(TAG, `已启动SSE进度推送: job_id=${jobId}`);
-          } catch (sseError) {
-            Logger.warn(TAG, `SSE连接失败，将使用轮询方式: ${JSON.stringify(sseError)}`);
-          }
+          stopPolling = this.startProgressPolling(jobId, onProgress);
+          Logger.info(TAG, `已启动HTTP轮询进度更新: job_id=${jobId}`);
         }
 
         httpRequest.request(
@@ -750,9 +786,9 @@ export class PodcastService {
           (err: BusinessError, data: http.HttpResponse) => {
             httpRequest.destroy();
             
-            // 关闭SSE连接
-            if (sseClient) {
-              sseClient.close();
+            // 停止轮询（如果正在运行）
+            if (stopPolling) {
+              stopPolling();
             }
             
             const result = this.handleResponse<PodcastResult>(err, data || null, '自定义角色播客生成失败');
@@ -840,8 +876,8 @@ export class PodcastService {
   /**
    * 生成主题深度播客
    * @param request 播客生成请求
-   * @param jobId 任务ID（可选，用于SSE进度推送）
-   * @param onProgress 进度回调（可选，用于SSE实时进度推送）
+   * @param jobId 任务ID（可选，用于HTTP轮询进度更新）
+   * @param onProgress 进度回调（可选，通过HTTP轮询获取进度更新）
    */
   async generateDeepPodcast(
     request: DeepPodcastRequest,
@@ -861,10 +897,10 @@ export class PodcastService {
         }
 
         const numCharacters = request.num_characters || 2;
-        if (numCharacters < 2 || numCharacters > 3) {
+        if (numCharacters < 1 || numCharacters > 3) {
           resolve({
             success: false,
-            message: '角色数量必须在2-3个之间',
+            message: '角色数量必须在1-3个之间',
             error: '角色数量无效',
           });
           return;
@@ -936,22 +972,13 @@ export class PodcastService {
 
         Logger.info(TAG, `请求URL: ${apiUrl}, 请求体大小: ${requestData.length} bytes`);
 
-        // 如果提供了jobId和进度回调，启动SSE连接
-        let sseClient: ProgressSSEClient | null = null;
+        // 如果提供了jobId和进度回调，启动HTTP轮询获取进度
+        // 注意：HarmonyOS的http模块不支持SSE流式读取，因此直接使用轮询方式
+        let stopPolling: (() => void) | null = null;
+        
         if (jobId && onProgress) {
-          try {
-            sseClient = new ProgressSSEClient(
-              jobId,
-              onProgress,
-              (error) => {
-                Logger.error(TAG, `SSE进度推送错误: ${error.message}`);
-              }
-            );
-            sseClient.connect();
-            Logger.info(TAG, `已启动SSE进度推送: job_id=${jobId}`);
-          } catch (sseError) {
-            Logger.warn(TAG, `SSE连接失败，将使用轮询方式: ${JSON.stringify(sseError)}`);
-          }
+          stopPolling = this.startProgressPolling(jobId, onProgress);
+          Logger.info(TAG, `已启动HTTP轮询进度更新: job_id=${jobId}`);
         }
 
         httpRequest.request(
@@ -960,9 +987,9 @@ export class PodcastService {
           (err: BusinessError, data: http.HttpResponse) => {
             httpRequest.destroy();
             
-            // 关闭SSE连接
-            if (sseClient) {
-              sseClient.close();
+            // 停止轮询（如果正在运行）
+            if (stopPolling) {
+              stopPolling();
             }
             
             const result = this.handleResponse<PodcastResult>(err, data || null, '主题深度播客生成失败');
