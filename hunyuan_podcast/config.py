@@ -46,15 +46,6 @@ HUNYUAN_MODEL = os.getenv("HUNYUAN_MODEL", "hunyuan-a13b")  # 默认使用 hunyu
 # 快思考模式开关（hunyuan-a13b 默认是慢思考模式，开启快思考模式可提升速度）
 HUNYUAN_FAST_THINKING = os.getenv("HUNYUAN_FAST_THINKING", "True").lower() == "true"  # 默认开启快思考模式
 
-# 兼容旧配置（如果设置了环境变量，优先使用）
-# 如果 HUNYUAN_API_KEY 未设置，尝试从旧配置读取
-if not HUNYUAN_API_KEY:
-    HUNYUAN_API_KEY = os.getenv("SILICONFLOW_API_KEY", "")
-
-# 硅基流动API配置（保留作为备用，如果腾讯云API不可用）
-SILICONFLOW_API_KEY = os.getenv("SILICONFLOW_API_KEY", "sk-tpoapasxdwjyexqfagbiigtvwsoydwravbptrmrrmwjfdwbh")
-SILICONFLOW_API_BASE = "https://api.siliconflow.cn/v1"
-SILICONFLOW_MODEL = "tencent/Hunyuan-A13B-Instruct"
 
 # SoulX-Podcast配置
 # 获取项目根目录（相对于当前文件）

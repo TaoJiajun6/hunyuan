@@ -137,24 +137,30 @@ export struct PodcastDeepPage {
     };
     
     try {
-      const request: DeepPodcastRequest = {
+      // 构建请求对象（先创建基础对象，避免结构化类型错误）
+      let request: DeepPodcastRequest = {
         topic: this.topic,
         role_voice_urls: this.roleVoiceUrls, // 强制使用云存储URL
         num_characters: this.numCharacters,
         depth_level: this.depthLevel,
         silence_interval: 300,
-        category: this.category.trim().length > 0 ? this.category : undefined, // 播客分类
         background_volume: 0.3, // 背景音乐音量，默认0.3
         job_id: this.jobId
       };
+      
+      // 根据条件添加可选属性（避免使用 undefined）
+      if (this.category.trim().length > 0) {
+        request.category = this.category; // 播客分类
+      }
 
       const response = await podcastService.generateDeepPodcast(request, this.jobId, onProgress);
 
       if (response.success && response.data) {
+        const resultData: PodcastResult = response.data;
         const params = new PodcastResultPageParams(
-          response.data,
+          resultData,
           '主题深度播客',
-          response.data.script
+          resultData.script
         );
         RouterUtils.pushPathByName(RouterMap.PODCAST_RESULT_PAGE, params);
       } else {
