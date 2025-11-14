@@ -1,27 +1,46 @@
 """
-硅基流动API客户端模块
-实现混元大模型tencent/Hunyuan-A13B-Instruct的调用
-使用 openai 库的 OpenAI 客户端
+腾讯云混元API客户端模块
+直接调用腾讯云混元大模型，速度更快
+使用 openai 库的 OpenAI 客户端（兼容 OpenAI 接口）
 """
 from typing import List, Dict, Optional, Iterator
 from openai import OpenAI
-from .config import SILICONFLOW_API_KEY, SILICONFLOW_API_BASE, SILICONFLOW_MODEL, DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS, DEFAULT_TOP_P
+from .config import (
+    HUNYUAN_API_KEY, HUNYUAN_API_BASE, HUNYUAN_MODEL, HUNYUAN_FAST_THINKING,
+    SILICONFLOW_API_KEY, SILICONFLOW_API_BASE, SILICONFLOW_MODEL,  # 保留作为备用
+    DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS, DEFAULT_TOP_P
+)
 
 
-class SiliconFlowClient:
-    """硅基流动API客户端"""
+class HunyuanClient:
+    """腾讯云混元API客户端"""
     
-    def __init__(self, api_key: Optional[str] = None, api_base: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, api_base: Optional[str] = None, model: Optional[str] = None, use_hunyuan: bool = True, fast_thinking: Optional[bool] = None):
         """
         初始化API客户端
         
         Args:
             api_key: API密钥，如果为None则使用配置文件中的密钥
             api_base: API基础URL，如果为None则使用配置文件中的URL
+            model: 模型名称，如果为None则使用配置文件中的模型
+            use_hunyuan: 是否使用腾讯云混元API（True）还是硅基流动API（False）
+            fast_thinking: 是否使用快思考模式（仅对 hunyuan-a13b 有效），如果为None则使用配置默认值
         """
-        self.api_key = api_key or SILICONFLOW_API_KEY
-        self.api_base = api_base or SILICONFLOW_API_BASE
-        self.model = SILICONFLOW_MODEL
+        self.use_hunyuan = use_hunyuan
+        if use_hunyuan:
+            # 使用腾讯云混元API
+            self.api_key = api_key or HUNYUAN_API_KEY
+            self.api_base = api_base or HUNYUAN_API_BASE
+            self.model = model or HUNYUAN_MODEL
+            self.fast_thinking = fast_thinking if fast_thinking is not None else HUNYUAN_FAST_THINKING
+            if not self.api_key:
+                raise ValueError("未设置 HUNYUAN_API_KEY，请从 https://console.cloud.tencent.com/hunyuan/start 获取API密钥")
+        else:
+            # 使用硅基流动API（备用）
+            self.api_key = api_key or SILICONFLOW_API_KEY
+            self.api_base = api_base or SILICONFLOW_API_BASE
+            self.model = model or SILICONFLOW_MODEL
+            self.fast_thinking = False  # 硅基流动API不支持快思考模式
         
         # 确保 base_url 以斜杠结尾（openai 库要求）
         if self.api_base and not self.api_base.endswith('/'):
@@ -58,10 +77,22 @@ class SiliconFlowClient:
         Returns:
             API响应结果（流式时返回迭代器，非流式时返回完整响应）
         """
+        # 处理快思考模式：在用户消息前添加 /no_think 前缀
+        import copy
+        processed_messages = copy.deepcopy(messages)
+        if self.use_hunyuan and self.fast_thinking:
+            # 对于 hunyuan-a13b，在用户消息前添加 /no_think 以启用快思考模式
+            for msg in processed_messages:
+                if msg.get("role") == "user" and msg.get("content"):
+                    content = msg["content"]
+                    # 如果还没有 /no_think 前缀，则添加
+                    if not content.strip().startswith("/no_think"):
+                        msg["content"] = f"/no_think {content}"
+        
         # 构建请求参数
         kwargs = {
             "model": self.model,
-            "messages": messages,
+            "messages": processed_messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
             "top_p": top_p,
@@ -70,10 +101,17 @@ class SiliconFlowClient:
         
         # 添加扩展参数（如果提供，使用 extra_body 传递）
         extra_body = {}
-        if enable_thinking is not None:
-            extra_body["enable_thinking"] = enable_thinking
-        if thinking_budget is not None:
-            extra_body["thinking_budget"] = thinking_budget
+        if self.use_hunyuan:
+            # 腾讯云混元API的自定义参数
+            # 根据文档，可以使用 enable_enhancement 等参数
+            # 为了速度，默认关闭功能增强（enable_enhancement=False）
+            extra_body["enable_enhancement"] = False  # 关闭功能增强以提升速度
+        else:
+            # 硅基流动API的扩展参数
+            if enable_thinking is not None:
+                extra_body["enable_thinking"] = enable_thinking
+            if thinking_budget is not None:
+                extra_body["thinking_budget"] = thinking_budget
         
         if extra_body:
             kwargs["extra_body"] = extra_body
@@ -120,7 +158,12 @@ class SiliconFlowClient:
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
+        # 处理快思考模式：在用户消息前添加 /no_think 前缀
+        user_content = prompt
+        if self.use_hunyuan and self.fast_thinking:
+            if not user_content.strip().startswith("/no_think"):
+                user_content = f"/no_think {user_content}"
+        messages.append({"role": "user", "content": user_content})
         
         # 使用流式输出收集完整内容
         content = ""
@@ -139,10 +182,15 @@ class SiliconFlowClient:
             
             # 添加扩展参数（如果提供，使用 extra_body 传递）
             extra_body = {}
-            if enable_thinking is not None:
-                extra_body["enable_thinking"] = enable_thinking
-            if thinking_budget is not None:
-                extra_body["thinking_budget"] = thinking_budget
+            if self.use_hunyuan:
+                # 腾讯云混元API：关闭功能增强以提升速度
+                extra_body["enable_enhancement"] = False
+            else:
+                # 硅基流动API的扩展参数
+                if enable_thinking is not None:
+                    extra_body["enable_thinking"] = enable_thinking
+                if thinking_budget is not None:
+                    extra_body["thinking_budget"] = thinking_budget
             
             if extra_body:
                 kwargs["extra_body"] = extra_body
@@ -210,7 +258,12 @@ class SiliconFlowClient:
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
+        # 处理快思考模式：在用户消息前添加 /no_think 前缀
+        user_content = prompt
+        if self.use_hunyuan and self.fast_thinking:
+            if not user_content.strip().startswith("/no_think"):
+                user_content = f"/no_think {user_content}"
+        messages.append({"role": "user", "content": user_content})
         
         try:
             # 构建请求参数
@@ -225,10 +278,15 @@ class SiliconFlowClient:
             
             # 添加扩展参数（如果提供，使用 extra_body 传递）
             extra_body = {}
-            if enable_thinking is not None:
-                extra_body["enable_thinking"] = enable_thinking
-            if thinking_budget is not None:
-                extra_body["thinking_budget"] = thinking_budget
+            if self.use_hunyuan:
+                # 腾讯云混元API：关闭功能增强以提升速度
+                extra_body["enable_enhancement"] = False
+            else:
+                # 硅基流动API的扩展参数
+                if enable_thinking is not None:
+                    extra_body["enable_thinking"] = enable_thinking
+                if thinking_budget is not None:
+                    extra_body["thinking_budget"] = thinking_budget
             
             if extra_body:
                 kwargs["extra_body"] = extra_body
@@ -268,11 +326,23 @@ class SiliconFlowClient:
 
 
 # 创建全局客户端实例
-_client_instance: Optional[SiliconFlowClient] = None
+_client_instance: Optional[HunyuanClient] = None
 
-def get_client() -> SiliconFlowClient:
-    """获取全局API客户端实例"""
+def get_client(use_hunyuan: bool = True) -> HunyuanClient:
+    """
+    获取全局API客户端实例
+    
+    Args:
+        use_hunyuan: 是否使用腾讯云混元API（True）还是硅基流动API（False）
+    
+    Returns:
+        API客户端实例
+    """
     global _client_instance
-    if _client_instance is None:
-        _client_instance = SiliconFlowClient()
+    if _client_instance is None or _client_instance.use_hunyuan != use_hunyuan:
+        _client_instance = HunyuanClient(use_hunyuan=use_hunyuan)
     return _client_instance
+
+
+# 为了兼容性，保留 SiliconFlowClient 作为别名
+SiliconFlowClient = HunyuanClient

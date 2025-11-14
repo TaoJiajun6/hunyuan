@@ -14,7 +14,9 @@ from pathlib import Path
 if "HF_ENDPOINT" not in os.environ:
     os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
-from .api_client import get_client, SiliconFlowClient
+from .api_client import get_client, HunyuanClient
+# 为了兼容性，保留 SiliconFlowClient 作为别名
+SiliconFlowClient = HunyuanClient
 from .text_processor import TextProcessor
 from .utils import (
     concatenate_audios,
@@ -39,7 +41,7 @@ class PodcastGenerator:
         llm_engine: Optional[str] = None,
         fp16_flow: Optional[bool] = None,
         device: Optional[str] = None,
-        api_client: Optional[SiliconFlowClient] = None
+        api_client: Optional[HunyuanClient] = None
     ):
         """
         初始化播客生成器
