@@ -25,7 +25,7 @@ export class PodcastConfig {
   // 5. 直连服务器IP（推荐，避免网关超时）：设置为服务器的公网/内网IP和端口
   //    例如：'http://9.165.4.87:8000' 或 'http://192.168.1.100:8000'
   //    注意：确保服务器防火墙允许8000端口访问
-  static readonly API_BASE_URL: string = 'http://43.153.201.92:8000/'; // 请替换为实际的服务器IP地址
+  static readonly API_BASE_URL: string = 'http://43.156.240.38:8000/'; // 请替换为实际的服务器IP地址
   static readonly API_TIMEOUT: number = 600000; // 10分钟超时（考虑大文件上传和播客生成时间）
 
   
@@ -440,7 +440,7 @@ export class PodcastService {
 
       // 继续轮询（如果还在运行）
       if (isPolling) {
-        pollingInterval = setTimeout(poll, 2000) as unknown as number; // 每2秒轮询一次
+        pollingInterval = setTimeout(poll, 2000) as number; // 每2秒轮询一次
       }
     };
 
