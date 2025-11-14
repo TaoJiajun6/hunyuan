@@ -293,15 +293,15 @@ export struct PodcastMultiRolePage {
         }
         // 如果进度中已有URL，说明已通过SSE回调处理，不再重复跳转
         if (!this.savedAudioUrl) {
-          const params = new PodcastResultPageParams(
-            response.data,
-            '多角色互动播客',
-            response.data.script
-          );
-          RouterUtils.pushPathByName(RouterMap.PODCAST_RESULT_PAGE, params);
-          // 清除保存的 URL（已成功获取响应）
-          this.savedAudioUrl = '';
-          this.savedScript = '';
+        const params = new PodcastResultPageParams(
+          response.data,
+          '多角色互动播客',
+          response.data.script
+        );
+        RouterUtils.pushPathByName(RouterMap.PODCAST_RESULT_PAGE, params);
+        // 清除保存的 URL（已成功获取响应）
+        this.savedAudioUrl = '';
+        this.savedScript = '';
         }
       } else {
         // 响应失败，但如果进度中有 URL，会在SSE回调中处理
