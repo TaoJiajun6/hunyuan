@@ -189,8 +189,8 @@ class TextProcessor:
                 if content_after:
                     # 清理对话内容
                     content_after = self.clean_dialogue_content(content_after)
-                    if content_after:
-                        current_content.append(content_after)
+                if content_after:
+                    current_content.append(content_after)
         
         # 保存最后一个角色的对话
         if current_role and current_content:
@@ -622,7 +622,7 @@ class TextProcessor:
 - **可选格式**：`[角色名]（情绪地）对话内容`（支持情绪标注，但情绪标注是可选的）
 - **重要**：不要使用冒号，直接写对话内容
 - 每行一个角色的发言，角色之间建议有空行间隔，让对话更清晰
-- 角色名称必须使用：{role_list}（不要使用其他名称）
+   - 角色名称必须使用：{role_list}（不要使用其他名称）
 - **对话长度**：生成足够长的对话内容，确保播客时长达到4-5分钟
 - **对话数量**：每个角色发言10-12次即可，总共约{num_characters * 11}段对话（优化：减少段数以提升生成速度）
 - **对话深度**：每段对话内容要充实，每句话至少50-80字（优化：增加单段长度以减少总段数），包含具体观点、例子、解释或讨论

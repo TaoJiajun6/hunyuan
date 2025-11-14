@@ -456,6 +456,22 @@ export struct PodcastCharacterPage {
 
         // 生成按钮
         Column() {
+          // 进度条与提示
+          if (this.isLoading) {
+            Column({ space: 6 }) {
+              Progress({ value: this.progressPercent })
+                .style({
+                  strokeWidth: 12
+                })
+                .width('100%')
+              Text(this.progressMessage || '生成中...')
+                .fontSize($r('sys.float.Body_S'))
+                .fontColor($r('sys.color.font_secondary'))
+                .alignSelf(ItemAlign.Start)
+            }
+            .width('100%')
+            .padding({ left: 16, right: 16, bottom: 8 })
+          }
           Button(this.isLoading ? '生成中...' : '开始生成')
             .width('100%')
             .height(40)
