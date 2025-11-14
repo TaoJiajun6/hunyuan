@@ -12,9 +12,10 @@ import requests
 import json
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request, BackgroundTasks
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
+import asyncio
 from pydantic import BaseModel, Field, ValidationError
 import uvicorn
 import glob
@@ -54,6 +55,8 @@ logger = logging.getLogger(__name__)
 _PROGRESS_DIR = os.path.join(os.getcwd(), 'outputs', 'progress')
 os.makedirs(_PROGRESS_DIR, exist_ok=True)
 _PROGRESS_CACHE: Dict[str, Dict[str, Any]] = {}
+# SSE连接管理：存储每个job_id的SSE连接队列
+_PROGRESS_SSE_QUEUES: Dict[str, asyncio.Queue] = {}
 
 def _progress_path(job_id: str) -> str:
     return os.path.join(_PROGRESS_DIR, f"{job_id}.json")
@@ -90,6 +93,16 @@ def _update_progress(job_id: Optional[str], phase: str, percent: int, message: s
             json.dump(data, f, ensure_ascii=False)
     except Exception:
         pass
+    
+    # 如果有SSE连接，推送进度更新
+    if job_id in _PROGRESS_SSE_QUEUES:
+        queue = _PROGRESS_SSE_QUEUES[job_id]
+        try:
+            # 非阻塞方式放入队列
+            queue.put_nowait(data)
+        except asyncio.QueueFull:
+            # 队列满了，忽略（不应该发生，因为只有一个连接）
+            pass
 
 def _get_progress(job_id: str) -> Dict[str, Any]:
     if job_id in _PROGRESS_CACHE:
@@ -150,25 +163,34 @@ async def log_requests(request: Request, call_next):
     method = request.method
     path = request.url.path
     
-    # 记录请求信息
-    content_length = request.headers.get("content-length")
-    if content_length:
-        content_length_mb = int(content_length) / (1024 * 1024)
-        logger.info(f"收到请求: {method} {path} from {client_ip}, Content-Length: {content_length_mb:.2f} MB")
-        
-        # 检查Content-Length
-        if int(content_length) > MAX_REQUEST_BODY_SIZE:
-            logger.warning(f"请求体过大: {content_length_mb:.2f} MB (限制: {MAX_REQUEST_BODY_SIZE / 1024 / 1024:.2f} MB)")
-            return JSONResponse(
-                status_code=413,
-                content={
-                    "success": False,
-                    "message": "请求体过大",
-                    "error": f"请求体大小 {content_length_mb:.2f} MB 超过限制 {MAX_REQUEST_BODY_SIZE / 1024 / 1024:.2f} MB"
-                }
-            )
-    else:
-        logger.info(f"收到请求: {method} {path} from {client_ip}")
+    # 过滤进度查询请求（GET /api/v1/podcast/progress/xxx），避免日志被轮询覆盖
+    # 但保留SSE连接请求的日志（/stream端点）
+    is_progress_poll = (
+        method == "GET" and 
+        path.startswith("/api/v1/podcast/progress/") and 
+        not path.endswith("/stream")
+    )
+    
+    if not is_progress_poll:
+        # 记录请求信息（非进度查询请求）
+        content_length = request.headers.get("content-length")
+        if content_length:
+            content_length_mb = int(content_length) / (1024 * 1024)
+            logger.info(f"收到请求: {method} {path} from {client_ip}, Content-Length: {content_length_mb:.2f} MB")
+            
+            # 检查Content-Length
+            if int(content_length) > MAX_REQUEST_BODY_SIZE:
+                logger.warning(f"请求体过大: {content_length_mb:.2f} MB (限制: {MAX_REQUEST_BODY_SIZE / 1024 / 1024:.2f} MB)")
+                return JSONResponse(
+                    status_code=413,
+                    content={
+                        "success": False,
+                        "message": "请求体过大",
+                        "error": f"请求体大小 {content_length_mb:.2f} MB 超过限制 {MAX_REQUEST_BODY_SIZE / 1024 / 1024:.2f} MB"
+                    }
+                )
+        else:
+            logger.info(f"收到请求: {method} {path} from {client_ip}")
     
     # 对于POST请求，尝试记录请求体（仅用于调试）
     if method == "POST" and path.startswith("/api/v1/podcast"):
@@ -237,7 +259,11 @@ async def log_requests(request: Request, call_next):
     response = await call_next(request)
     
     process_time = time.time() - start_time
-    logger.info(f"请求完成: {method} {path} - 状态码: {response.status_code} - 耗时: {process_time:.2f}s")
+    
+    # 记录响应信息（非进度查询请求）
+    if not is_progress_poll:
+        status_code = response.status_code
+        logger.info(f"请求完成: {method} {path} - 状态码: {status_code} - 耗时: {process_time:.2f}s")
     
     return response
 
@@ -1939,12 +1965,77 @@ async def get_podcast_file(file_id: str):
 @app.get("/api/v1/podcast/progress/{job_id}")
 async def get_progress(job_id: str):
     """
-    获取任务进度（前端可每秒轮询）
+    获取任务进度（兼容轮询方式，但不推荐使用）
+    推荐使用 SSE 端点：/api/v1/podcast/progress/{job_id}/stream
     """
     try:
         return _get_progress(job_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/podcast/progress/{job_id}/stream")
+async def stream_progress(job_id: str):
+    """
+    使用 Server-Sent Events (SSE) 实时推送任务进度
+    前端通过 EventSource 连接此端点，无需轮询
+    
+    使用示例（JavaScript）：
+    ```javascript
+    const eventSource = new EventSource(`/api/v1/podcast/progress/${jobId}/stream`);
+    eventSource.onmessage = (event) => {
+        const progress = JSON.parse(event.data);
+        console.log('进度更新:', progress);
+        // 更新UI
+    };
+    eventSource.onerror = (error) => {
+        console.error('SSE连接错误:', error);
+        eventSource.close();
+    };
+    ```
+    """
+    async def event_generator():
+        # 创建SSE队列
+        queue = asyncio.Queue()
+        _PROGRESS_SSE_QUEUES[job_id] = queue
+        
+        try:
+            # 先发送当前进度（如果有）
+            current_progress = _get_progress(job_id)
+            if current_progress.get("phase") != "unknown":
+                yield f"data: {json.dumps(current_progress, ensure_ascii=False)}\n\n"
+            
+            # 持续监听进度更新
+            while True:
+                try:
+                    # 等待进度更新，设置超时以避免连接挂起
+                    progress_data = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield f"data: {json.dumps(progress_data, ensure_ascii=False)}\n\n"
+                    
+                    # 如果任务完成或失败，关闭连接
+                    if progress_data.get("done", False):
+                        break
+                except asyncio.TimeoutError:
+                    # 发送心跳保持连接
+                    yield f": heartbeat\n\n"
+                    continue
+        except asyncio.CancelledError:
+            # 客户端断开连接
+            pass
+        finally:
+            # 清理SSE队列
+            if job_id in _PROGRESS_SSE_QUEUES:
+                del _PROGRESS_SSE_QUEUES[job_id]
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # 禁用nginx缓冲
+        }
+    )
 
 
 if __name__ == "__main__":

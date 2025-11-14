@@ -1,6 +1,6 @@
 import { RouterMap, RouterUtils, WindowModel } from 'lib_common';
 import { NavHeaderBar } from 'lib_widget';
-import { podcastService, DeepPodcastRequest, PodcastResult } from 'lib_api';
+import { podcastService, DeepPodcastRequest, PodcastResult, ProgressStatus } from 'lib_api';
 import { FileUtils } from '../../utils/FileUtils';
 import { promptAction, AppStorageV2 } from '@kit.ArkUI';
 import { PodcastResultPageParams } from './PodcastResultPage';
@@ -18,6 +18,9 @@ export struct PodcastDeepPage {
   @Local numCharacters: number = 2;
   @Local depthLevel: string = '深度';
   @Local isLoading: boolean = false;
+  @Local jobId: string = '';
+  @Local progressPercent: number = 0;
+  @Local progressMessage: string = '';
   @Local windowModel: WindowModel = AppStorageV2.connect(WindowModel, () => new WindowModel())!;
 
   readonly depthLevels: string[] = ['深度', '中等', '浅层'];
@@ -80,6 +83,25 @@ export struct PodcastDeepPage {
     }
 
     this.isLoading = true;
+    // 生成一个任务ID用于SSE进度推送
+    this.jobId = `${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
+    this.progressPercent = 1;
+    this.progressMessage = '任务已提交';
+    
+    // SSE进度回调
+    const onProgress = (progress: ProgressStatus) => {
+      this.progressPercent = progress.percent || 0;
+      this.progressMessage = progress.message || '';
+      
+      // 如果任务失败，显示错误
+      if (progress.done && progress.error) {
+        promptAction.showToast({
+          message: progress.error || '生成失败',
+          duration: 3000
+        });
+      }
+    };
+    
     try {
       const request: DeepPodcastRequest = {
         topic: this.topic,
@@ -89,7 +111,7 @@ export struct PodcastDeepPage {
         silence_interval: 300
       };
 
-      const response = await podcastService.generateDeepPodcast(request);
+      const response = await podcastService.generateDeepPodcast(request, this.jobId, onProgress);
 
       if (response.success && response.data) {
         const params = new PodcastResultPageParams(
