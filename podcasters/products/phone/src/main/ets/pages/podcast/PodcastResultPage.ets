@@ -352,7 +352,7 @@ export struct PodcastResultPage {
                   .alignItems(HorizontalAlign.Start)
                   .padding(12)
                 }
-                .height(200)
+                .layoutWeight(1)
                 .borderRadius(8)
                 .backgroundColor($r('sys.color.background_primary'))
               }

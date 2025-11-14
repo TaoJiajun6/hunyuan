@@ -558,6 +558,7 @@ export struct PodcastMultiRolePage {
                 Button(this.textFileUrl ? '已选择' : '选择文件')
                   .fontSize($r('sys.float.Body_S'))
                   .type(ButtonType.Normal)
+                  .borderRadius(10)
                   .backgroundColor(this.textFileUrl ?
                     $r('sys.color.icon_emphasize') :
                     $r('sys.color.comp_background_tertiary'))
@@ -594,6 +595,7 @@ export struct PodcastMultiRolePage {
                   Button(this.roleVoiceUrls[roleName] ? '已选择' : '选择音色')
                     .fontSize($r('sys.float.Body_S'))
                     .type(ButtonType.Normal)
+                    .borderRadius(10)
                     .backgroundColor(this.roleVoiceUrls[roleName] ?
                       $r('sys.color.icon_emphasize') :
                       $r('sys.color.comp_background_tertiary'))
