@@ -12,6 +12,10 @@ from .config import MUSIC_DIR
 from .api_client import get_client
 from .cloud_storage_music import get_cloud_music_client, CloudStorageMusicClient
 
+# 全局音乐文件列表缓存（跨实例共享）
+_global_music_cache: Optional[List[Dict[str, str]]] = None
+_global_music_cache_cloud_client_id: Optional[str] = None
+
 
 class MusicSelector:
     """音乐选择器"""
@@ -153,11 +157,22 @@ class MusicSelector:
     def scan_music_files_metadata_only(self) -> List[Dict[str, str]]:
         """
         扫描音乐文件，只获取元数据，不预下载文件
-        优化性能：避免在扫描时下载所有文件
+        优化性能：避免在扫描时下载所有文件，使用全局缓存
         
         Returns:
             音乐文件列表，每个元素包含 {'path': 文件路径（可能为None）, 'name': 文件名, 'style': 推断的风格, 'cloud_path': 云存储路径（如果有）, 'url': 下载URL（如果有）}
         """
+        global _global_music_cache, _global_music_cache_cloud_client_id
+        
+        # 使用全局缓存（如果云存储客户端相同）
+        cloud_client_id = None
+        if self.cloud_client:
+            cloud_client_id = f"{self.cloud_client.bucket}:{self.cloud_client.music_path}"
+        
+        if _global_music_cache is not None and _global_music_cache_cloud_client_id == cloud_client_id:
+            print(f"使用全局缓存的音乐文件列表: {len(_global_music_cache)} 个文件")
+            return _global_music_cache
+        
         music_files = []
         
         # 优先尝试从云存储获取（只获取列表，不下载）
@@ -167,6 +182,9 @@ class MusicSelector:
                 cloud_files = self.cloud_client.list_music_files()
                 if cloud_files:
                     print(f"✓ 从云存储获取到 {len(cloud_files)} 个音乐文件（仅元数据，未下载）")
+                    # 更新全局缓存
+                    _global_music_cache = cloud_files
+                    _global_music_cache_cloud_client_id = cloud_client_id
                     # 不预下载，只返回元数据
                     return cloud_files
                 else:
@@ -201,6 +219,9 @@ class MusicSelector:
                 })
         
         print(f"从本地扫描到 {len(music_files)} 个音乐文件")
+        # 更新全局缓存
+        _global_music_cache = music_files
+        _global_music_cache_cloud_client_id = cloud_client_id
         return music_files
     
     def _download_music_if_needed(self, music_info: Dict[str, str]) -> Optional[str]:
@@ -287,47 +308,43 @@ class MusicSelector:
             else:
                 return []
         
-        # 构建选择提示词
+        # 优化：如果音乐文件数量较少（<=5个），直接使用关键词匹配，避免AI调用
+        if len(music_files) <= 5:
+            print(f"音乐文件数量较少（{len(music_files)}个），使用关键词匹配，跳过AI调用以提升性能")
+            return self._select_music_by_keywords(text, topic, scene_types, music_files, num_music)
+        
+        # 构建选择提示词（优化：缩短文本预览，减少prompt长度）
         music_list_str = "\n".join([
-            f"- {i+1}. {m['name']} (风格: {m['style']})"
+            f"{i+1}. {m['name']} ({m['style']})"
             for i, m in enumerate(music_files)
         ])
         
         # 构建场景描述
         scene_desc = ""
         if scene_types:
-            scene_desc = f"场景类型：{', '.join(scene_types)}\n"
+            scene_desc = f"场景：{', '.join(scene_types[:3])}\n"  # 限制场景数量
         
-        selection_prompt = f"""你是一位专业的播客音乐总监。请根据以下信息，从音乐库中选择最合适的背景音乐。
+        # 优化：缩短prompt，减少文本预览长度
+        text_preview = text[:300] if len(text) > 300 else text
+        
+        selection_prompt = f"""从以下音乐中选择最合适的背景音乐：
 
-播客信息：
-- 播客名称：{podcast_name or "未指定"}
-- 主题：{topic or "未指定"}
-{scene_desc}
-文本内容预览：{text[:500]}...
+播客：{podcast_name or "未指定"}
+主题：{topic or "未指定"}
+{scene_desc}文本：{text_preview}...
 
-可用音乐库：
+音乐库：
 {music_list_str}
 
-选择要求：
-1. 根据播客的主题、场景类型和文本内容，选择最匹配的音乐
-2. 音乐应该能够增强播客的氛围，不干扰对话
-3. 优先选择与场景类型匹配的音乐（如访谈场景选择interview风格，商务场景选择corporate风格）
-4. 如果场景类型不明确，选择chill或general风格的音乐
-
-请返回JSON格式，包含选中的音乐编号（从1开始）：
-{{
-    "selected_music": [音乐编号1, 音乐编号2, ...],
-    "reason": "选择理由（简要说明）"
-}}
-
-请直接返回JSON，不要添加其他说明。"""
+要求：根据主题和场景选择匹配的音乐。返回JSON：
+{{"selected_music": [编号], "reason": "理由"}}"""
         
         try:
+            # 优化：降低max_tokens，加快响应速度
             response = self.api_client.generate_text(
                 prompt=selection_prompt,
                 temperature=0.7,
-                max_tokens=500
+                max_tokens=200  # 从500降低到200，减少生成时间
             )
             
             # 提取JSON
@@ -435,18 +452,12 @@ class MusicSelector:
         # 选择前num_music个，处理云存储文件
         selected = []
         for _, music in scores[:num_music]:
-            music_path = music.get('path')
-            
-            # 如果是云存储文件，需要先下载
-            if 'cloud_path' in music and self.cloud_client:
-                cloud_path = music['cloud_path']
-                local_path = self.cloud_client.download_music_file(cloud_path)
-                if local_path:
-                    selected.append(local_path)
-                else:
-                    print(f"警告：无法下载云存储文件 {cloud_path}，跳过")
-            elif music_path:
-                selected.append(music_path)
+            # 使用统一的下载方法
+            local_path = self._download_music_if_needed(music)
+            if local_path:
+                selected.append(local_path)
+            else:
+                print(f"警告：无法获取音乐文件 {music.get('name', 'unknown')}，跳过")
         
         print(f"基于关键词选择音乐: {[os.path.basename(p) for p in selected]}")
         return selected

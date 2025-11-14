@@ -26,5 +26,8 @@ export {
   CharacterRequest,
   DeepPodcastRequest,
   ApiResponse,
-  PodcastResult
+  PodcastResult,
+  ProgressStatus,
+  AnalyzeTextRequest,
+  AnalyzeTextResult
 } from './src/main/ets/services/PodcastService'

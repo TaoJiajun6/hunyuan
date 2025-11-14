@@ -1,6 +1,6 @@
 import { RouterMap, RouterUtils, WindowModel } from 'lib_common';
 import { NavHeaderBar } from 'lib_widget';
-import { podcastService, MultiRoleRequest, PodcastResult } from 'lib_api';
+import { podcastService, MultiRoleRequest, PodcastResult, ProgressStatus } from 'lib_api';
 import { FileUtils, TextFileInfo } from '../../utils/FileUtils';
 import { promptAction, AppStorageV2 } from '@kit.ArkUI';
 import { PodcastResultPageParams } from './PodcastResultPage';
@@ -31,7 +31,7 @@ export struct PodcastMultiRolePage {
   @Local jobId: string = '';
   @Local progressPercent: number = 0;
   @Local progressMessage: string = '';
-  private progressTimer: number = 0;
+  private progressTimer: number = 0; // 保留用于fallback轮询
   @Local windowModel: WindowModel = AppStorageV2.connect(WindowModel, () => new WindowModel())!;
   // 输入类型选项列表
   private readonly inputTypeOptions: SelectOption[] = [
@@ -230,12 +230,47 @@ export struct PodcastMultiRolePage {
     }
 
     this.isLoading = true;
-    // 生成一个任务ID用于进度轮询
+    // 生成一个任务ID用于SSE进度推送
     this.jobId = `${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
     this.progressPercent = 1;
     this.progressMessage = '任务已提交';
-    // 启动进度轮询
-    this.startProgressPolling();
+    
+    // SSE进度回调
+    const onProgress = (progress: ProgressStatus) => {
+      this.progressPercent = progress.percent || 0;
+      this.progressMessage = progress.message || '';
+      
+      // 如果任务完成且有音频URL，保存并跳转
+      if (progress.done && progress.audio_url) {
+        this.savedAudioUrl = progress.audio_url;
+        // 如果已有保存的script，可以跳转到结果页
+        if (this.savedScript) {
+          const resultData: PodcastResult = {
+            audio_path: '',
+            file_size_mb: 0,
+            script: this.savedScript,
+            audio_url: progress.audio_url
+          };
+          const params = new PodcastResultPageParams(
+            resultData,
+            '多角色互动播客',
+            this.savedScript
+          );
+          RouterUtils.pushPathByName(RouterMap.PODCAST_RESULT_PAGE, params);
+          this.savedAudioUrl = '';
+          this.savedScript = '';
+        }
+      }
+      
+      // 如果任务失败，显示错误
+      if (progress.done && progress.error) {
+        promptAction.showToast({
+          message: progress.error || '生成失败',
+          duration: 3000
+        });
+      }
+    };
+    
     try {
       const request: MultiRoleRequest = {
         text: hasText ? this.text : '', // 如果使用文件或URL，text可以为空
@@ -249,13 +284,15 @@ export struct PodcastMultiRolePage {
         job_id: this.jobId
       } as MultiRoleRequest;
 
-      const response = await podcastService.generateMultiRolePodcast(request);
+      const response = await podcastService.generateMultiRolePodcast(request, onProgress);
 
       if (response.success && response.data) {
         // 保存 script，以便在响应失败时也能使用
         if (response.data.script) {
           this.savedScript = response.data.script;
         }
+        // 如果进度中已有URL，说明已通过SSE回调处理，不再重复跳转
+        if (!this.savedAudioUrl) {
         const params = new PodcastResultPageParams(
           response.data,
           '多角色互动播客',
@@ -265,8 +302,9 @@ export struct PodcastMultiRolePage {
         // 清除保存的 URL（已成功获取响应）
         this.savedAudioUrl = '';
         this.savedScript = '';
+        }
       } else {
-        // 响应失败，但如果进度中有 URL，会在进度轮询中处理
+        // 响应失败，但如果进度中有 URL，会在SSE回调中处理
         // 这里只显示错误提示，不阻止使用进度中的 URL
         if (!this.savedAudioUrl) {
           promptAction.showToast({
@@ -282,10 +320,12 @@ export struct PodcastMultiRolePage {
       });
     } finally {
       this.isLoading = false;
+      // 停止轮询（如果SSE失败，可能启动了fallback轮询）
       this.stopProgressPolling();
-      this.progressPercent = 0;
-      this.progressMessage = '';
-      this.jobId = '';
+      // 不立即清除进度，让用户看到最终状态
+      // this.progressPercent = 0;
+      // this.progressMessage = '';
+      // this.jobId = '';
     }
   }
 

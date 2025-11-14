@@ -1,6 +1,7 @@
 import { http } from '@kit.NetworkKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { Logger } from 'lib_common';
+import { ProgressSSEClient } from '../utils/ProgressSSEClient';
 
 const TAG = '[PodcastService]';
 
@@ -25,10 +26,10 @@ export class PodcastConfig {
   // 5. 直连服务器IP（推荐，避免网关超时）：设置为服务器的公网/内网IP和端口
   //    例如：'http://9.165.4.87:8000' 或 'http://192.168.1.100:8000'
   //    注意：确保服务器防火墙允许8000端口访问
-  static readonly API_BASE_URL: string = 'http://43.156.99.188:8000/'; // 请替换为实际的服务器IP地址
+  static readonly API_BASE_URL: string = 'http://43.156.84.42:8000/'; // 请替换为实际的服务器IP地址
   static readonly API_TIMEOUT: number = 600000; // 10分钟超时（考虑大文件上传和播客生成时间）
 
-
+  
   // 是否使用云函数（如果使用云函数，路径可能不同）
   // 云函数通过HTTP触发器调用，URL格式通常为：https://your-cloud-function-url.com
   // 本地/远程服务器URL格式：http://ip:port 或 https://domain.com
@@ -499,8 +500,13 @@ export class PodcastService {
 
   /**
    * 生成多角色互动播客
+   * @param request 播客生成请求
+   * @param onProgress 进度回调（可选，用于SSE实时进度推送）
    */
-  async generateMultiRolePodcast(request: MultiRoleRequest): Promise<ApiResponse<PodcastResult>> {
+  async generateMultiRolePodcast(
+    request: MultiRoleRequest,
+    onProgress?: (progress: ProgressStatus) => void
+  ): Promise<ApiResponse<PodcastResult>> {
     return new Promise<ApiResponse<PodcastResult>>((resolve) => {
       try {
         // 验证请求参数（text、text_file_url或input_url至少有一个）
@@ -580,11 +586,35 @@ export class PodcastService {
 
         Logger.info(TAG, `请求URL: ${apiUrl}, 请求体大小: ${requestData.length} bytes`);
 
+        // 如果提供了job_id和进度回调，启动SSE连接
+        let sseClient: ProgressSSEClient | null = null;
+        if (request.job_id && onProgress) {
+          try {
+            sseClient = new ProgressSSEClient(
+              request.job_id,
+              onProgress,
+              (error) => {
+                Logger.error(TAG, `SSE进度推送错误: ${error.message}`);
+              }
+            );
+            sseClient.connect();
+            Logger.info(TAG, `已启动SSE进度推送: job_id=${request.job_id}`);
+          } catch (sseError) {
+            Logger.warn(TAG, `SSE连接失败，将使用轮询方式: ${JSON.stringify(sseError)}`);
+          }
+        }
+
         httpRequest.request(
           apiUrl,
           options,
           (err: BusinessError, data: http.HttpResponse) => {
             httpRequest.destroy();
+            
+            // 关闭SSE连接
+            if (sseClient) {
+              sseClient.close();
+            }
+            
             const result = this.handleResponse<PodcastResult>(err, data || null, '多角色播客生成失败');
             if (result.success) {
               Logger.info(TAG, '多角色播客生成成功');
@@ -607,8 +637,15 @@ export class PodcastService {
 
   /**
    * 生成自定义角色播客
+   * @param request 播客生成请求
+   * @param jobId 任务ID（可选，用于SSE进度推送）
+   * @param onProgress 进度回调（可选，用于SSE实时进度推送）
    */
-  async generateCharacterPodcast(request: CharacterRequest): Promise<ApiResponse<PodcastResult>> {
+  async generateCharacterPodcast(
+    request: CharacterRequest,
+    jobId?: string,
+    onProgress?: (progress: ProgressStatus) => void
+  ): Promise<ApiResponse<PodcastResult>> {
     return new Promise<ApiResponse<PodcastResult>>((resolve) => {
       try {
         // 验证请求参数
@@ -678,11 +715,35 @@ export class PodcastService {
 
         Logger.info(TAG, `请求URL: ${apiUrl}, 请求体大小: ${requestData.length} bytes`);
 
+        // 如果提供了jobId和进度回调，启动SSE连接
+        let sseClient: ProgressSSEClient | null = null;
+        if (jobId && onProgress) {
+          try {
+            sseClient = new ProgressSSEClient(
+              jobId,
+              onProgress,
+              (error) => {
+                Logger.error(TAG, `SSE进度推送错误: ${error.message}`);
+              }
+            );
+            sseClient.connect();
+            Logger.info(TAG, `已启动SSE进度推送: job_id=${jobId}`);
+          } catch (sseError) {
+            Logger.warn(TAG, `SSE连接失败，将使用轮询方式: ${JSON.stringify(sseError)}`);
+          }
+        }
+
         httpRequest.request(
           apiUrl,
           options,
           (err: BusinessError, data: http.HttpResponse) => {
             httpRequest.destroy();
+            
+            // 关闭SSE连接
+            if (sseClient) {
+              sseClient.close();
+            }
+            
             const result = this.handleResponse<PodcastResult>(err, data || null, '自定义角色播客生成失败');
             if (result.success) {
               Logger.info(TAG, '自定义角色播客生成成功');
@@ -767,8 +828,15 @@ export class PodcastService {
 
   /**
    * 生成主题深度播客
+   * @param request 播客生成请求
+   * @param jobId 任务ID（可选，用于SSE进度推送）
+   * @param onProgress 进度回调（可选，用于SSE实时进度推送）
    */
-  async generateDeepPodcast(request: DeepPodcastRequest): Promise<ApiResponse<PodcastResult>> {
+  async generateDeepPodcast(
+    request: DeepPodcastRequest,
+    jobId?: string,
+    onProgress?: (progress: ProgressStatus) => void
+  ): Promise<ApiResponse<PodcastResult>> {
     return new Promise<ApiResponse<PodcastResult>>((resolve) => {
       try {
         // 验证请求参数
@@ -857,11 +925,35 @@ export class PodcastService {
 
         Logger.info(TAG, `请求URL: ${apiUrl}, 请求体大小: ${requestData.length} bytes`);
 
+        // 如果提供了jobId和进度回调，启动SSE连接
+        let sseClient: ProgressSSEClient | null = null;
+        if (jobId && onProgress) {
+          try {
+            sseClient = new ProgressSSEClient(
+              jobId,
+              onProgress,
+              (error) => {
+                Logger.error(TAG, `SSE进度推送错误: ${error.message}`);
+              }
+            );
+            sseClient.connect();
+            Logger.info(TAG, `已启动SSE进度推送: job_id=${jobId}`);
+          } catch (sseError) {
+            Logger.warn(TAG, `SSE连接失败，将使用轮询方式: ${JSON.stringify(sseError)}`);
+          }
+        }
+
         httpRequest.request(
           apiUrl,
           options,
           (err: BusinessError, data: http.HttpResponse) => {
             httpRequest.destroy();
+            
+            // 关闭SSE连接
+            if (sseClient) {
+              sseClient.close();
+            }
+            
             const result = this.handleResponse<PodcastResult>(err, data || null, '主题深度播客生成失败');
             if (result.success) {
               Logger.info(TAG, '主题深度播客生成成功');
