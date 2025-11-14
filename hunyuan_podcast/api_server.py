@@ -1215,6 +1215,7 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                     podcast_name=request.podcast_name,
                     topic=request.topic,
                     scene_types=request.scene_types,
+                    category=request.category if hasattr(request, 'category') else None,
                     num_music=1
                 )
                 music_selection_time = time.time() - music_selection_start
@@ -1261,6 +1262,12 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
             logger.info(f"  - 平均每段字数: {avg_chars_per_dialogue:.1f} 字")
             logger.info(f"  - 角色数量: {role_count} 个")
             logger.info(f"  - 角色列表: {', '.join(sorted(unique_roles))}")
+            logger.info("=" * 60)
+            
+            # 输出完整脚本内容到控制台
+            logger.info("=" * 60)
+            logger.info("【完整脚本内容】")
+            logger.info(text_content)
             logger.info("=" * 60)
             
             # 中间过程-检索信息
@@ -1564,6 +1571,12 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
             
             cleaned_text = processor.clean_text(generated_text)
             
+            # 输出完整脚本内容到控制台
+            logger.info("=" * 60)
+            logger.info("【完整脚本内容】")
+            logger.info(cleaned_text)
+            logger.info("=" * 60)
+            
             # 自动选择背景音乐（在AI生成对话之后，使用完整的文本内容）
             background_music_path = None
             try:
@@ -1571,13 +1584,12 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
                 logger.info("开始自动选择背景音乐...")
                 music_selection_start = time.time()
                 music_selector = MusicSelector(use_cloud_storage=True)
-                # 将category转换为scene_types列表
-                scene_types = [request.category] if request.category else None
                 selected_music = music_selector.select_music_by_ai(
                     text=cleaned_text,  # 使用完整的文本内容（包括AI生成的对话）
                     podcast_name=None,
                     topic=request.topic,
-                    scene_types=scene_types,
+                    scene_types=None,
+                    category=request.category,
                     num_music=1
                 )
                 music_selection_time = time.time() - music_selection_start
@@ -1809,6 +1821,12 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
             
             cleaned_text = processor.clean_text(generated_text)
             
+            # 输出完整脚本内容到控制台
+            logger.info("=" * 60)
+            logger.info("【完整脚本内容】")
+            logger.info(cleaned_text)
+            logger.info("=" * 60)
+            
             # 自动选择背景音乐（在AI生成对话之后，使用完整的文本内容）
             background_music_path = None
             try:
@@ -1816,13 +1834,12 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
                 logger.info("开始自动选择背景音乐...")
                 music_selection_start = time.time()
                 music_selector = MusicSelector(use_cloud_storage=True)
-                # 将category转换为scene_types列表
-                scene_types = [request.category] if request.category else None
                 selected_music = music_selector.select_music_by_ai(
                     text=cleaned_text,  # 使用完整的文本内容（包括AI生成的对话）
                     podcast_name=None,
                     topic=request.topic,
-                    scene_types=scene_types,
+                    scene_types=None,
+                    category=request.category,
                     num_music=1
                 )
                 music_selection_time = time.time() - music_selection_start

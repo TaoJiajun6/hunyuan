@@ -1,10 +1,12 @@
-import { RouterMap, RouterUtils, WindowModel } from 'lib_common';
+import { WindowModel } from 'lib_common';
 import { NavHeaderBar } from 'lib_widget';
 import { podcastService, DeepPodcastRequest, PodcastResult, ProgressStatus } from 'lib_api';
 import { FileUtils } from '../../utils/FileUtils';
 import { promptAction, AppStorageV2 } from '@kit.ArkUI';
-import { PodcastResultPageParams } from './PodcastResultPage';
 import { common } from '@kit.AbilityKit';
+import { MediaService, SongItem } from 'module_musicplay';
+import { CloudStorageMusicUtils, CloudAudioFile } from '../../common/CloudStorageMusicUtils';
+import { Logger } from 'lib_common';
 
 // Select 选项类型定义
 interface SelectOption {
@@ -97,6 +99,96 @@ export struct PodcastDeepPage {
   }
 
   /**
+   * 从云存储获取最新音频并播放
+   * @param audioUrl 可选的音频URL，如果提供则优先使用
+   */
+  private async getLatestAudioAndPlay(audioUrl?: string): Promise<void> {
+    try {
+      // 显示加载提示
+      promptAction.showToast({
+        message: '正在获取最新音频...',
+        duration: 2000
+      });
+
+      let audioFile: CloudAudioFile | null = null;
+
+      // 如果提供了 audioUrl，尝试从 URL 提取云侧路径
+      if (audioUrl) {
+        const cloudPath = CloudStorageMusicUtils.extractCloudPath(audioUrl);
+        if (cloudPath) {
+          // 从路径中提取文件名
+          const fileName = cloudPath.split('/').pop() || '';
+          if (fileName) {
+            audioFile = {
+              fileName: fileName,
+              filePath: cloudPath
+            };
+            Logger.info('PodcastDeepPage', `使用提供的音频URL: ${fileName}`);
+          }
+        }
+      }
+
+      // 如果无法从 URL 获取，则从云存储列表中选择最新的
+      if (!audioFile) {
+        // 从云存储获取音频文件列表
+        const audioFiles = await CloudStorageMusicUtils.getAudioFileList('outputs/podcasts/');
+        
+        if (audioFiles.length === 0) {
+          promptAction.showToast({
+            message: '未找到音频文件，请稍后重试',
+            duration: 3000
+          });
+          return;
+        }
+
+        // 按文件名排序，获取最新的音频文件（文件名通常包含时间戳）
+        // 例如：podcast_1763144806.wav，数字越大越新
+        const sortedFiles = audioFiles.sort((a, b) => {
+          // 提取文件名中的数字部分进行比较
+          const getTimestamp = (fileName: string): number => {
+            const match = fileName.match(/(\d+)/);
+            return match ? parseInt(match[1]) : 0;
+          };
+          return getTimestamp(b.fileName) - getTimestamp(a.fileName);
+        });
+
+        // 获取最新的音频文件
+        audioFile = sortedFiles[0];
+        Logger.info('PodcastDeepPage', `找到最新音频文件: ${audioFile.fileName}`);
+      }
+
+      // 转换为 SongItem
+      const songItem = await CloudStorageMusicUtils.convertToSongItem(audioFile);
+      
+      if (!songItem || !songItem.src) {
+        promptAction.showToast({
+          message: '音频文件准备失败，请稍后重试',
+          duration: 3000
+        });
+        return;
+      }
+
+      // 设置标题
+      songItem.title = audioFile.fileName.replace(/\.[^/.]+$/, '');
+      songItem.singer = '主题深度播客';
+
+      // 播放音频并显示播放页面
+      MediaService.getInstance().playSong(songItem, true);
+      
+      promptAction.showToast({
+        message: '已开始播放最新播客',
+        duration: 2000
+      });
+    } catch (error) {
+      Logger.error('PodcastDeepPage', `获取最新音频失败: ${error}`);
+      promptAction.showToast({
+        message: `获取音频失败: ${error}`,
+        duration: 3000
+      });
+    }
+  }
+
+  /**
    * 生成播客
    */
   async generatePodcast(): Promise<void> {
@@ -132,6 +224,15 @@ export struct PodcastDeepPage {
       // 启动平滑动画
       this.startProgressAnimation();
       
+      // 如果任务完成，获取最新音频并播放
+      if (progress.done && progress.audio_url) {
+        this.isLoading = false;
+        // 等待一小段时间确保文件已上传到云存储
+        setTimeout(() => {
+          this.getLatestAudioAndPlay(progress.audio_url);
+        }, 1000);
+      }
+      
       // 如果任务失败，显示错误
       if (progress.done && progress.error) {
         promptAction.showToast({
@@ -164,16 +265,10 @@ export struct PodcastDeepPage {
         // 确保进度条到达100%
         this.targetProgress = 100;
         this.startProgressAnimation();
-        // 等待一小段时间让进度条动画完成，然后跳转
+        // 等待一小段时间确保文件已上传到云存储，然后获取最新音频并播放
         setTimeout(() => {
-          const resultData: PodcastResult = response.data!;
-          const params = new PodcastResultPageParams(
-            resultData,
-            '主题深度播客',
-            resultData.script
-          );
-          RouterUtils.pushPathByName(RouterMap.PODCAST_RESULT_PAGE, params);
-        }, 500);
+          this.getLatestAudioAndPlay(response.data!.audio_url);
+        }, 1000);
       } else {
         promptAction.showToast({
           message: response.error || response.message || '生成失败',
