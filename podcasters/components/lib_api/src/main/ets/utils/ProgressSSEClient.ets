@@ -65,13 +65,23 @@ export class ProgressSSEClient {
           'Accept': 'text/event-stream',
           'Cache-Control': 'no-cache',
         },
-        readTimeout: 60000, // 60秒读取超时
-        connectTimeout: 10000, // 10秒连接超时
+        // SSE连接需要保持长时间连接，设置更长的超时时间
+        // 使用与API_TIMEOUT相同的值（10分钟），确保能够接收完整的进度更新
+        readTimeout: PodcastConfig.API_TIMEOUT, // 10分钟读取超时（600000ms）
+        connectTimeout: 30000, // 30秒连接超时（足够建立连接）
       };
 
       this.requestTask.request(url, options, (err: BusinessError, data: http.HttpResponse) => {
         if (err) {
-          Logger.error(TAG, `SSE连接失败: ${JSON.stringify(err)}`);
+          // 检查是否是超时错误（错误码2300028）
+          const isTimeout = err.code === 2300028 || err.message?.includes('Timeout') || err.message?.includes('timeout');
+          if (isTimeout) {
+            Logger.warn(TAG, `SSE连接超时: ${JSON.stringify(err)}，这可能是正常的（连接保持时间较长）`);
+            // 超时不一定意味着失败，可能是连接保持时间较长
+            // 不立即触发错误，让调用方决定是否回退到轮询
+          } else {
+            Logger.error(TAG, `SSE连接失败: ${JSON.stringify(err)}`);
+          }
           this.isConnected = false;
           this.onError(new Error(err.message || 'SSE连接失败'));
           return;
@@ -82,8 +92,14 @@ export class ProgressSSEClient {
           Logger.info(TAG, 'SSE连接成功');
           
           // 处理SSE数据流
-          const streamData = data.result.toString();
-          this.processSSEStream(streamData);
+          // 注意：HarmonyOS的http模块可能不支持真正的流式读取
+          // 如果响应是一次性返回的，这里会处理完整的数据
+          const streamData = data.result?.toString() || '';
+          if (streamData) {
+            this.processSSEStream(streamData);
+          } else {
+            Logger.warn(TAG, 'SSE响应数据为空');
+          }
         } else {
           Logger.error(TAG, `SSE连接返回非200状态码: ${data?.responseCode}`);
           this.isConnected = false;

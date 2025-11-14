@@ -6,6 +6,11 @@ import { promptAction, AppStorageV2 } from '@kit.ArkUI';
 import { PodcastResultPageParams } from './PodcastResultPage';
 import { common } from '@kit.AbilityKit';
 
+// Select 选项类型定义
+interface SelectOption {
+  value: string;
+}
+
 @Builder
 export function PodcastDeepPageBuilder() {
   PodcastDeepPage()
@@ -14,6 +19,7 @@ export function PodcastDeepPageBuilder() {
 @ComponentV2
 export struct PodcastDeepPage {
   @Local topic: string = '';
+  @Local category: string = ''; // 播客分类（可选）
   @Local roleVoiceUrls: Record<string, string> = {}; // 角色名 -> 云存储URL（必需）
   @Local numCharacters: number = 2;
   @Local depthLevel: string = '深度';
@@ -25,6 +31,34 @@ export struct PodcastDeepPage {
 
   readonly depthLevels: string[] = ['深度', '中等', '浅层'];
   readonly roleNames: string[] = ['角色A', '角色B', '角色C'];
+  // 播客分类选项列表
+  private readonly categoryOptions: SelectOption[] = [
+    { value: '商业' },
+    { value: '科技' },
+    { value: '财经' },
+    { value: '新闻' },
+    { value: '影视' },
+    { value: '音乐' },
+    { value: '文化艺术' },
+    { value: '历史' },
+    { value: '哲学思考' },
+    { value: '自我成长' },
+    { value: '职场' },
+    { value: '学习' },
+    { value: '教育育儿' },
+    { value: '情感恋爱' },
+    { value: '健康养生' },
+    { value: '旅游' },
+    { value: '美食' },
+    { value: '生活方式' },
+    { value: '娱乐' },
+    { value: '游戏电竞' },
+    { value: '体育' },
+    { value: '时尚美妆' },
+    { value: '汽车' },
+    { value: '法律' },
+    { value: '宠物' }
+  ];
 
   /**
    * 选择角色音色文件
@@ -108,7 +142,10 @@ export struct PodcastDeepPage {
         role_voice_urls: this.roleVoiceUrls, // 强制使用云存储URL
         num_characters: this.numCharacters,
         depth_level: this.depthLevel,
-        silence_interval: 300
+        silence_interval: 300,
+        category: this.category.trim().length > 0 ? this.category : undefined, // 播客分类
+        background_volume: 0.3, // 背景音乐音量，默认0.3
+        job_id: this.jobId
       };
 
       const response = await podcastService.generateDeepPodcast(request, this.jobId, onProgress);
@@ -218,6 +255,22 @@ export struct PodcastDeepPage {
             }
             .width('100%')
             .alignItems(HorizontalAlign.Start)
+
+            // 播客分类选择
+            Column({ space: 12 }) {
+              Text('播客分类（可选）')
+                .fontSize($r('sys.float.Subtitle_L'))
+                .fontColor($r('sys.color.font_primary'))
+                .fontWeight(FontWeight.Bold)
+                .alignSelf(ItemAlign.Start)
+
+              Select(this.categoryOptions)
+                .value(this.category || '')
+                .onSelect((index: number, value: string) => {
+                  this.category = value;
+                })
+                .width('100%')
+            }
 
             // 深度级别选择
             Column({ space: 12 }) {
