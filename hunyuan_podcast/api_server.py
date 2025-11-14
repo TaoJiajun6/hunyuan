@@ -173,24 +173,24 @@ async def log_requests(request: Request, call_next):
     
     if not is_progress_poll:
         # 记录请求信息（非进度查询请求）
-    content_length = request.headers.get("content-length")
-    if content_length:
-        content_length_mb = int(content_length) / (1024 * 1024)
-        logger.info(f"收到请求: {method} {path} from {client_ip}, Content-Length: {content_length_mb:.2f} MB")
-        
-        # 检查Content-Length
-        if int(content_length) > MAX_REQUEST_BODY_SIZE:
-            logger.warning(f"请求体过大: {content_length_mb:.2f} MB (限制: {MAX_REQUEST_BODY_SIZE / 1024 / 1024:.2f} MB)")
-            return JSONResponse(
-                status_code=413,
-                content={
-                    "success": False,
-                    "message": "请求体过大",
-                    "error": f"请求体大小 {content_length_mb:.2f} MB 超过限制 {MAX_REQUEST_BODY_SIZE / 1024 / 1024:.2f} MB"
-                }
-            )
-    else:
-        logger.info(f"收到请求: {method} {path} from {client_ip}")
+        content_length = request.headers.get("content-length")
+        if content_length:
+            content_length_mb = int(content_length) / (1024 * 1024)
+            logger.info(f"收到请求: {method} {path} from {client_ip}, Content-Length: {content_length_mb:.2f} MB")
+            
+            # 检查Content-Length
+            if int(content_length) > MAX_REQUEST_BODY_SIZE:
+                logger.warning(f"请求体过大: {content_length_mb:.2f} MB (限制: {MAX_REQUEST_BODY_SIZE / 1024 / 1024:.2f} MB)")
+                return JSONResponse(
+                    status_code=413,
+                    content={
+                        "success": False,
+                        "message": "请求体过大",
+                        "error": f"请求体大小 {content_length_mb:.2f} MB 超过限制 {MAX_REQUEST_BODY_SIZE / 1024 / 1024:.2f} MB"
+                    }
+                )
+        else:
+            logger.info(f"收到请求: {method} {path} from {client_ip}")
     
     # 对于POST请求，尝试记录请求体（仅用于调试）
     if method == "POST" and path.startswith("/api/v1/podcast"):
