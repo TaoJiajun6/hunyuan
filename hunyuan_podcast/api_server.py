@@ -451,101 +451,159 @@ def download_audio_from_url(url: str, suffix: str = ".wav", timeout: int = 120) 
     
     如果下载的文件是PCM格式（扩展名为.wav但实际是PCM），会自动转换为WAV格式。
     """
-    try:
-        logger.info(f"从URL下载音频文件: {url}")
-        
-        # 下载文件（华为AGC云存储的下载URL通常可以直接访问）
-        # 如果URL需要认证，可以在headers中添加Authorization头
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': '*/*',
-            'Accept-Encoding': 'gzip, deflate',
-            'Connection': 'keep-alive'  # 保持连接，提高下载速度
-        }
-        # 使用Session以复用连接，提高下载速度
-        session = requests.Session()
+    max_retries = 3
+    retry_delay = 1  # 重试延迟（秒）
+    
+    for attempt in range(max_retries):
         try:
-            response = session.get(url, timeout=timeout, stream=True, headers=headers)
-            response.raise_for_status()
-        finally:
-            session.close()
-        
-        # 检查Content-Length
-        content_length = response.headers.get("content-length")
-        if content_length:
-            file_size = int(content_length)
-            file_size_mb = file_size / (1024 * 1024)
-            logger.info(f"下载音频文件: 大小 {file_size_mb:.2f} MB")
+            logger.info(f"从URL下载音频文件: {url}" + (f" (重试 {attempt + 1}/{max_retries})" if attempt > 0 else ""))
             
-            # 检查文件大小
-            if file_size > MAX_AUDIO_FILE_SIZE:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"音频文件过大: {file_size_mb:.2f} MB (限制: {MAX_AUDIO_FILE_SIZE / 1024 / 1024:.2f} MB)"
+            # 下载文件（华为AGC云存储的下载URL通常可以直接访问）
+            # 优化请求头：音频文件通常不需要压缩，禁用压缩可能更快
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': '*/*',
+                # 对于音频文件，禁用压缩可能更快（文件本身已压缩）
+                # 'Accept-Encoding': 'gzip, deflate',  # 注释掉，让服务器直接返回原始数据
+                'Connection': 'keep-alive',  # 保持连接，提高下载速度
+                'Cache-Control': 'no-cache'  # 禁用缓存，确保获取最新数据
+            }
+            
+            # 优化超时设置：连接超时和读取超时分开设置
+            # 连接超时设置较短（10秒），读取超时设置较长（适应慢速下载）
+            connect_timeout = 10
+            read_timeout = timeout
+            
+            # 使用Session以复用连接，提高下载速度
+            session = requests.Session()
+            # 配置连接池，提高性能
+            adapter = requests.adapters.HTTPAdapter(
+                pool_connections=10,
+                pool_maxsize=20,
+                max_retries=0  # 禁用urllib3的重试，我们自己处理
+            )
+            session.mount('http://', adapter)
+            session.mount('https://', adapter)
+            
+            try:
+                response = session.get(
+                    url, 
+                    timeout=(connect_timeout, read_timeout),  # (连接超时, 读取超时)
+                    stream=True, 
+                    headers=headers,
+                    allow_redirects=True
                 )
-        
-        # 保存到临时文件
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-        
-        # 流式下载（使用更大的chunk_size以提高下载速度）
-        downloaded_size = 0
-        chunk_size = 64 * 1024  # 64KB chunks，提高下载速度
-        start_time = time.time()
-        for chunk in response.iter_content(chunk_size=chunk_size):
-            if chunk:
-                temp_file.write(chunk)
-                downloaded_size += len(chunk)
-                # 检查下载大小
-                if downloaded_size > MAX_AUDIO_FILE_SIZE:
-                    temp_file.close()
-                    os.unlink(temp_file.name)
+                response.raise_for_status()
+            finally:
+                session.close()
+            
+            # 检查Content-Length
+            content_length = response.headers.get("content-length")
+            if content_length:
+                file_size = int(content_length)
+                file_size_mb = file_size / (1024 * 1024)
+                logger.info(f"下载音频文件: 大小 {file_size_mb:.2f} MB")
+                
+                # 检查文件大小
+                if file_size > MAX_AUDIO_FILE_SIZE:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"音频文件过大: {downloaded_size / (1024 * 1024):.2f} MB (限制: {MAX_AUDIO_FILE_SIZE / 1024 / 1024:.2f} MB)"
+                        detail=f"音频文件过大: {file_size_mb:.2f} MB (限制: {MAX_AUDIO_FILE_SIZE / 1024 / 1024:.2f} MB)"
                     )
-        
-        download_time = time.time() - start_time
-        if download_time > 5:  # 如果下载时间超过5秒，记录警告
-            logger.warning(f"音频文件下载较慢: {download_time:.2f}秒，文件大小: {downloaded_size / (1024 * 1024):.2f} MB")
-        
-        temp_file.close()
-        
-        file_size_mb = downloaded_size / (1024 * 1024)
-        logger.info(f"音频文件已下载到临时文件: {temp_file.name}, 大小: {file_size_mb:.2f} MB")
-        
-        # 检测文件格式：如果扩展名是.wav但实际是PCM格式，转换为WAV
-        if suffix == ".wav" and is_pcm_file(temp_file.name):
-            logger.info(f"检测到PCM格式文件，正在转换为WAV格式...")
-            wav_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-            wav_file.close()
+            
+            # 保存到临时文件
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            
+            # 流式下载（使用更大的chunk_size以提高下载速度）
+            downloaded_size = 0
+            chunk_size = 256 * 1024  # 增大到256KB chunks，提高下载速度
+            start_time = time.time()
+            
             try:
-                convert_pcm_to_wav(temp_file.name, wav_file.name)
-                # 删除原始PCM文件
-                os.unlink(temp_file.name)
-                logger.info(f"PCM文件已转换为WAV: {wav_file.name}")
-                return wav_file.name
-            except Exception as e:
-                logger.error(f"PCM转WAV失败: {str(e)}，使用原始文件")
-                # 如果转换失败，返回原始文件
-                return temp_file.name
-        
-        return temp_file.name
-    except requests.exceptions.HTTPError as e:
-        if e.response.status_code == 403:
-            logger.error(f"下载音频文件失败: 403 Forbidden - 可能是云存储安全规则限制或需要认证")
-            logger.error(f"请检查华为AGC云存储的安全规则配置，确保下载URL可以公开访问")
-            raise HTTPException(status_code=400, detail=f"下载音频文件失败: 403 Forbidden - 请检查云存储安全规则配置")
-        else:
-            logger.error(f"下载音频文件失败: HTTP {e.response.status_code} - {str(e)}")
-            raise HTTPException(status_code=400, detail=f"下载音频文件失败: HTTP {e.response.status_code} - {str(e)}")
-    except requests.exceptions.RequestException as e:
-        logger.error(f"下载音频文件失败: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"下载音频文件失败: {str(e)}")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"下载音频文件异常: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"下载音频文件异常: {str(e)}")
+                for chunk in response.iter_content(chunk_size=chunk_size):
+                    if chunk:
+                        temp_file.write(chunk)
+                        downloaded_size += len(chunk)
+                        # 检查下载大小
+                        if downloaded_size > MAX_AUDIO_FILE_SIZE:
+                            temp_file.close()
+                            os.unlink(temp_file.name)
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"音频文件过大: {downloaded_size / (1024 * 1024):.2f} MB (限制: {MAX_AUDIO_FILE_SIZE / 1024 / 1024:.2f} MB)"
+                            )
+            finally:
+                temp_file.close()
+            
+            download_time = time.time() - start_time
+            download_speed = (downloaded_size / (1024 * 1024)) / download_time if download_time > 0 else 0
+            
+            if download_time > 5:  # 如果下载时间超过5秒，记录警告
+                logger.warning(f"音频文件下载较慢: {download_time:.2f}秒，文件大小: {downloaded_size / (1024 * 1024):.2f} MB，速度: {download_speed:.2f} MB/s")
+            else:
+                logger.info(f"音频文件下载完成: {download_time:.2f}秒，速度: {download_speed:.2f} MB/s")
+            
+            # 检测文件格式：如果扩展名是.wav但实际是PCM格式，转换为WAV
+            if suffix == ".wav" and is_pcm_file(temp_file.name):
+                logger.info(f"检测到PCM格式文件，正在转换为WAV格式...")
+                wav_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+                wav_file.close()
+                try:
+                    convert_pcm_to_wav(temp_file.name, wav_file.name)
+                    # 删除原始PCM文件
+                    os.unlink(temp_file.name)
+                    logger.info(f"PCM文件已转换为WAV: {wav_file.name}")
+                    return wav_file.name
+                except Exception as e:
+                    logger.error(f"PCM转WAV失败: {str(e)}，使用原始文件")
+                    # 如果转换失败，返回原始文件
+                    return temp_file.name
+            
+            return temp_file.name
+            
+        except requests.exceptions.Timeout as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"下载超时，{retry_delay}秒后重试 ({attempt + 1}/{max_retries})...")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # 指数退避
+                continue
+            else:
+                logger.error(f"下载音频文件失败: 超时（已重试{max_retries}次）")
+                raise HTTPException(status_code=400, detail=f"下载音频文件失败: 超时（已重试{max_retries}次）")
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 403:
+                logger.error(f"下载音频文件失败: 403 Forbidden - 可能是云存储安全规则限制或需要认证")
+                logger.error(f"请检查华为AGC云存储的安全规则配置，确保下载URL可以公开访问")
+                raise HTTPException(status_code=400, detail=f"下载音频文件失败: 403 Forbidden - 请检查云存储安全规则配置")
+            elif e.response.status_code >= 500 and attempt < max_retries - 1:
+                # 服务器错误，重试
+                logger.warning(f"服务器错误 {e.response.status_code}，{retry_delay}秒后重试 ({attempt + 1}/{max_retries})...")
+                time.sleep(retry_delay)
+                retry_delay *= 2
+                continue
+            else:
+                logger.error(f"下载音频文件失败: HTTP {e.response.status_code} - {str(e)}")
+                raise HTTPException(status_code=400, detail=f"下载音频文件失败: HTTP {e.response.status_code} - {str(e)}")
+        except requests.exceptions.RequestException as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"下载请求异常: {str(e)}，{retry_delay}秒后重试 ({attempt + 1}/{max_retries})...")
+                time.sleep(retry_delay)
+                retry_delay *= 2
+                continue
+            else:
+                logger.error(f"下载音频文件失败: {str(e)}")
+                raise HTTPException(status_code=400, detail=f"下载音频文件失败: {str(e)}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"下载异常: {str(e)}，{retry_delay}秒后重试 ({attempt + 1}/{max_retries})...")
+                time.sleep(retry_delay)
+                retry_delay *= 2
+                continue
+            else:
+                logger.error(f"下载音频文件异常: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"下载音频文件异常: {str(e)}")
 
 
 def download_text_from_url(url: Union[str, List[str]], timeout: int = 120) -> str:
