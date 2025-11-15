@@ -63,7 +63,7 @@ DEFAULT_MAX_TOKENS = 2000  # 降低最大token数以加快生成速度
 DEFAULT_TOP_P = 0.9
 
 # 音频合成配置
-AUDIO_SILENCE_INTERVAL = 800  # 角色切换时的静音间隔（毫秒），默认800ms以增加角色之间的间隔，让对话更清晰
+AUDIO_SILENCE_INTERVAL = 500  # 角色切换时的静音间隔（毫秒），默认500ms以保持对话流畅自然
 AUDIO_SAMPLING_RATE = 22050
 
 # 输出目录（使用绝对路径，确保无论从哪里运行都能正确保存）
