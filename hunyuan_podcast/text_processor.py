@@ -5,7 +5,6 @@
 import re
 import json
 from typing import List, Dict, Tuple, Optional, Any
-from .polyphone_handler import get_polyphone_handler
 
 
 class TextProcessor:
@@ -29,28 +28,22 @@ class TextProcessor:
     def clean_dialogue_content(self, content: str) -> str:
         """
         清理对话内容，移除可能误包含的情绪描述词和动作描述
-        同时处理多音字，确保正确发音
         
         Args:
             content: 原始对话内容
         
         Returns:
-            清理后的对话内容（包含多音字拼音标注）
+            清理后的对话内容
         """
         if not content:
             return content
         
-        # 先处理多音字，添加拼音标注
-        polyphone_handler = get_polyphone_handler()
-        content = polyphone_handler.process_text(content)
-        
-        # 移除内容中的音效标注（但不移除拼音标注）
-        # 拼音标注格式：词语[拼音]，音效标注格式：[音效：xxx]
+        # 移除内容中的音效标注
+        # 音效标注格式：[音效：xxx]
         content = re.sub(r'\[音效[：:][^\]]+\]', '', content).strip()
         
         # 移除括号内的动作描述词（如 (点头)、(思考状)、(Nods)、(Thinking) 等）
         # 支持中文括号（）和英文括号()，使用非贪婪匹配
-        # 注意：不匹配方括号[]，因为拼音标注使用方括号
         content = re.sub(r'[（(][^）)]*?[）)]', '', content)
         
         # 移除内容中可能误包含的情绪描述词（防止模型错误生成）
@@ -423,25 +416,14 @@ class TextProcessor:
    - **禁止使用**：不能使用纯数字（如[1]、[2]）、单个字母（如[J]、[A]）或其他非标准角色名
    - **角色间隔**：角色对话之间要有自然的间隔，每个角色发言后要有适当的停顿，让对话节奏更舒缓
 
-**6. 多音字使用规范**（重要）：
-   - 注意多音字的正确使用，避免产生歧义或读错音
-   - 常见多音字示例：
-     * "转行"中的"转"读"zhuǎn"（第三声），如"跨界转行"、"转行创业"
-     * "银行"中的"行"读"háng"（第二声），如"银行账户"、"银行卡"
-     * "行走"中的"行"读"xíng"（第二声），如"行走"、"行为"、"行动"
-     * "长大"中的"长"读"zhǎng"（第三声），如"长大"、"长高"
-     * "长期"中的"长"读"cháng"（第二声），如"长期"、"长度"
-   - 如果遇到不确定读音的多音字，优先使用更常见、更不容易读错的表达方式
-   - 避免使用容易产生歧义的多音字组合
-
-**7. 对话要求**：
+**6. 对话要求**：
    - 每个角色必须发言至少6-8次，总共至少{len(role_names) * 6}段对话
    - 对话要自然流畅，角色之间要有良好的互动和回应
    - 必须包含感叹词、语气词、填充词等真实对话元素
    - 对话要有话题的自然流动和转换
    - 每个角色的说话风格要严格符合其角色人设
 
-7. **输出格式示例**（SoulX-Podcast兼容格式）：
+**7. 输出格式示例**（SoulX-Podcast兼容格式）：
 **示例1：简洁格式（推荐）**
 ```
 [角色A]OMG！你这个想法，真的是Queen级别的！
