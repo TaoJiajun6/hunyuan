@@ -197,7 +197,11 @@ class CloudStorageMusicClient:
             # 构建下载URL（根据华为AGC云存储API文档）
             # 格式：https://{domain}/{bucket_name}/{object_name}
             # 注意：storage_url已经包含了/v0/，所以不需要再加
-            download_url = f"{self.storage_url}{self.bucket}/{cloud_path}"
+            # 需要对路径进行URL编码，特别是中文字符
+            from urllib.parse import quote
+            # 对路径的每个部分分别编码，保留斜杠
+            encoded_path = '/'.join(quote(part, safe='') for part in cloud_path.split('/'))
+            download_url = f"{self.storage_url}{self.bucket}/{encoded_path}"
             
             # 生成本地文件名
             filename = os.path.basename(cloud_path)
@@ -553,10 +557,17 @@ class CloudStorageMusicClient:
                     continue
                 
                 # 直接构建下载URL（不再通过API获取）
+                # 注意：需要对路径进行URL编码，特别是中文字符
+                from urllib.parse import quote
                 if file_path.startswith('music/'):
-                    download_url = f"{self.storage_url}{self.bucket}/{file_path}"
+                    # 对路径进行URL编码，但保留斜杠
+                    encoded_path = '/'.join(quote(part, safe='') for part in file_path.split('/'))
+                    download_url = f"{self.storage_url}{self.bucket}/{encoded_path}"
                 else:
-                    download_url = f"{self.storage_url}{self.bucket}/{normalized_path}{filename}"
+                    # 对路径和文件名分别编码
+                    encoded_path = '/'.join(quote(part, safe='') for part in normalized_path.split('/'))
+                    encoded_filename = quote(filename, safe='')
+                    download_url = f"{self.storage_url}{self.bucket}/{encoded_path}{encoded_filename}"
                 
                 # 从文件名推断风格
                 style = self._infer_style_from_filename(filename)

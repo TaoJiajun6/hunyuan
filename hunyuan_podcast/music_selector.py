@@ -367,6 +367,9 @@ class MusicSelector:
         directory_name_lower = directory_name.lower()
         core_dir_name_lower = core_dir_name.lower()
         
+        # 调试：打印匹配信息
+        print(f"  匹配目录: '{directory_name}' (核心部分: '{core_dir_name}')")
+        
         for music_info in music_files:
             # 从云存储路径或本地路径中提取目录信息
             cloud_path = music_info.get('cloud_path', '')
@@ -380,14 +383,23 @@ class MusicSelector:
                     # 跳过 "music" 部分，获取子目录
                     subdir = path_parts[1] if path_parts[0].lower() == 'music' else path_parts[0]
                     subdir_lower = subdir.lower()
-                    # 提取子目录的核心部分
+                    # 提取子目录的核心部分（去除括号）
                     subdir_core = subdir.split('（')[0].split('(')[0].strip().lower()
                     
                     # 匹配逻辑：
-                    # 1. 完整目录名称匹配（支持模糊匹配）
-                    # 2. 核心部分匹配（去除括号后的部分）
-                    if (directory_name_lower in subdir_lower or subdir_lower in directory_name_lower or
-                        core_dir_name_lower == subdir_core or core_dir_name_lower in subdir_core or subdir_core in core_dir_name_lower):
+                    # 1. 核心部分完全匹配（最重要）
+                    # 2. 核心部分包含关系
+                    # 3. 完整目录名称匹配（支持模糊匹配）
+                    is_match = (
+                        core_dir_name_lower == subdir_core or  # 核心部分完全匹配
+                        (core_dir_name_lower and subdir_core and 
+                         (core_dir_name_lower in subdir_core or subdir_core in core_dir_name_lower)) or  # 核心部分包含
+                        directory_name_lower in subdir_lower or  # 完整名称包含
+                        subdir_lower in directory_name_lower  # 反向包含
+                    )
+                    
+                    if is_match:
+                        print(f"    ✓ 匹配: {cloud_path} (子目录: '{subdir}', 核心: '{subdir_core}')")
                         filtered.append(music_info)
                         continue
             
@@ -401,11 +413,19 @@ class MusicSelector:
                 dir_name_core = dir_name.split('（')[0].split('(')[0].strip().lower()
                 
                 # 匹配逻辑：同上
-                if (directory_name_lower in dir_name_lower or dir_name_lower in directory_name_lower or
-                    core_dir_name_lower == dir_name_core or core_dir_name_lower in dir_name_core or dir_name_core in core_dir_name_lower):
+                is_match = (
+                    core_dir_name_lower == dir_name_core or
+                    (core_dir_name_lower and dir_name_core and 
+                     (core_dir_name_lower in dir_name_core or dir_name_core in core_dir_name_lower)) or
+                    directory_name_lower in dir_name_lower or
+                    dir_name_lower in directory_name_lower
+                )
+                
+                if is_match:
                     filtered.append(music_info)
                     continue
         
+        print(f"  匹配结果: 找到 {len(filtered)} 个文件")
         return filtered
     
     def select_music_by_category(
