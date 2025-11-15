@@ -1874,69 +1874,20 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                     # 使用正斜杠构建云存储路径，避免 Windows 反斜杠问题
                     object_name = f"outputs/podcasts/{os.path.basename(output_path)}"
                     try:
-                        if request.wait_for_upload:
-                            logger.info("请求要求等待上传完成，开始同步上传...")
-                            _update_progress(request.job_id, "uploading", 90, "正在上传到云存储（同步）")
-                            # 计算超时时间：如果为0则根据文件大小自动计算，否则使用指定值
-                            actual_timeout = calculate_upload_timeout(output_path, request.upload_timeout) if request.upload_timeout == 0 else request.upload_timeout
-                            file_size_mb = os.path.getsize(output_path) / (1024 * 1024) if os.path.exists(output_path) else 0
-                            logger.info(f"文件大小: {file_size_mb:.2f}MB, 使用超时时间: {actual_timeout}秒")
-                            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                                future = executor.submit(agc_upload_client,
-                                                          output_path=output_path,
-                                                          storage_url=agc_storage_url,
-                                                          bucket=agc_bucket,
-                                                          product_id=agc_product_id,
-                                                          domain=agc_domain,
-                                                          client_id=agc_client_id,
-                                                          client_secret=agc_client_secret)
-                                try:
-                                    res = future.result(timeout=actual_timeout)
-                                    agc_result = {
-                                        'status': 'uploaded',
-                                        'bucket': agc_bucket,
-                                        'object': object_name,
-                                        'http_status': res.get('http_status'),
-                                        'response_text': res.get('response_text'),
-                                        'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
-                                    }
-                                    logger.info(f"同步 AGC 上传完成: {agc_result}")
-                                    # 更新进度，包含音频URL以便前端从云存储下载并播放
-                                    audio_url = agc_result.get('url') if isinstance(agc_result, dict) else None
-                                    _update_progress(request.job_id, "completed", 100, "生成完成，已上传到云存储", done=True, audio_url=audio_url)
-                                    # 同步上传成功，不再启动后台上传任务
-                                except concurrent.futures.TimeoutError:
-                                    logger.warning(f"同步上传超时（{actual_timeout}秒），文件大小: {file_size_mb:.2f}MB，已改为后台继续上传")
-                                    background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
-                                                              agc_product_id, agc_domain, agc_client_id, agc_client_secret)
-                                    agc_result = {
-                                        'status': 'timeout_and_background',
-                                        'bucket': agc_bucket,
-                                        'object': object_name,
-                                        'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}",
-                                        'message': f'上传超时，已在后台继续上传（文件大小: {file_size_mb:.2f}MB）'
-                                    }
-                                    # 更新进度，包含音频URL（即使后台上传，也先返回URL以便前端下载）
-                                    audio_url = agc_result.get('url') if isinstance(agc_result, dict) else None
-                                    _update_progress(request.job_id, "uploading", 95, "生成完成，正在后台上传到云存储", done=True, audio_url=audio_url)
-                                except Exception as e:
-                                    logger.exception(f"同步上传失败: {e}")
-                                    agc_result = {'status': 'failed', 'reason': str(e)}
-                                    _update_progress(request.job_id, "upload_failed", 95, f"上传失败: {e}", done=True, error=str(e))
-                        else:
-                            # 后台异步上传（默认）
-                            background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
-                                                      agc_product_id, agc_domain, agc_client_id, agc_client_secret)
-                            logger.info("已在后台启动 AGC 上传任务")
-                            agc_result = {
-                                'status': 'started',
-                                'bucket': agc_bucket,
-                                'object': object_name,
-                                'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
-                            }
-                            # 更新进度，包含音频URL（即使后台上传，也先返回URL以便前端从云存储下载）
-                            audio_url = agc_result.get('url') if isinstance(agc_result, dict) else None
-                            _update_progress(request.job_id, "uploading", 95, "生成完成，已开始后台上传到云存储", done=True, audio_url=audio_url)
+                        # 统一使用后台上传，避免阻塞和超时问题
+                        # 参考之前提交的实现：立即返回base64音频，上传在后台进行
+                        background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
+                                                  agc_product_id, agc_domain, agc_client_id, agc_client_secret)
+                        logger.info("已在后台启动 AGC 上传任务（不阻塞主流程）")
+                        agc_result = {
+                            'status': 'started',
+                            'bucket': agc_bucket,
+                            'object': object_name,
+                            'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
+                        }
+                        # 更新进度，包含音频URL（即使后台上传，也先返回URL以便前端从云存储下载）
+                        audio_url = agc_result.get('url') if isinstance(agc_result, dict) else None
+                        _update_progress(request.job_id, "uploading", 95, "生成完成，已开始后台上传到云存储", done=True, audio_url=audio_url)
                     except Exception as e:
                         logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
                 else:
@@ -2236,64 +2187,25 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
                     # 使用正斜杠构建云存储路径，避免 Windows 反斜杠问题
                     object_name = f"outputs/podcasts/{os.path.basename(output_path)}"
                     try:
-                        if request.wait_for_upload:
-                            # 同步上传，等待完成（阻塞，超时由 upload_timeout 控制）
-                            logger.info("请求要求等待上传完成，开始同步上传...")
-                            # 计算超时时间：如果为0则根据文件大小自动计算，否则使用指定值
-                            actual_timeout = calculate_upload_timeout(output_path, request.upload_timeout) if request.upload_timeout == 0 else request.upload_timeout
-                            file_size_mb = os.path.getsize(output_path) / (1024 * 1024) if os.path.exists(output_path) else 0
-                            logger.info(f"文件大小: {file_size_mb:.2f}MB, 使用超时时间: {actual_timeout}秒")
-                            # 通过线程执行并等待指定超时，超时后改为后台继续上传
-                            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                                future = executor.submit(agc_upload_client,
-                                                          output_path=output_path,
-                                                          storage_url=agc_storage_url,
-                                                          bucket=agc_bucket,
-                                                          product_id=agc_product_id,
-                                                          domain=agc_domain,
-                                                          client_id=agc_client_id,
-                                                          client_secret=agc_client_secret)
-                                try:
-                                    res = future.result(timeout=actual_timeout)
-                                    agc_result = {
-                                        'status': 'uploaded',
-                                        'bucket': agc_bucket,
-                                        'object': object_name,
-                                        'http_status': res.get('http_status'),
-                                        'response_text': res.get('response_text'),
-                                        'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
-                                    }
-                                    logger.info(f"同步 AGC 上传完成: {agc_result}")
-                                except concurrent.futures.TimeoutError:
-                                    logger.warning(f"同步上传超时（{actual_timeout}秒），文件大小: {file_size_mb:.2f}MB，已改为后台继续上传")
-                                    # 改为后台继续上传
-                                    background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
-                                                              agc_product_id, agc_domain, agc_client_id, agc_client_secret)
-                                    agc_result = {
-                                        'status': 'timeout_and_background',
-                                        'bucket': agc_bucket,
-                                        'object': object_name,
-                                        'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}",
-                                        'message': f'上传超时，已在后台继续上传（文件大小: {file_size_mb:.2f}MB）'
-                                    }
-                                except Exception as e:
-                                    logger.exception(f"同步上传失败: {e}")
-                                    agc_result = {'status': 'failed', 'reason': str(e)}
-                        else:
-                            # 后台异步上传（默认）
-                            background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
-                                                      agc_product_id, agc_domain, agc_client_id, agc_client_secret)
-                            logger.info("已在后台启动 AGC 上传任务")
-                            agc_result = {
-                                'status': 'started',
-                                'bucket': agc_bucket,
-                                'object': object_name,
-                                'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
-                            }
+                        # 统一使用后台上传，避免阻塞和超时问题
+                        # 参考之前提交的实现：立即返回base64音频，上传在后台进行
+                        background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
+                                                  agc_product_id, agc_domain, agc_client_id, agc_client_secret)
+                        logger.info("已在后台启动 AGC 上传任务（不阻塞主流程）")
+                        agc_result = {
+                            'status': 'started',
+                            'bucket': agc_bucket,
+                            'object': object_name,
+                            'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
+                        }
+                        # 更新进度，包含音频URL（即使后台上传，也先返回URL以便前端从云存储下载）
+                        audio_url = agc_result.get('url') if isinstance(agc_result, dict) else None
+                        _update_progress(request.job_id, "uploading", 95, "生成完成，已开始后台上传到云存储", done=True, audio_url=audio_url)
                     except Exception as e:
                         logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
                 else:
                     logger.debug("未检测到 AGC 存储配置，跳过后台上传")
+                    _update_progress(request.job_id, "completed", 100, "生成完成", done=True)
             except Exception as e:
                 logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
 
@@ -2567,64 +2479,25 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
                     # 使用正斜杠构建云存储路径，避免 Windows 反斜杠问题
                     object_name = f"outputs/podcasts/{os.path.basename(output_path)}"
                     try:
-                        if request.wait_for_upload:
-                            # 同步上传，等待完成（阻塞，超时由 upload_timeout 控制）
-                            logger.info("请求要求等待上传完成，开始同步上传...")
-                            # 计算超时时间：如果为0则根据文件大小自动计算，否则使用指定值
-                            actual_timeout = calculate_upload_timeout(output_path, request.upload_timeout) if request.upload_timeout == 0 else request.upload_timeout
-                            file_size_mb = os.path.getsize(output_path) / (1024 * 1024) if os.path.exists(output_path) else 0
-                            logger.info(f"文件大小: {file_size_mb:.2f}MB, 使用超时时间: {actual_timeout}秒")
-                            # 通过线程执行并等待指定超时，超时后改为后台继续上传
-                            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                                future = executor.submit(agc_upload_client,
-                                                          output_path=output_path,
-                                                          storage_url=agc_storage_url,
-                                                          bucket=agc_bucket,
-                                                          product_id=agc_product_id,
-                                                          domain=agc_domain,
-                                                          client_id=agc_client_id,
-                                                          client_secret=agc_client_secret)
-                                try:
-                                    res = future.result(timeout=actual_timeout)
-                                    agc_result = {
-                                        'status': 'uploaded',
-                                        'bucket': agc_bucket,
-                                        'object': object_name,
-                                        'http_status': res.get('http_status'),
-                                        'response_text': res.get('response_text'),
-                                        'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
-                                    }
-                                    logger.info(f"同步 AGC 上传完成: {agc_result}")
-                                except concurrent.futures.TimeoutError:
-                                    logger.warning(f"同步上传超时（{actual_timeout}秒），文件大小: {file_size_mb:.2f}MB，已改为后台继续上传")
-                                    # 改为后台继续上传
-                                    background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
-                                                              agc_product_id, agc_domain, agc_client_id, agc_client_secret)
-                                    agc_result = {
-                                        'status': 'timeout_and_background',
-                                        'bucket': agc_bucket,
-                                        'object': object_name,
-                                        'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}",
-                                        'message': f'上传超时，已在后台继续上传（文件大小: {file_size_mb:.2f}MB）'
-                                    }
-                                except Exception as e:
-                                    logger.exception(f"同步上传失败: {e}")
-                                    agc_result = {'status': 'failed', 'reason': str(e)}
-                        else:
-                            # 后台异步上传（默认）
-                            background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
-                                                      agc_product_id, agc_domain, agc_client_id, agc_client_secret)
-                            logger.info("已在后台启动 AGC 上传任务")
-                            agc_result = {
-                                'status': 'started',
-                                'bucket': agc_bucket,
-                                'object': object_name,
-                                'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
-                            }
+                        # 统一使用后台上传，避免阻塞和超时问题
+                        # 参考之前提交的实现：立即返回base64音频，上传在后台进行
+                        background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
+                                                  agc_product_id, agc_domain, agc_client_id, agc_client_secret)
+                        logger.info("已在后台启动 AGC 上传任务（不阻塞主流程）")
+                        agc_result = {
+                            'status': 'started',
+                            'bucket': agc_bucket,
+                            'object': object_name,
+                            'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
+                        }
+                        # 更新进度，包含音频URL（即使后台上传，也先返回URL以便前端从云存储下载）
+                        audio_url = agc_result.get('url') if isinstance(agc_result, dict) else None
+                        _update_progress(request.job_id, "uploading", 95, "生成完成，已开始后台上传到云存储", done=True, audio_url=audio_url)
                     except Exception as e:
                         logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
                 else:
                     logger.debug("未检测到 AGC 存储配置，跳过后台上传")
+                    _update_progress(request.job_id, "completed", 100, "生成完成", done=True)
             except Exception as e:
                 logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
 

@@ -181,22 +181,14 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
     
     backoff_factor = 0.5
     
-    # 根据文件大小动态调整超时时间（在循环外计算，避免重复计算）
-    # 对于上传操作，需要考虑写入超时，假设最小上传速度为0.03 MB/s（考虑非常慢的网络）
-    # 从实际日志看，上传速度可能只有0.04-0.05 MB/s，所以设置更保守的值
-    min_upload_speed_mbps = 0.03  # 最小上传速度（MB/s），考虑非常慢的网络
-    # 计算所需时间：文件大小(MB) / 最小速度(MB/s) + 缓冲时间
-    calculated_timeout = int((file_size_mb / min_upload_speed_mbps) + 600)  # 至少600秒缓冲
-    # 使用传入的timeout和计算出的timeout中的较大值，但不超过7200秒（120分钟）
-    base_read_timeout = max(timeout, min(calculated_timeout, 7200))
-    connect_timeout = 30  # 连接超时30秒
+    # 移除超时限制，允许上传持续进行直到完成
+    # 对于慢速网络，上传可能需要很长时间，不应该设置超时限制
+    connect_timeout = 30  # 连接超时30秒（仅用于建立连接）
+    read_timeout = None  # 读取/写入超时设置为None，表示无超时限制
     
     for attempt in range(1, retries + 1):
         try:
-            # 每次重试时增加超时时间
-            read_timeout = int(base_read_timeout * (1 + (attempt - 1) * 0.5))  # 每次重试增加50%
-            
-            logger.info(f"上传尝试 {attempt}/{retries}: 连接超时={connect_timeout}秒, 读取超时={read_timeout}秒 (文件大小: {file_size_mb:.2f} MB)")
+            logger.info(f"上传尝试 {attempt}/{retries}: 连接超时={connect_timeout}秒, 读取超时=无限制 (文件大小: {file_size_mb:.2f} MB)")
             
             # 优化上传：使用Session和连接池（每次重试创建新的session）
             session = requests.Session()
