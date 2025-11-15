@@ -201,50 +201,23 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
             try:
                 upload_start = time.time()
                 
-                # 统一使用流式上传，避免一次性读取大文件导致写入超时
-                # 根据文件大小动态调整chunk_size：使用较小的chunk避免写入超时
-                if file_size_mb > 20:
-                    chunk_size = 1024 * 1024  # 1MB chunks，超大文件（>20MB）
-                elif file_size_mb > 5:
-                    chunk_size = 512 * 1024  # 512KB chunks，中等文件（5-20MB）
-                else:
-                    chunk_size = 256 * 1024  # 256KB chunks，小文件（<5MB）
+                # AGC服务器要求必须使用Content-Length头，不能使用Transfer-Encoding: chunked
+                # 使用字节数据或文件对象时，如果手动设置了Content-Length，requests会使用它
+                # 对于小于100MB的文件，直接读取到内存（最简单可靠）
+                # 对于大文件，也使用直接读取（确保Content-Length被正确使用）
+                logger.info(f"直接上传模式（文件大小: {file_size_mb:.2f} MB）")
+                with open(file_path, 'rb') as f:
+                    file_data = f.read()
                 
-                logger.info(f"流式上传模式：chunk_size={chunk_size / 1024:.0f} KB (文件大小: {file_size_mb:.2f} MB)")
+                # 验证读取的数据大小
+                if len(file_data) != file_size:
+                    raise AGCUploadError(f"文件读取大小不匹配: 期望 {file_size} 字节，实际 {len(file_data)} 字节")
                 
-                def file_stream():
-                    """生成器函数，用于流式读取文件"""
-                    try:
-                        with open(file_path, 'rb') as f:
-                            bytes_sent = 0
-                            last_log_time = upload_start
-                            while True:
-                                chunk = f.read(chunk_size)
-                                if not chunk:
-                                    break
-                                bytes_sent += len(chunk)
-                                # 每2秒记录一次进度（避免日志过多，同时提供实时反馈）
-                                current_time = time.time()
-                                if current_time - last_log_time >= 2.0:
-                                    elapsed = current_time - upload_start
-                                    if elapsed > 0:
-                                        speed = (bytes_sent / (1024 * 1024)) / elapsed
-                                        progress = (bytes_sent / file_size) * 100
-                                        logger.info(f"上传进度: {progress:.1f}% ({bytes_sent / (1024 * 1024):.2f}/{file_size_mb:.2f} MB), 速度: {speed:.2f} MB/s")
-                                    last_log_time = current_time
-                                yield chunk
-                    except Exception as e:
-                        logger.error(f"读取文件流失败: {str(e)}")
-                        raise
-                
-                # 使用流式上传，设置较长的超时时间
-                # 注意：timeout参数中，第一个是连接超时，第二个是读取/写入超时
-                # 对于上传，需要足够长的超时时间来处理慢速网络和写入操作
                 resp = session.put(
                     url,
-                    data=file_stream(),  # 使用生成器进行流式上传
+                    data=file_data,  # 使用字节数据，配合手动设置的Content-Length头
                     headers=headers,
-                    timeout=(connect_timeout, read_timeout),  # (连接超时, 读取/写入超时)
+                    timeout=(connect_timeout, read_timeout),
                     allow_redirects=True
                 )
             finally:

@@ -157,6 +157,52 @@ export interface ProgressStatus {
 }
 
 /**
+ * 批量任务项
+ */
+export interface BatchTaskItem {
+  task_type: 'multi_role' | 'character' | 'deep'; // 任务类型
+  task_id?: string; // 可选的任务ID，如果不提供则自动生成
+  request_data: MultiRoleRequest | CharacterRequest | DeepPodcastRequest; // 任务请求数据
+}
+
+/**
+ * 批量生成请求
+ */
+export interface BatchRequest {
+  tasks: BatchTaskItem[]; // 任务列表（最多50个）
+}
+
+/**
+ * 批量生成响应
+ */
+export interface BatchResponse {
+  task_ids: string[]; // 任务ID列表
+  total: number; // 总任务数
+  queue_size: number; // 队列大小
+  active_tasks: number; // 活跃任务数
+}
+
+/**
+ * 任务状态
+ */
+export interface TaskStatus {
+  task_id: string;
+  task_type: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  progress: number;
+  message: string;
+  created_at?: number;
+  started_at?: number;
+  completed_at?: number;
+  error?: string;
+  result?: {
+    file_size_mb?: number;
+    output_path?: string;
+    audio_url?: string;
+  };
+}
+
+/**
  * 多角色播客请求体（API请求用）
  */
 class MultiRoleRequestBody {
@@ -1064,6 +1110,155 @@ export class PodcastService {
         resolve({
           success: false,
           message: '播客生成失败',
+          error: errorMessage,
+        });
+      }
+    });
+  }
+
+  /**
+   * 批量生成播客
+   * @param request 批量生成请求
+   * @returns 批量任务响应
+   */
+  async batchGeneratePodcasts(
+    request: BatchRequest
+  ): Promise<ApiResponse<BatchResponse>> {
+    return new Promise<ApiResponse<BatchResponse>>((resolve) => {
+      try {
+        // 验证请求参数
+        if (!request.tasks || request.tasks.length === 0) {
+          resolve({
+            success: false,
+            message: '任务列表不能为空',
+            error: '任务列表为空',
+          });
+          return;
+        }
+
+        if (request.tasks.length > 50) {
+          resolve({
+            success: false,
+            message: '单次批量任务数量不能超过50个',
+            error: '任务数量过多',
+          });
+          return;
+        }
+
+        Logger.info(TAG, `开始批量生成播客: 任务数量=${request.tasks.length}`);
+
+        const httpRequest = http.createHttp();
+        const requestData = JSON.stringify(request);
+        const options: http.HttpRequestOptions = {
+          method: http.RequestMethod.POST,
+          header: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          extraData: requestData,
+          connectTimeout: PodcastConfig.API_TIMEOUT,
+          readTimeout: PodcastConfig.API_TIMEOUT,
+        };
+
+        const apiUrl = PodcastConfig.USE_CLOUD_FUNCTION
+          ? this.baseUrl
+          : this.buildApiUrl('/api/v1/podcast/batch');
+
+        Logger.info(TAG, `批量生成请求URL: ${apiUrl}, 任务数量: ${request.tasks.length}`);
+
+        httpRequest.request(
+          apiUrl,
+          options,
+          (err: BusinessError, data: http.HttpResponse) => {
+            httpRequest.destroy();
+            
+            const result = this.handleResponse<BatchResponse>(err, data || null, '批量生成播客失败');
+            if (result.success) {
+              Logger.info(TAG, `批量生成播客成功: 已提交 ${result.data?.total || 0} 个任务`);
+            } else {
+              Logger.error(TAG, `批量生成播客失败: ${result.error || result.message}`);
+            }
+            resolve(result);
+          }
+        );
+      } catch (error) {
+        let errorMessage = '未知错误';
+        if (error instanceof Error) {
+          errorMessage = error.message || '错误对象没有消息';
+        } else if (error && typeof error === 'object') {
+          const businessError = error as BusinessError;
+          errorMessage = businessError.message || businessError.code?.toString() || '业务错误';
+        } else {
+          errorMessage = String(error) || '未知错误';
+        }
+        
+        Logger.error(TAG, `批量生成播客异常: ${errorMessage}`);
+        
+        resolve({
+          success: false,
+          message: '批量生成播客失败',
+          error: errorMessage,
+        });
+      }
+    });
+  }
+
+  /**
+   * 查询任务状态
+   * @param taskId 任务ID
+   * @returns 任务状态
+   */
+  async getTaskStatus(taskId: string): Promise<ApiResponse<TaskStatus>> {
+    return new Promise<ApiResponse<TaskStatus>>((resolve) => {
+      try {
+        const httpRequest = http.createHttp();
+        const options: http.HttpRequestOptions = {
+          method: http.RequestMethod.GET,
+          header: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          connectTimeout: PodcastConfig.API_TIMEOUT,
+          readTimeout: PodcastConfig.API_TIMEOUT,
+        };
+
+        const apiUrl = PodcastConfig.USE_CLOUD_FUNCTION
+          ? this.baseUrl
+          : this.buildApiUrl(`/api/v1/podcast/task/${taskId}`);
+
+        Logger.info(TAG, `查询任务状态: ${apiUrl}`);
+
+        httpRequest.request(
+          apiUrl,
+          options,
+          (err: BusinessError, data: http.HttpResponse) => {
+            httpRequest.destroy();
+            
+            const result = this.handleResponse<TaskStatus>(err, data || null, '查询任务状态失败');
+            if (result.success) {
+              Logger.info(TAG, `任务状态查询成功: ${taskId}, 状态=${result.data?.status}`);
+            } else {
+              Logger.error(TAG, `任务状态查询失败: ${result.error || result.message}`);
+            }
+            resolve(result);
+          }
+        );
+      } catch (error) {
+        let errorMessage = '未知错误';
+        if (error instanceof Error) {
+          errorMessage = error.message || '错误对象没有消息';
+        } else if (error && typeof error === 'object') {
+          const businessError = error as BusinessError;
+          errorMessage = businessError.message || businessError.code?.toString() || '业务错误';
+        } else {
+          errorMessage = String(error) || '未知错误';
+        }
+        
+        Logger.error(TAG, `查询任务状态异常: ${errorMessage}`);
+        
+        resolve({
+          success: false,
+          message: '查询任务状态失败',
           error: errorMessage,
         });
       }
