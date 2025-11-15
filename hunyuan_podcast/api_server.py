@@ -63,6 +63,429 @@ _PROGRESS_CACHE: Dict[str, Dict[str, Any]] = {}
 # SSE连接管理：存储每个job_id的SSE连接队列
 _PROGRESS_SSE_QUEUES: Dict[str, asyncio.Queue] = {}
 
+# ============ 异步任务管理器 ============
+# 并发控制：限制同时运行的播客生成任务数量（避免GPU内存溢出）
+MAX_CONCURRENT_PODCAST_TASKS = int(os.getenv("MAX_CONCURRENT_PODCAST_TASKS", "2"))
+
+class PodcastTask:
+    """播客生成任务"""
+    def __init__(self, task_id: str, task_type: str, request_data: Dict[str, Any]):
+        self.task_id = task_id
+        self.task_type = task_type  # "multi_role", "character", "deep"
+        self.request_data = request_data
+        self.status = "pending"  # pending, processing, completed, failed
+        self.progress = 0
+        self.message = "任务已创建"
+        self.result: Optional[Dict[str, Any]] = None
+        self.error: Optional[str] = None
+        self.created_at = time.time()
+        self.started_at: Optional[float] = None
+        self.completed_at: Optional[float] = None
+
+class PodcastTaskManager:
+    """播客任务管理器（单例）"""
+    _instance: Optional['PodcastTaskManager'] = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(PodcastTaskManager, cls).__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+    
+    def __init__(self):
+        if not self._initialized:
+            self.tasks: Dict[str, PodcastTask] = {}
+            self.queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+            self.semaphore = asyncio.Semaphore(MAX_CONCURRENT_PODCAST_TASKS)
+            self.workers: List[asyncio.Task] = []
+            self._initialized = True
+            logger.info(f"PodcastTaskManager初始化完成，最大并发数: {MAX_CONCURRENT_PODCAST_TASKS}")
+    
+    def start_workers(self, num_workers: int = None):
+        """启动后台工作线程"""
+        if num_workers is None:
+            num_workers = MAX_CONCURRENT_PODCAST_TASKS
+        
+        for i in range(num_workers):
+            worker = asyncio.create_task(self._worker(f"podcast-worker-{i}"))
+            self.workers.append(worker)
+            logger.info(f"启动播客生成工作线程: podcast-worker-{i}")
+    
+    async def _worker(self, worker_name: str):
+        """后台工作线程"""
+        logger.info(f"{worker_name} 已启动")
+        
+        while True:
+            try:
+                # 从队列获取任务
+                task_id = await self.queue.get()
+                
+                if task_id not in self.tasks:
+                    logger.warning(f"{worker_name}: 任务 {task_id} 不存在")
+                    self.queue.task_done()
+                    continue
+                
+                task = self.tasks[task_id]
+                
+                # 获取信号量（限制并发数）
+                async with self.semaphore:
+                    logger.info(f"{worker_name}: 开始处理任务 {task_id} (类型: {task.task_type})")
+                    await self._process_task(task, worker_name)
+                
+                self.queue.task_done()
+                
+            except asyncio.CancelledError:
+                logger.info(f"{worker_name} 已取消")
+                break
+            except Exception as e:
+                logger.error(f"{worker_name} 错误: {e}", exc_info=True)
+                self.queue.task_done()
+    
+    async def _process_task(self, task: PodcastTask, worker_name: str):
+        """处理单个任务"""
+        try:
+            # 更新状态为处理中
+            task.status = "processing"
+            task.started_at = time.time()
+            task.progress = 5
+            task.message = "任务开始处理"
+            _update_progress(task.task_id, "processing", 5, task.message)
+            
+            logger.info(f"任务 {task.task_id} 开始处理")
+            
+            # 获取生成器实例
+            gen = get_generator()
+            
+            # 根据任务类型调用相应的生成函数
+            if task.task_type == "multi_role":
+                result = await self._generate_multi_role(gen, task)
+            elif task.task_type == "character":
+                result = await self._generate_character(gen, task)
+            elif task.task_type == "deep":
+                result = await self._generate_deep(gen, task)
+            else:
+                raise ValueError(f"未知的任务类型: {task.task_type}")
+            
+            # 更新任务状态
+            task.status = "completed"
+            task.progress = 100
+            task.message = "任务完成"
+            task.result = result
+            task.completed_at = time.time()
+            
+            duration = task.completed_at - task.started_at
+            logger.info(f"任务 {task.task_id} 完成，耗时: {duration:.2f}秒")
+            
+            _update_progress(task.task_id, "completed", 100, "任务完成", done=True, 
+                           audio_url=result.get("audio_url") if result else None)
+            
+        except Exception as e:
+            task.status = "failed"
+            task.error = str(e)
+            task.completed_at = time.time()
+            logger.error(f"任务 {task.task_id} 失败: {e}", exc_info=True)
+            
+            _update_progress(task.task_id, "failed", task.progress, f"任务失败: {str(e)}", 
+                           done=True, error=str(e))
+    
+    async def _generate_multi_role(self, gen: PodcastGenerator, task: PodcastTask) -> Dict[str, Any]:
+        """生成多角色播客"""
+        from .input_processor import get_processor
+        from .music_selector import MusicSelector
+        
+        request_data = task.request_data
+        _update_progress(task.task_id, "processing", 10, "正在处理输入文本...")
+        
+        # 处理输入（与原有逻辑相同）
+        processor = get_processor()
+        cleaned_text = await asyncio.get_event_loop().run_in_executor(
+            None, processor.process_input, request_data
+        )
+        
+        _update_progress(task.task_id, "processing", 30, "正在下载音色文件...")
+        
+        # 下载音色文件
+        role_voices = {}
+        if request_data.get("role_voice_urls"):
+            for role, url in request_data["role_voice_urls"].items():
+                voice_path = await asyncio.get_event_loop().run_in_executor(
+                    None, download_audio_from_url, url
+                )
+                role_voices[role] = voice_path
+        
+        _update_progress(task.task_id, "processing", 50, "正在选择背景音乐...")
+        
+        # 选择背景音乐
+        music_selector = MusicSelector()
+        background_music_path = None
+        if request_data.get("category") or request_data.get("topic"):
+            try:
+                background_music_path = await asyncio.get_event_loop().run_in_executor(
+                    None, music_selector.select_music,
+                    request_data.get("category"), request_data.get("topic")
+                )
+            except Exception as e:
+                logger.warning(f"选择背景音乐失败: {str(e)}")
+        
+        _update_progress(task.task_id, "processing", 60, "正在生成播客音频...")
+        
+        # 生成播客
+        output_path = await asyncio.get_event_loop().run_in_executor(
+            None, gen.generate_from_text,
+            cleaned_text, role_voices, None,
+            request_data.get("silence_interval", 800),
+            None, None, background_music_path,
+            request_data.get("background_volume", 0.3),
+            "single", True
+        )
+        
+        _update_progress(task.task_id, "processing", 90, "正在编码音频文件...")
+        
+        # 编码音频
+        audio_base64 = encode_file_to_base64(output_path)
+        file_size = os.path.getsize(output_path) / (1024 * 1024)
+        
+        result = {
+            "audio_base64": audio_base64,
+            "file_size_mb": file_size,
+            "output_path": output_path
+        }
+        
+        # 如果配置了AGC上传，尝试上传
+        if request_data.get("wait_for_upload"):
+            try:
+                _update_progress(task.task_id, "processing", 95, "正在上传到云存储...")
+                # 这里可以添加AGC上传逻辑
+                # agc_url = await upload_to_agc(output_path)
+                # result["audio_url"] = agc_url
+            except Exception as e:
+                logger.warning(f"上传到云存储失败: {str(e)}")
+        
+        return result
+    
+    async def _generate_character(self, gen: PodcastGenerator, task: PodcastTask) -> Dict[str, Any]:
+        """生成自定义角色播客"""
+        from .text_processor import TextProcessor
+        from .music_selector import MusicSelector
+        from .api_client import get_client
+        
+        request_data = task.request_data
+        _update_progress(task.task_id, "processing", 10, "正在下载音色文件...")
+        
+        # 下载音色文件并构建角色信息
+        role_voices = {}
+        character_descriptions = {}
+        characters = request_data.get("characters", [])
+        
+        for char in characters:
+            char_name = char.get("name") if isinstance(char, dict) else char.name
+            voice_url = char.get("voice_url") if isinstance(char, dict) else char.voice_url
+            
+            voice_path = await asyncio.get_event_loop().run_in_executor(
+                None, download_audio_from_url, voice_url
+            )
+            role_voices[char_name] = voice_path
+            
+            if isinstance(char, dict):
+                character_descriptions[char_name] = {
+                    "identity": char.get("identity", ""),
+                    "personality": char.get("personality", ""),
+                    "catchphrase": char.get("catchphrase", ""),
+                    "speaking_style": char.get("speaking_style", ""),
+                    "relationship": char.get("relationship", "")
+                }
+            else:
+                character_descriptions[char_name] = {
+                    "identity": char.identity or "",
+                    "personality": char.personality or "",
+                    "catchphrase": char.catchphrase or "",
+                    "speaking_style": char.speaking_style or "",
+                    "relationship": char.relationship or ""
+                }
+        
+        _update_progress(task.task_id, "processing", 30, "正在生成对话文本...")
+        
+        # 获取文本素材
+        text_material = request_data.get("text", "")
+        
+        # 生成对话文本
+        processor = TextProcessor()
+        api_client = get_client()
+        prompt = processor.build_character_prompt(character_descriptions, request_data.get("topic"))
+        
+        generated_text = await asyncio.get_event_loop().run_in_executor(
+            None, api_client.generate_text,
+            prompt, 0.7, 3000
+        )
+        
+        cleaned_text = processor.clean_text(generated_text)
+        
+        _update_progress(task.task_id, "processing", 50, "正在选择背景音乐...")
+        
+        # 选择背景音乐
+        music_selector = MusicSelector()
+        background_music_path = None
+        if request_data.get("category") or request_data.get("topic"):
+            try:
+                background_music_path = await asyncio.get_event_loop().run_in_executor(
+                    None, music_selector.select_music,
+                    request_data.get("category"), request_data.get("topic")
+                )
+            except Exception as e:
+                logger.warning(f"选择背景音乐失败: {str(e)}")
+        
+        _update_progress(task.task_id, "processing", 60, "正在生成播客音频...")
+        
+        # 生成播客
+        output_path = await asyncio.get_event_loop().run_in_executor(
+            None, gen.generate_from_text,
+            cleaned_text, role_voices, None,
+            request_data.get("silence_interval", 800),
+            None, None, background_music_path,
+            request_data.get("background_volume", 0.3),
+            "single", True
+        )
+        
+        _update_progress(task.task_id, "processing", 90, "正在编码音频文件...")
+        
+        # 编码音频
+        audio_base64 = encode_file_to_base64(output_path)
+        file_size = os.path.getsize(output_path) / (1024 * 1024)
+        
+        result = {
+            "audio_base64": audio_base64,
+            "file_size_mb": file_size,
+            "output_path": output_path
+        }
+        
+        return result
+    
+    async def _generate_deep(self, gen: PodcastGenerator, task: PodcastTask) -> Dict[str, Any]:
+        """生成深度播客"""
+        from .text_processor import TextProcessor
+        from .music_selector import MusicSelector
+        from .api_client import get_client
+        
+        request_data = task.request_data
+        _update_progress(task.task_id, "processing", 10, "正在下载音色文件...")
+        
+        # 下载音色文件
+        role_voices = {}
+        num_characters = request_data.get("num_characters", 2)
+        role_names = ["角色A", "角色B", "角色C"][:num_characters]
+        
+        for role_name in role_names:
+            if role_name in request_data.get("role_voice_urls", {}):
+                voice_url = request_data["role_voice_urls"][role_name]
+                voice_path = await asyncio.get_event_loop().run_in_executor(
+                    None, download_audio_from_url, voice_url
+                )
+                role_voices[role_name] = voice_path
+        
+        _update_progress(task.task_id, "processing", 30, "正在生成对话文本...")
+        
+        # 生成对话文本
+        processor = TextProcessor()
+        api_client = get_client()
+        prompt = processor.build_deep_podcast_prompt(
+            request_data.get("topic", ""),
+            request_data.get("depth_level", "深度"),
+            num_characters
+        )
+        
+        generated_text = await asyncio.get_event_loop().run_in_executor(
+            None, api_client.generate_text,
+            prompt, 0.7, 3000
+        )
+        
+        cleaned_text = processor.clean_text(generated_text)
+        
+        _update_progress(task.task_id, "processing", 50, "正在选择背景音乐...")
+        
+        # 选择背景音乐
+        music_selector = MusicSelector()
+        background_music_path = None
+        if request_data.get("category") or request_data.get("topic"):
+            try:
+                background_music_path = await asyncio.get_event_loop().run_in_executor(
+                    None, music_selector.select_music,
+                    request_data.get("category"), request_data.get("topic")
+                )
+            except Exception as e:
+                logger.warning(f"选择背景音乐失败: {str(e)}")
+        
+        _update_progress(task.task_id, "processing", 60, "正在生成播客音频...")
+        
+        # 生成播客
+        output_path = await asyncio.get_event_loop().run_in_executor(
+            None, gen.generate_from_text,
+            cleaned_text, role_voices, None,
+            request_data.get("silence_interval", 800),
+            None, None, background_music_path,
+            request_data.get("background_volume", 0.3),
+            "single", True
+        )
+        
+        _update_progress(task.task_id, "processing", 90, "正在编码音频文件...")
+        
+        # 编码音频
+        audio_base64 = encode_file_to_base64(output_path)
+        file_size = os.path.getsize(output_path) / (1024 * 1024)
+        
+        result = {
+            "audio_base64": audio_base64,
+            "file_size_mb": file_size,
+            "output_path": output_path
+        }
+        
+        return result
+    
+    async def create_task(self, task_id: str, task_type: str, request_data: Dict[str, Any]) -> PodcastTask:
+        """创建并加入队列"""
+        task = PodcastTask(task_id, task_type, request_data)
+        self.tasks[task_id] = task
+        await self.queue.put(task_id)
+        logger.info(f"任务 {task_id} 已加入队列，队列大小: {self.queue.qsize()}")
+        return task
+    
+    def get_task(self, task_id: str) -> Optional[PodcastTask]:
+        """获取任务信息"""
+        return self.tasks.get(task_id)
+    
+    def get_active_task_count(self) -> int:
+        """获取活跃任务数量"""
+        return sum(
+            1 for task in self.tasks.values()
+            if task.status in ["pending", "processing"]
+        )
+    
+    async def shutdown(self):
+        """关闭任务管理器"""
+        logger.info("正在关闭PodcastTaskManager...")
+        
+        # 等待队列清空
+        await self.queue.join()
+        
+        # 取消所有工作线程
+        for worker in self.workers:
+            worker.cancel()
+        
+        # 等待工作线程结束
+        await asyncio.gather(*self.workers, return_exceptions=True)
+        logger.info("PodcastTaskManager关闭完成")
+
+# 全局任务管理器实例
+_task_manager: Optional[PodcastTaskManager] = None
+
+def get_task_manager() -> PodcastTaskManager:
+    """获取全局任务管理器实例"""
+    global _task_manager
+    if _task_manager is None:
+        _task_manager = PodcastTaskManager()
+        # 启动工作线程
+        _task_manager.start_workers()
+    return _task_manager
+
 def _progress_path(job_id: str) -> str:
     return os.path.join(_PROGRESS_DIR, f"{job_id}.json")
 
@@ -353,6 +776,18 @@ class ApiResponse(BaseModel):
     message: str = Field(..., description="响应消息")
     data: Optional[Dict[str, Any]] = Field(None, description="响应数据")
     error: Optional[str] = Field(None, description="错误信息")
+
+
+class BatchTaskItem(BaseModel):
+    """批量任务项"""
+    task_type: str = Field(..., description="任务类型: multi_role, character, deep")
+    task_id: Optional[str] = Field(None, description="可选的任务ID，如果不提供则自动生成")
+    request_data: Dict[str, Any] = Field(..., description="任务请求数据（与对应单个接口的参数相同）")
+
+
+class BatchRequest(BaseModel):
+    """批量生成请求"""
+    tasks: List[BatchTaskItem] = Field(..., description="任务列表", min_items=1, max_items=50)
 
 
 # ============ 工具函数 ============
@@ -2128,6 +2563,200 @@ async def get_progress(job_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/v1/podcast/batch", response_model=ApiResponse)
+async def batch_generate_podcasts(request: BatchRequest):
+    """
+    批量生成播客接口
+    
+    请求体格式：
+    {
+        "tasks": [
+            {
+                "task_type": "multi_role",  // 或 "character", "deep"
+                "task_id": "可选的任务ID，如果不提供则自动生成",
+                "request_data": {
+                    // 对应任务类型的请求参数（与单个接口相同）
+                }
+            },
+            ...
+        ]
+    }
+    
+    返回：
+    {
+        "success": true,
+        "message": "批量任务已提交",
+        "data": {
+            "task_ids": ["task_id_1", "task_id_2", ...],
+            "total": 2,
+            "queue_size": 5
+        }
+    }
+    """
+    import uuid
+    
+    try:
+        task_manager = get_task_manager()
+        task_ids = []
+        
+        for task_item in request.tasks:
+            task_type = task_item.task_type
+            if task_type not in ["multi_role", "character", "deep"]:
+                raise HTTPException(status_code=400, detail=f"未知的任务类型: {task_type}")
+            
+            task_id = task_item.task_id or str(uuid.uuid4())
+            request_data = task_item.request_data.dict() if isinstance(task_item.request_data, BaseModel) else task_item.request_data
+            
+            # 创建任务
+            task = await task_manager.create_task(task_id, task_type, request_data)
+            task_ids.append(task_id)
+            
+            # 初始化进度
+            _update_progress(task_id, "queued", 0, "任务已加入队列，等待处理")
+        
+        logger.info(f"批量提交了 {len(task_ids)} 个播客生成任务")
+        
+        return ApiResponse(
+            success=True,
+            message=f"批量任务已提交，共 {len(task_ids)} 个任务",
+            data={
+                "task_ids": task_ids,
+                "total": len(task_ids),
+                "queue_size": task_manager.queue.qsize(),
+                "active_tasks": task_manager.get_active_task_count()
+            }
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"批量生成播客失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"批量生成播客失败: {str(e)}")
+
+
+@app.get("/api/v1/podcast/task/{task_id}", response_model=ApiResponse)
+async def get_task_status(task_id: str):
+    """
+    查询任务状态
+    
+    返回任务详细信息，包括状态、进度、结果等
+    """
+    try:
+        task_manager = get_task_manager()
+        task = task_manager.get_task(task_id)
+        
+        if task is None:
+            # 尝试从进度缓存获取
+            progress = _get_progress(task_id)
+            if progress.get("phase") == "unknown":
+                raise HTTPException(status_code=404, detail="任务不存在")
+            
+            return ApiResponse(
+                success=True,
+                message="任务信息",
+                data={
+                    "task_id": task_id,
+                    "status": progress.get("phase", "unknown"),
+                    "progress": progress.get("percent", 0),
+                    "message": progress.get("message", ""),
+                    "done": progress.get("done", False),
+                    "error": progress.get("error"),
+                    "audio_url": progress.get("audio_url")
+                }
+            )
+        
+        # 构建响应数据
+        result_data = {
+            "task_id": task.task_id,
+            "task_type": task.task_type,
+            "status": task.status,
+            "progress": task.progress,
+            "message": task.message,
+            "created_at": task.created_at,
+            "started_at": task.started_at,
+            "completed_at": task.completed_at
+        }
+        
+        if task.error:
+            result_data["error"] = task.error
+        
+        if task.result:
+            result_data["result"] = {
+                "file_size_mb": task.result.get("file_size_mb"),
+                "output_path": task.result.get("output_path"),
+                "audio_url": task.result.get("audio_url")
+            }
+            # 注意：不返回完整的base64音频，避免响应过大
+        
+        return ApiResponse(
+            success=True,
+            message="任务信息",
+            data=result_data
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"查询任务状态失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"查询任务状态失败: {str(e)}")
+
+
+@app.get("/api/v1/podcast/tasks", response_model=ApiResponse)
+async def list_tasks(status: Optional[str] = None, limit: int = 20):
+    """
+    列出所有任务
+    
+    参数：
+    - status: 过滤状态（pending, processing, completed, failed），可选
+    - limit: 返回数量限制，默认20
+    """
+    try:
+        task_manager = get_task_manager()
+        tasks = list(task_manager.tasks.values())
+        
+        # 按创建时间倒序排序
+        tasks.sort(key=lambda t: t.created_at, reverse=True)
+        
+        # 状态过滤
+        if status:
+            tasks = [t for t in tasks if t.status == status]
+        
+        # 限制数量
+        tasks = tasks[:limit]
+        
+        # 构建任务列表
+        task_list = []
+        for task in tasks:
+            task_info = {
+                "task_id": task.task_id,
+                "task_type": task.task_type,
+                "status": task.status,
+                "progress": task.progress,
+                "message": task.message,
+                "created_at": task.created_at,
+                "started_at": task.started_at,
+                "completed_at": task.completed_at
+            }
+            if task.error:
+                task_info["error"] = task.error
+            task_list.append(task_info)
+        
+        return ApiResponse(
+            success=True,
+            message=f"共找到 {len(task_list)} 个任务",
+            data={
+                "tasks": task_list,
+                "total": len(task_manager.tasks),
+                "active": task_manager.get_active_task_count(),
+                "queue_size": task_manager.queue.qsize()
+            }
+        )
+    
+    except Exception as e:
+        logger.error(f"列出任务失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"列出任务失败: {str(e)}")
+
+
 @app.get("/api/v1/podcast/progress/{job_id}/stream")
 async def stream_progress(job_id: str):
     """
@@ -2209,6 +2838,23 @@ async def stream_progress(job_id: str):
     )
 
 
+# 应用启动和关闭事件
+@app.on_event("startup")
+async def startup_event():
+    """应用启动时初始化任务管理器"""
+    logger.info("应用启动，初始化任务管理器...")
+    task_manager = get_task_manager()
+    logger.info(f"任务管理器已初始化，最大并发数: {MAX_CONCURRENT_PODCAST_TASKS}")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """应用关闭时清理资源"""
+    logger.info("应用关闭，清理任务管理器...")
+    task_manager = get_task_manager()
+    await task_manager.shutdown()
+    logger.info("任务管理器已关闭")
+
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="混元AI播客生成API服务")
@@ -2220,6 +2866,7 @@ if __name__ == "__main__":
     print(f"📡 API地址: http://{args.host}:{args.port}")
     print(f"📚 API文档: http://{args.host}:{args.port}/docs")
     print(f"💡 健康检查: http://{args.host}:{args.port}/health")
+    print(f"⚙️  最大并发任务数: {MAX_CONCURRENT_PODCAST_TASKS} (可通过环境变量 MAX_CONCURRENT_PODCAST_TASKS 配置)")
     
     uvicorn.run(app, host=args.host, port=args.port)
 

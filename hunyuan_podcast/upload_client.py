@@ -150,12 +150,14 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
         'productId': product_id or '',
         'client_id': client_id,
         'Authorization': f'Bearer {token}',
+        'Content-Length': str(file_size),  # AGC服务器要求必须设置Content-Length头
         'X-Agc-File-Size': str(file_size),
         'X-Agc-Content-Type': content_type,
     }
 
     logger.info(f"上传到 AGC: {url}")
     logger.info(f"  文件大小: {file_size} bytes ({file_size / (1024 * 1024):.2f} MB)")
+    logger.info(f"  Content-Length: {file_size}")
     logger.info(f"  X-Agc-Content-Type: {content_type}")
     logger.info(f"  Headers: productId={'已设置' if product_id else '未设置'}, client_id={'已设置' if client_id else '未设置'}, Authorization={'已设置' if token else '未设置'}")
 
