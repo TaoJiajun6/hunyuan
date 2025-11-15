@@ -31,33 +31,33 @@ class MusicSelector:
         "intro": ["开场", "介绍", "intro", "opening"]
     }
     
-    # 播客分类到音乐子目录的映射
+    # 播客分类到音乐子目录的映射（使用英文目录名）
     CATEGORY_TO_MUSIC_DIR = {
-        "商业": "商业（包含创业创新",
-        "科技": "科技（包含科学科普）",
-        "财经": "财经",
-        "新闻": "新闻",
-        "影视": "影视",
-        "音乐": "音乐",
-        "文化艺术": "文化艺术（包含读书阅读）",
-        "历史": "历史",
-        "哲学思考": "哲学思考",
-        "自我成长": "自我成长（包含自我成长与自愈、心理学",
-        "职场": "职场（包含职场万象、职场人际关系、求职就业）",
-        "学习": "学习（包含学习类、考题）",
-        "教育育儿": "教育育儿",
-        "情感恋爱": "情感恋爱",
-        "健康养生": "健康养生（包含运动健身）",
-        "旅游": "旅游",
-        "美食": "美食",
-        "生活方式": "生活方式",
-        "娱乐": "娱乐（包含娱乐八卦、喜剧）",
-        "游戏电竞": "游戏电竞",
-        "体育": "体育",
-        "时尚美妆": "时尚美妆",
-        "汽车": "汽车",
-        "法律": "法律",
-        "宠物": "宠物"
+        "商业": "business",
+        "科技": "technology",
+        "财经": "finance",
+        "新闻": "news",
+        "影视": "film",
+        "音乐": "music",
+        "文化艺术": "culture",
+        "历史": "history",
+        "哲学思考": "philosophy",
+        "自我成长": "self_improvement",
+        "职场": "career",
+        "学习": "learning",
+        "教育育儿": "education",
+        "情感恋爱": "relationship",
+        "健康养生": "health",
+        "旅游": "travel",
+        "美食": "food",
+        "生活方式": "lifestyle",
+        "娱乐": "entertainment",
+        "游戏电竞": "gaming",
+        "体育": "sports",
+        "时尚美妆": "fashion",
+        "汽车": "automotive",
+        "法律": "law",
+        "宠物": "pets"
     }
     
     def __init__(self, music_dir: Optional[str] = None, use_cloud_storage: bool = True):
@@ -355,51 +355,43 @@ class MusicSelector:
         
         Args:
             music_files: 音乐文件列表
-            directory_name: 子目录名称（如 "体育"、"财经"、"商业（包含创业创新" 等）
+            directory_name: 子目录名称（英文，如 "sports"、"finance"、"business" 等）
         
         Returns:
             匹配的音乐文件列表
         """
         filtered = []
-        # 提取目录名称的核心部分（去除括号及之后的内容，用于匹配）
-        # 例如："商业（包含创业创新" -> "商业"
-        core_dir_name = directory_name.split('（')[0].split('(')[0].strip()
-        directory_name_lower = directory_name.lower()
-        core_dir_name_lower = core_dir_name.lower()
+        # 使用小写进行匹配（英文目录名）
+        directory_name_lower = directory_name.lower().strip()
         
         # 调试：打印匹配信息
-        print(f"  匹配目录: '{directory_name}' (核心部分: '{core_dir_name}')")
+        print(f"  匹配目录: '{directory_name}'")
         
         for music_info in music_files:
             # 从云存储路径或本地路径中提取目录信息
             cloud_path = music_info.get('cloud_path', '')
             path = music_info.get('path', '')
             
-            # 检查云存储路径（格式：music/体育/music.mp3 或 music/商业（包含创业创新/music.mp3）
+            # 检查云存储路径（格式：music/sports/music.mp3 或 music/business/music.mp3）
             if cloud_path:
-                # 提取目录部分：music/体育/music.mp3 -> 体育
+                # 提取目录部分：music/sports/music.mp3 -> sports
                 path_parts = cloud_path.split('/')
                 if len(path_parts) >= 2:
                     # 跳过 "music" 部分，获取子目录
                     subdir = path_parts[1] if path_parts[0].lower() == 'music' else path_parts[0]
-                    subdir_lower = subdir.lower()
-                    # 提取子目录的核心部分（去除括号）
-                    subdir_core = subdir.split('（')[0].split('(')[0].strip().lower()
+                    subdir_lower = subdir.lower().strip()
                     
-                    # 匹配逻辑：
-                    # 1. 核心部分完全匹配（最重要）
-                    # 2. 核心部分包含关系
-                    # 3. 完整目录名称匹配（支持模糊匹配）
+                    # 匹配逻辑：完全匹配或部分匹配（支持下划线和连字符）
+                    # 例如：business 匹配 business, self_improvement 匹配 self_improvement
                     is_match = (
-                        core_dir_name_lower == subdir_core or  # 核心部分完全匹配
-                        (core_dir_name_lower and subdir_core and 
-                         (core_dir_name_lower in subdir_core or subdir_core in core_dir_name_lower)) or  # 核心部分包含
-                        directory_name_lower in subdir_lower or  # 完整名称包含
+                        directory_name_lower == subdir_lower or  # 完全匹配
+                        directory_name_lower.replace('_', '-') == subdir_lower.replace('_', '-') or  # 支持下划线和连字符互换
+                        directory_name_lower in subdir_lower or  # 包含匹配
                         subdir_lower in directory_name_lower  # 反向包含
                     )
                     
                     if is_match:
-                        print(f"    ✓ 匹配: {cloud_path} (子目录: '{subdir}', 核心: '{subdir_core}')")
+                        print(f"    ✓ 匹配: {cloud_path} (子目录: '{subdir}')")
                         filtered.append(music_info)
                         continue
             
@@ -408,15 +400,12 @@ class MusicSelector:
                 # 提取目录部分
                 dir_part = os.path.dirname(path)
                 dir_name = os.path.basename(dir_part)
-                dir_name_lower = dir_name.lower()
-                # 提取目录名称的核心部分
-                dir_name_core = dir_name.split('（')[0].split('(')[0].strip().lower()
+                dir_name_lower = dir_name.lower().strip()
                 
                 # 匹配逻辑：同上
                 is_match = (
-                    core_dir_name_lower == dir_name_core or
-                    (core_dir_name_lower and dir_name_core and 
-                     (core_dir_name_lower in dir_name_core or dir_name_core in core_dir_name_lower)) or
+                    directory_name_lower == dir_name_lower or
+                    directory_name_lower.replace('_', '-') == dir_name_lower.replace('_', '-') or
                     directory_name_lower in dir_name_lower or
                     dir_name_lower in directory_name_lower
                 )

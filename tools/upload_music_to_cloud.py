@@ -337,8 +337,8 @@ def main():
     print(f"音乐目录: {music_dir}")
     print(f"存储URL: {storage_url}")
     print(f"存储桶: {bucket}")
-    print(f"客户端ID: {client_id[:8]}..." if client_id else "未设置")
-    print(f"项目ID: {product_id or '未设置'}")
+    print(f"客户端ID: {'已设置' if client_id else '未设置'}")
+    print(f"项目ID: {'已设置' if product_id else '未设置'}")
     print("=" * 60)
     print()
     
