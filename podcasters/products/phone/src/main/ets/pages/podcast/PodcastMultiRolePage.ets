@@ -23,7 +23,7 @@ export struct PodcastMultiRolePage {
   @Local text: string = ''; // 保留用于兼容，但优先使用textFileUrl
   @Local textFileUrl: string = ''; // 文本文件云存储URL
   @Local textFileName: string = ''; // 文本文件名
-  @Local inputType: string = '文字'; // 输入类型：文字、文字+指令、公众号、公众号+指令、网页、文件、文件+指令、文字+英文指令
+  @Local inputType: string = '文字'; // 输入类型：文字、文字+指令、公众号、公众号+指令、网页、网页+指令、文件、文件+指令、文字+英文指令
   @Local inputUrl: string = ''; // 输入URL（用于公众号、网页等类型）
   @Local instruction: string = ''; // 指令内容（可选）
   @Local category: string = ''; // 播客分类（可选）
@@ -42,6 +42,7 @@ export struct PodcastMultiRolePage {
     { value: '公众号' },
     { value: '公众号+指令' },
     { value: '网页' },
+    { value: '网页+指令' },
     { value: '文件' },
     { value: '文件+指令' },
     { value: '文字+英文指令' }
@@ -517,7 +518,7 @@ export struct PodcastMultiRolePage {
                 .onSelect((index: number, value: string) => {
                   this.inputType = value;
                   // 根据类型清空不需要的字段
-                  if (!['公众号', '公众号+指令', '网页'].includes(value)) {
+                  if (!['公众号', '公众号+指令', '网页', '网页+指令'].includes(value)) {
                     this.inputUrl = '';
                   }
                   // 如果不是文件类型，清空文件相关字段
@@ -530,7 +531,7 @@ export struct PodcastMultiRolePage {
             }
 
             // URL输入（当选择公众号、网页等类型时显示，PDF通过文件上传）
-            if (['公众号', '公众号+指令', '网页'].includes(this.inputType)) {
+            if (['公众号', '公众号+指令', '网页', '网页+指令'].includes(this.inputType)) {
               Column({ space: 12 }) {
                 Text('输入URL')
                   .fontSize($r('sys.float.Subtitle_L'))

@@ -227,7 +227,7 @@ async def log_requests(request: Request, call_next):
                         input_type = body_json.get("input_type", "").strip()
                         
                         # 根据输入类型验证必需的输入
-                        url_types = ["公众号", "公众号+指令", "网页"]
+                        url_types = ["公众号", "公众号+指令", "网页", "网页+指令"]
                         text_types = ["文字", "文字+指令", "文字+英文指令"]
                         file_types = ["文件", "文件+指令"]
                         
@@ -280,7 +280,7 @@ class MultiRoleRequest(BaseModel):
     """多角色互动播客请求"""
     text: Optional[str] = Field(None, description="播客文本（支持角色标记或普通文本，如果使用text_file_url或input_url，此字段可为空）")
     text_file_url: Optional[str] = Field(None, description="文本文件云存储URL（.txt或Word文件，如果提供，优先使用）")
-    input_type: Optional[str] = Field(None, description="输入类型，可选值：文字、文字+指令、公众号、公众号+指令、网页、文件、文件+指令、文字+英文指令")
+    input_type: Optional[str] = Field(None, description="输入类型，可选值：文字、文字+指令、公众号、公众号+指令、网页、网页+指令、文件、文件+指令、文字+英文指令")
     input_url: Optional[str] = Field(None, description="输入URL（用于公众号、网页、PDF等类型）")
     instruction: Optional[str] = Field(None, description="指令内容（可选，用于控制播客生成过程，如'生成5分钟播客'、'使用轻松风格'等）")
     role_voice_urls: Optional[Dict[str, str]] = Field(None, description="角色音色映射，云存储URL（如果使用云存储，键为角色名，值为云存储下载URL）")
@@ -974,7 +974,7 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
     input_type = request.input_type or ""
     text_types = ["文字", "文字+指令", "文字+英文指令"]
     file_types = ["文件", "文件+指令"]
-    url_types = ["公众号", "公众号+指令", "网页"]
+    url_types = ["公众号", "公众号+指令", "网页", "网页+指令"]
     
     # 文字类型：只需要text，不需要text_file_url
     if input_type in text_types:
