@@ -725,7 +725,7 @@ def generate_character_podcast(
             generated_text = api_client.generate_text(
                 prompt=prompt,
                 temperature=0.8,
-                max_tokens=2000  # 降低以加快生成速度
+                max_tokens=3000  # 增加到7000以支持更长的对话（5-6分钟播客）
             )
             
             if progress:

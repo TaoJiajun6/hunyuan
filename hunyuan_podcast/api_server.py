@@ -1195,7 +1195,7 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 generated_text = api_client.generate_text(
                     prompt=prompt,
                     temperature=0.6,  # 降低温度以加快生成速度
-                    max_tokens=4000  
+                    max_tokens=4000  # 增加到4000以支持更长的对话（5-6分钟播客）
                 )
                 text_generation_time = time.time() - text_generation_start
                 retrieval_timings["对话文本生成"] = text_generation_time
@@ -1568,7 +1568,7 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
             generated_text = api_client.generate_text(
                 prompt=prompt,
                 temperature=0.8,
-                max_tokens=2000  # 降低以加快生成速度
+                max_tokens=3000  # 增加到3000以支持更长的对话（5-6分钟播客）
             )
             text_generation_time = time.time() - text_generation_start
             logger.info(f"对话文本生成完成，耗时: {text_generation_time:.2f}s，文本长度: {len(generated_text)}")
@@ -1821,7 +1821,7 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
             generated_text = api_client.generate_text(
                 prompt=prompt,
                 temperature=0.7,
-                max_tokens=2000  # 降低以加快生成速度
+                max_tokens=3000  # 增加到3000以支持更长的对话（5-6分钟播客）
             )
             text_generation_time = time.time() - text_generation_start
             logger.info(f"对话文本生成完成，耗时: {text_generation_time:.2f}s，文本长度: {len(generated_text)}")
