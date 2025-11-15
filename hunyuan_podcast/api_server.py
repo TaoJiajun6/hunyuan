@@ -785,7 +785,7 @@ def _load_agc_credentials_from_file(path: str) -> Tuple[Optional[str], Optional[
         client_secret = j.get('client_secret')
         # 尝试多种可能的字段名
         project_id = j.get('project_id') or j.get('projectId') or j.get('projectId')
-        logger.info(f"从 {path} 读取配置: client_id={client_id[:8] if client_id else None}..., project_id={project_id}")
+        logger.info(f"从 {path} 读取配置: client_id={'已设置' if client_id else '未设置'}, project_id={'已设置' if project_id else '未设置'}")
         return client_id, client_secret, project_id
     except Exception as e:
         logger.error(f"读取 AGC 凭证文件失败: {e}")
@@ -935,8 +935,9 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
     
     注意：本接口仅支持云存储URL，不再支持base64编码的音频文件
     """
+    # 立即创建初始进度，确保前端轮询时能立即获取到状态
+    _update_progress(request.job_id, "queued", 1, "任务已提交，准备开始处理")
     start_time = time.time()
-    _update_progress(request.job_id, "queued", 1, "任务已排队")
     
     # 验证文本输入（text、text_file_url或input_url至少有一个）
     has_text = request.text and request.text.strip()
@@ -1511,6 +1512,8 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
     
     注意：本接口仅支持云存储URL，不再支持base64编码的音频文件
     """
+    # 立即创建初始进度，确保前端轮询时能立即获取到状态
+    _update_progress(request.job_id, "queued", 1, "任务已提交，准备开始处理")
     start_time = time.time()
     
     # 检查输入：必须提供文本素材
@@ -1532,6 +1535,7 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
         role_voices = {}
         
         try:
+            _update_progress(request.job_id, "downloading_voices", 5, "正在下载角色音色文件")
             for char in request.characters:
                 logger.info(f"从云存储下载角色 '{char.name}' 的音频文件: {char.voice_url}")
                 # 从云存储URL下载
@@ -1771,6 +1775,8 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
     
     注意：本接口仅支持云存储URL，不再支持base64编码的音频文件
     """
+    # 立即创建初始进度，确保前端轮询时能立即获取到状态
+    _update_progress(request.job_id, "queued", 1, "任务已提交，准备开始处理")
     start_time = time.time()
     
     # 验证云存储URL
@@ -1789,6 +1795,7 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
         role_voices = {}
         
         try:
+            _update_progress(request.job_id, "downloading_voices", 5, "正在下载角色音色文件")
             role_names = ["角色A", "角色B", "角色C"][:request.num_characters]
             for i, role_name in enumerate(role_names):
                 if role_name in request.role_voice_urls:

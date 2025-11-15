@@ -338,7 +338,7 @@ class CloudStorageMusicClient:
                     headers['client_id'] = self.client_id
                     headers['productId'] = self.product_id or ''
                     
-                    print(f"  使用认证方式下载（client_id: {self.client_id[:8]}..., productId: {self.product_id or '(empty)'}）")
+                    print(f"  使用认证方式下载（client_id: {'已设置' if self.client_id else '未设置'}, productId: {'已设置' if self.product_id else '未设置'}）")
                 except Exception as e:
                     print(f"  ✗ 获取token失败: {str(e)}")
                     return None
@@ -444,7 +444,7 @@ class CloudStorageMusicClient:
         
         print(f"正在请求文件列表: {list_url} (path: {normalized_path})")
         print(f"  查询参数: {params}")
-        print(f"  请求头: productId={self.product_id or '(empty)'}, client_id={self.client_id[:8] if self.client_id else '(empty)'}...")
+        print(f"  请求头: productId={'已设置' if self.product_id else '未设置'}, client_id={'已设置' if self.client_id else '未设置'}")
         
         # 发送GET请求
         try:
