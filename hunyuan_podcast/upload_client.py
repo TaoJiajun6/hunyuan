@@ -146,44 +146,38 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
     if not content_type:
         content_type = 'application/octet-stream'
 
-    # 注意：Headers顺序和Java参考代码保持一致
     headers = {
         'productId': product_id or '',
         'client_id': client_id,
         'Authorization': f'Bearer {token}',
         'X-Agc-File-Size': str(file_size),
-        'Content-Type': content_type,
-        'Connection': 'keep-alive',  # 保持连接，提高上传速度
-        'Cache-Control': 'no-cache'  # 禁用缓存
+        'X-Agc-Content-Type': content_type,
     }
-    # 注意：Java参考代码中没有X-Agc-Content-Type，只有Content-Type
 
     logger.info(f"上传到 AGC: {url}")
     logger.info(f"  文件大小: {file_size} bytes ({file_size / (1024 * 1024):.2f} MB)")
-    logger.info(f"  Content-Type: {content_type}")
+    logger.info(f"  X-Agc-Content-Type: {content_type}")
     logger.info(f"  Headers: productId={'已设置' if product_id else '未设置'}, client_id={'已设置' if client_id else '未设置'}, Authorization={'已设置' if token else '未设置'}")
 
     last_exc = None
     file_size_mb = file_size / (1024 * 1024)
     
-    # 根据文件大小决定重试次数：小文件（<10MB）只重试1次，大文件重试3次
+    # 根据文件大小决定重试次数：小文件（<10MB）只重试1次，大文件重试2次
     if file_size_mb < 10:
         retries = 1  # 小文件只重试1次
     else:
-        retries = 3  # 大文件重试3次
+        retries = 2  # 大文件重试2次
     
     backoff_factor = 0.5
-    current_timeout = timeout  # 当前使用的超时时间，重试时会增加
     
     # 根据文件大小动态调整超时时间（在循环外计算，避免重复计算）
-    # 对于大文件（几MB到几十MB），假设最小上传速度为0.2 MB/s（比0.1 MB/s更合理）
-    # 这样可以减少不必要的超时时间，同时仍为慢速网络预留足够时间
-    min_upload_speed_mbps = 0.2  # 最小上传速度（MB/s），适合大文件
+    # 对于上传操作，需要考虑写入超时，假设最小上传速度为0.1 MB/s（考虑慢速网络）
+    min_upload_speed_mbps = 0.1  # 最小上传速度（MB/s），考虑慢速网络
     # 计算所需时间：文件大小(MB) / 最小速度(MB/s) + 缓冲时间
-    calculated_timeout = int((file_size_mb / min_upload_speed_mbps) + 120)  # 至少120秒缓冲
-    # 使用传入的timeout和计算出的timeout中的较大值，但不超过1800秒（30分钟）
-    base_read_timeout = max(timeout, min(calculated_timeout, 1800))
-    connect_timeout = 15  # 连接超时15秒
+    calculated_timeout = int((file_size_mb / min_upload_speed_mbps) + 300)  # 至少300秒缓冲
+    # 使用传入的timeout和计算出的timeout中的较大值，但不超过3600秒（60分钟）
+    base_read_timeout = max(timeout, min(calculated_timeout, 3600))
+    connect_timeout = 30  # 连接超时30秒
     
     for attempt in range(1, retries + 1):
         try:
@@ -205,70 +199,52 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
             try:
                 upload_start = time.time()
                 
-                # 对于小文件（<10MB），直接读取整个文件到内存，这样可以自动设置Content-Length
-                # 对于大文件，使用流式上传，但需要手动设置Content-Length头
-                if file_size_mb < 10:
-                    # 小文件：直接读取整个文件，requests会自动设置Content-Length
-                    logger.info(f"小文件模式：直接读取整个文件 ({file_size_mb:.2f} MB)")
-                    with open(file_path, 'rb') as f:
-                        file_data = f.read()
-                    
-                    # 确保Content-Length头已设置
-                    headers['Content-Length'] = str(file_size)
-                    
-                    resp = session.put(
-                        url,
-                        data=file_data,  # 直接上传整个文件
-                        headers=headers,
-                        timeout=(connect_timeout, read_timeout),
-                        allow_redirects=True
-                    )
+                # 统一使用流式上传，避免一次性读取大文件导致写入超时
+                # 根据文件大小动态调整chunk_size：使用较小的chunk避免写入超时
+                if file_size_mb > 20:
+                    chunk_size = 1024 * 1024  # 1MB chunks，超大文件（>20MB）
+                elif file_size_mb > 5:
+                    chunk_size = 512 * 1024  # 512KB chunks，中等文件（5-20MB）
                 else:
-                    # 大文件：使用流式上传，手动设置Content-Length
-                    headers['Content-Length'] = str(file_size)
-                    
-                    # 根据文件大小动态调整chunk_size：大文件使用更大的chunk以提高上传速度
-                    if file_size_mb > 20:
-                        chunk_size = 2 * 1024 * 1024  # 2MB chunks，超大文件（>20MB）
-                    elif file_size_mb > 10:
-                        chunk_size = 1024 * 1024  # 1MB chunks，大文件（10-20MB）
-                    else:
-                        chunk_size = 512 * 1024  # 512KB chunks，中等文件（10MB左右）
-                    
-                    logger.info(f"大文件模式：流式上传，chunk_size={chunk_size / 1024:.0f} KB (文件大小: {file_size_mb:.2f} MB)")
-                    
-                    def file_stream():
-                        """生成器函数，用于流式读取文件"""
-                        try:
-                            with open(file_path, 'rb') as f:
-                                bytes_sent = 0
-                                last_log_time = upload_start
-                                while True:
-                                    chunk = f.read(chunk_size)
-                                    if not chunk:
-                                        break
-                                    bytes_sent += len(chunk)
-                                    # 每2秒记录一次进度（避免日志过多，同时提供实时反馈）
-                                    current_time = time.time()
-                                    if current_time - last_log_time >= 2.0:
-                                        elapsed = current_time - upload_start
-                                        if elapsed > 0:
-                                            speed = (bytes_sent / (1024 * 1024)) / elapsed
-                                            progress = (bytes_sent / file_size) * 100
-                                            logger.info(f"上传进度: {progress:.1f}% ({bytes_sent / (1024 * 1024):.2f}/{file_size_mb:.2f} MB), 速度: {speed:.2f} MB/s")
-                                        last_log_time = current_time
-                                    yield chunk
-                        except Exception as e:
-                            logger.error(f"读取文件流失败: {str(e)}")
-                            raise
-                    
-                    resp = session.put(
-                        url,
-                        data=file_stream(),  # 使用生成器进行流式上传
-                        headers=headers,
-                        timeout=(connect_timeout, read_timeout),
-                        allow_redirects=True
-                    )
+                    chunk_size = 256 * 1024  # 256KB chunks，小文件（<5MB）
+                
+                logger.info(f"流式上传模式：chunk_size={chunk_size / 1024:.0f} KB (文件大小: {file_size_mb:.2f} MB)")
+                
+                def file_stream():
+                    """生成器函数，用于流式读取文件"""
+                    try:
+                        with open(file_path, 'rb') as f:
+                            bytes_sent = 0
+                            last_log_time = upload_start
+                            while True:
+                                chunk = f.read(chunk_size)
+                                if not chunk:
+                                    break
+                                bytes_sent += len(chunk)
+                                # 每2秒记录一次进度（避免日志过多，同时提供实时反馈）
+                                current_time = time.time()
+                                if current_time - last_log_time >= 2.0:
+                                    elapsed = current_time - upload_start
+                                    if elapsed > 0:
+                                        speed = (bytes_sent / (1024 * 1024)) / elapsed
+                                        progress = (bytes_sent / file_size) * 100
+                                        logger.info(f"上传进度: {progress:.1f}% ({bytes_sent / (1024 * 1024):.2f}/{file_size_mb:.2f} MB), 速度: {speed:.2f} MB/s")
+                                    last_log_time = current_time
+                                yield chunk
+                    except Exception as e:
+                        logger.error(f"读取文件流失败: {str(e)}")
+                        raise
+                
+                # 使用流式上传，设置较长的超时时间
+                # 注意：timeout参数中，第一个是连接超时，第二个是读取/写入超时
+                # 对于上传，需要足够长的超时时间来处理慢速网络和写入操作
+                resp = session.put(
+                    url,
+                    data=file_stream(),  # 使用生成器进行流式上传
+                    headers=headers,
+                    timeout=(connect_timeout, read_timeout),  # (连接超时, 读取/写入超时)
+                    allow_redirects=True
+                )
             finally:
                 session.close()
             
@@ -319,7 +295,7 @@ def upload_generated_podcast(
     client_id: Optional[str] = None,
     client_secret: Optional[str] = None,
     product_id: Optional[str] = None,
-    # 注意：上传时使用的client_id可能与获取token时不同（参考Java代码）
+    # 注意：上传时使用的client_id可能与获取token时不同
     upload_client_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """高层封装：读取配置、获取 token、上传文件，返回结果字典
@@ -382,30 +358,229 @@ def upload_generated_podcast(
     }
 
 
+def download_file_from_agc(storage_url: str, bucket: str, object_name: str, output_path: str,
+                           client_id: str, product_id: str, token: str, timeout: int = 300) -> requests.Response:
+    """从 AGC 存储下载文件
+
+    Args:
+        storage_url: 基础存储 URL，例如 https://ops-server-drcn.agcstorage.link/v0/
+        bucket: 存储实例名
+        object_name: 要下载的文件路径/文件名，例如 outputs/podcasts/podcast.wav
+        output_path: 本地保存文件路径
+        client_id: AGC API client_id（header）
+        product_id: AGC 项目 ID（header productId）
+        token: access_token
+        timeout: 超时时间（秒）
+
+    Returns:
+        requests.Response
+    """
+    if not storage_url.endswith('/'):
+        storage_url = storage_url + '/'
+
+    url = f"{storage_url}{bucket}/{object_name}"
+
+    headers = {
+        'productId': product_id or '',
+        'client_id': client_id,
+        'Authorization': f'Bearer {token}',
+    }
+
+    logger.info(f"从 AGC 下载文件: {url}")
+    logger.info(f"  保存到: {output_path}")
+    logger.info(f"  Headers: productId={'已设置' if product_id else '未设置'}, client_id={'已设置' if client_id else '未设置'}, Authorization={'已设置' if token else '未设置'}")
+
+    # 确保输出目录存在
+    output_dir = os.path.dirname(output_path)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+        logger.info(f"创建输出目录: {output_dir}")
+
+    # 使用Session和连接池
+    session = requests.Session()
+    adapter = requests.adapters.HTTPAdapter(
+        pool_connections=10,
+        pool_maxsize=20,
+        max_retries=0
+    )
+    session.mount('http://', adapter)
+    session.mount('https://', adapter)
+
+    try:
+        download_start = time.time()
+        
+        # 使用GET请求，流式下载
+        resp = session.get(
+            url,
+            headers=headers,
+            timeout=timeout,
+            stream=True  # 启用流式下载
+        )
+        
+        resp.raise_for_status()
+        
+        # 使用1024字节缓冲区，将响应流写入本地文件
+        file_size = 0
+        buffer_size = 1024
+        
+        with open(output_path, 'wb') as output_stream:
+            for chunk in resp.iter_content(chunk_size=buffer_size):
+                if chunk:
+                    output_stream.write(chunk)
+                    file_size += len(chunk)
+        
+        
+        download_time = time.time() - download_start
+        download_speed = (file_size / (1024 * 1024)) / download_time if download_time > 0 else 0
+        
+        logger.info(f"下载成功！")
+        logger.info(f"  文件大小: {file_size} bytes ({file_size / (1024 * 1024):.2f} MB)")
+        logger.info(f"  耗时: {download_time:.2f}秒, 速度: {download_speed:.2f} MB/s")
+        logger.info(f"  保存路径: {output_path}")
+        
+        return resp
+    finally:
+        session.close()
+
+
+def download_generated_podcast(
+    object_name: str,
+    output_path: str,
+    storage_url: Optional[str] = None,
+    bucket: Optional[str] = None,
+    domain: Optional[str] = None,
+    client_id: Optional[str] = None,
+    client_secret: Optional[str] = None,
+    product_id: Optional[str] = None,
+    download_client_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """高层封装：读取配置、获取 token、下载文件，返回结果字典
+
+    优先级：函数参数 > 环境变量 > 仓库 agc-apiclient-*.json
+    
+    Args:
+        object_name: 要下载的文件路径/文件名，例如 outputs/podcasts/podcast.wav
+        output_path: 本地保存文件路径
+        storage_url: 存储URL（可选）
+        bucket: 存储实例名（可选）
+        domain: AGC域名（可选）
+        client_id: 客户端ID（可选）
+        client_secret: 客户端密钥（可选）
+        product_id: 项目ID（可选）
+        download_client_id: 下载时使用的client_id（可选，如果未提供则使用token_client_id）
+
+    Returns:
+        结果字典
+    """
+    # 从环境变量读取（可覆盖）
+    storage_url = storage_url or os.getenv('AGC_STORAGE_URL')
+    bucket = bucket or os.getenv('AGC_BUCKET')
+    domain = domain or os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
+    token_client_id = client_id or os.getenv('AGC_CLIENT_ID')
+    client_secret = client_secret or os.getenv('AGC_CLIENT_SECRET')
+    product_id = product_id or os.getenv('AGC_PRODUCT_ID')
+    # 下载时使用的client_id（如果未指定，使用token_client_id）
+    download_client_id = download_client_id or token_client_id
+
+    # 如果缺少 client_id/secret，尝试从文件读取
+    if not token_client_id or not client_secret:
+        cfg = _find_agc_client_json()
+        if cfg:
+            cred = _load_agc_credentials_from_file(cfg)
+            token_client_id = token_client_id or cred.get('client_id')
+            client_secret = client_secret or cred.get('client_secret')
+            product_id = product_id or cred.get('project_id')
+            # 如果未指定download_client_id，使用从文件读取的client_id
+            if not download_client_id:
+                download_client_id = token_client_id
+
+    if not storage_url or not bucket:
+        raise ValueError('需要提供 storage_url 和 bucket （参数或环境变量 AGC_STORAGE_URL/AGC_BUCKET）')
+
+    if not token_client_id or not client_secret:
+        raise ValueError('需要提供 client_id 和 client_secret （参数、环境变量或 agc-apiclient-*.json 文件）')
+
+    if not object_name:
+        raise ValueError('需要提供 object_name（要下载的文件路径/文件名）')
+
+    if not output_path:
+        raise ValueError('需要提供 output_path（本地保存文件路径）')
+
+    logger.info(f"准备下载文件: {object_name}")
+    logger.info(f"  Token client_id: {'已设置' if token_client_id else '未设置'}")
+    logger.info(f"  下载 client_id: {'已设置' if download_client_id else '未设置'}")
+    logger.info(f"  product_id: {'已设置' if product_id else '未设置'}")
+
+    # 获取 token（使用token_client_id和client_secret）
+    token = get_agc_token(domain, token_client_id, client_secret)
+
+    # 下载（使用download_client_id，可能与token_client_id不同）
+    resp = download_file_from_agc(storage_url, bucket, object_name, output_path,
+                                  client_id=download_client_id, product_id=product_id or '', token=token)
+
+    return {
+        'status': 'downloaded',
+        'bucket': bucket,
+        'object': object_name,
+        'output_path': output_path,
+        'http_status': resp.status_code,
+    }
+
+
 if __name__ == '__main__':
     # 简单的脚本入口（方便在服务端直接运行），从环境或参数读取
     import argparse
 
-    parser = argparse.ArgumentParser(description='Upload generated podcast to Huawei AGC')
-    parser.add_argument('--output-path', required=True, help='本地文件路径')
-    parser.add_argument('--storage-url', required=False, help='AGC storage base URL')
-    parser.add_argument('--bucket', required=False, help='AGC bucket name')
-    parser.add_argument('--object-name', required=False, help='目标 object name in bucket')
-    parser.add_argument('--domain', required=False, help='AGC domain for token')
-    parser.add_argument('--client-id', required=False)
-    parser.add_argument('--client-secret', required=False)
-    parser.add_argument('--product-id', required=False)
+    parser = argparse.ArgumentParser(description='Upload/Download files to/from Huawei AGC Storage')
+    subparsers = parser.add_subparsers(dest='action', help='操作类型')
+    
+    # 上传子命令
+    upload_parser = subparsers.add_parser('upload', help='上传文件到AGC存储')
+    upload_parser.add_argument('--output-path', required=True, help='本地文件路径')
+    upload_parser.add_argument('--storage-url', required=False, help='AGC storage base URL')
+    upload_parser.add_argument('--bucket', required=False, help='AGC bucket name')
+    upload_parser.add_argument('--object-name', required=False, help='目标 object name in bucket')
+    upload_parser.add_argument('--domain', required=False, help='AGC domain for token')
+    upload_parser.add_argument('--client-id', required=False)
+    upload_parser.add_argument('--client-secret', required=False)
+    upload_parser.add_argument('--product-id', required=False)
+    
+    # 下载子命令
+    download_parser = subparsers.add_parser('download', help='从AGC存储下载文件')
+    download_parser.add_argument('--object-name', required=True, help='要下载的文件路径/文件名')
+    download_parser.add_argument('--output-path', required=True, help='本地保存文件路径')
+    download_parser.add_argument('--storage-url', required=False, help='AGC storage base URL')
+    download_parser.add_argument('--bucket', required=False, help='AGC bucket name')
+    download_parser.add_argument('--domain', required=False, help='AGC domain for token')
+    download_parser.add_argument('--client-id', required=False)
+    download_parser.add_argument('--client-secret', required=False)
+    download_parser.add_argument('--product-id', required=False)
 
     args = parser.parse_args()
 
-    res = upload_generated_podcast(
-        output_path=args.output_path,
-        storage_url=args.storage_url,
-        bucket=args.bucket,
-        object_name=args.object_name,
-        domain=args.domain,
-        client_id=args.client_id,
-        client_secret=args.client_secret,
-        product_id=args.product_id,
-    )
-    print(res)
+    if args.action == 'upload':
+        res = upload_generated_podcast(
+            output_path=args.output_path,
+            storage_url=args.storage_url,
+            bucket=args.bucket,
+            object_name=args.object_name,
+            domain=args.domain,
+            client_id=args.client_id,
+            client_secret=args.client_secret,
+            product_id=args.product_id,
+        )
+        print(res)
+    elif args.action == 'download':
+        res = download_generated_podcast(
+            object_name=args.object_name,
+            output_path=args.output_path,
+            storage_url=args.storage_url,
+            bucket=args.bucket,
+            domain=args.domain,
+            client_id=args.client_id,
+            client_secret=args.client_secret,
+            product_id=args.product_id,
+        )
+        print(res)
+    else:
+        parser.print_help()
