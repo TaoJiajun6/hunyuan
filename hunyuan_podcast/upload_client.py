@@ -97,7 +97,7 @@ def get_agc_token(domain: str, client_id: str, client_secret: str, timeout: int 
     for attempt in range(1, retries + 1):
         try:
             logger.info(f"请求 AGC token (attempt {attempt}): {url}")
-            logger.info(f"  Payload: grant_type={payload.get('grant_type')}, client_id={payload.get('client_id')[:8] if payload.get('client_id') else None}...")
+            logger.info(f"  Payload: grant_type={payload.get('grant_type')}, client_id={'已设置' if payload.get('client_id') else '未设置'}")
             resp = requests.post(url, json=payload, timeout=timeout)
             logger.info(f"Token 响应: status_code={resp.status_code}")
             resp.raise_for_status()
@@ -159,7 +159,7 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
     logger.info(f"上传到 AGC: {url}")
     logger.info(f"  文件大小: {file_size} bytes ({file_size / (1024 * 1024):.2f} MB)")
     logger.info(f"  Content-Type: {content_type}")
-    logger.info(f"  Headers: productId={product_id or '(empty)'}, client_id={client_id[:8] if client_id else '(empty)'}..., Authorization=Bearer {token[:20] if token else '(empty)'}...")
+    logger.info(f"  Headers: productId={'已设置' if product_id else '未设置'}, client_id={'已设置' if client_id else '未设置'}, Authorization={'已设置' if token else '未设置'}")
 
     last_exc = None
     retries = 3
@@ -240,9 +240,9 @@ def upload_generated_podcast(
     object_name = object_name or ('outputs/podcasts/' + os.path.basename(output_path))
 
     logger.info(f"准备上传文件: {output_path}")
-    logger.info(f"  Token client_id: {token_client_id[:8] if token_client_id else None}...")
-    logger.info(f"  上传 client_id: {upload_client_id[:8] if upload_client_id else None}...")
-    logger.info(f"  product_id: {product_id}")
+    logger.info(f"  Token client_id: {'已设置' if token_client_id else '未设置'}")
+    logger.info(f"  上传 client_id: {'已设置' if upload_client_id else '未设置'}")
+    logger.info(f"  product_id: {'已设置' if product_id else '未设置'}")
 
     # 获取 token（使用token_client_id和client_secret）
     token = get_agc_token(domain, token_client_id, client_secret)
