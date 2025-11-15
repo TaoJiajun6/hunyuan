@@ -1,10 +1,12 @@
-import { RouterMap, RouterUtils, WindowModel } from 'lib_common';
+import { WindowModel } from 'lib_common';
 import { NavHeaderBar } from 'lib_widget';
 import { podcastService, MultiRoleRequest, PodcastResult, ProgressStatus } from 'lib_api';
 import { FileUtils, TextFileInfo } from '../../utils/FileUtils';
 import { promptAction, AppStorageV2 } from '@kit.ArkUI';
-import { PodcastResultPageParams } from './PodcastResultPage';
 import { common } from '@kit.AbilityKit';
+import { MediaService, SongItem } from 'module_musicplay';
+import { CloudStorageMusicUtils, CloudAudioFile } from '../../common/CloudStorageMusicUtils';
+import { Logger } from 'lib_common';
 
 // Select 选项类型定义
 interface SelectOption {
@@ -249,25 +251,16 @@ export struct PodcastMultiRolePage {
       }
       this.progressMessage = progress.message || '';
       
-      // 如果任务完成且有音频URL，保存并跳转
+      // 如果任务完成，获取最新音频并播放
       if (progress.done && progress.audio_url) {
         this.savedAudioUrl = progress.audio_url;
-        // 跳转到结果页（即使没有script也跳转，script可以从响应中获取）
-        const resultData: PodcastResult = {
-          audio_path: '',
-          file_size_mb: 0,
-          script: this.savedScript || '脚本内容请从响应中查看',
-          audio_url: progress.audio_url
-        };
-        const params = new PodcastResultPageParams(
-          resultData,
-          '多角色互动播客',
-          this.savedScript || ''
-        );
-        RouterUtils.pushPathByName(RouterMap.PODCAST_RESULT_PAGE, params);
-        this.savedAudioUrl = '';
-        this.savedScript = '';
         this.isLoading = false;
+        // 等待一小段时间确保文件已上传到云存储
+        setTimeout(() => {
+          this.getLatestAudioAndPlay(this.savedAudioUrl);
+          this.savedAudioUrl = '';
+          this.savedScript = '';
+        }, 1000);
       }
       
       // 如果任务失败，显示错误
@@ -299,17 +292,15 @@ export struct PodcastMultiRolePage {
         if (response.data.script) {
           this.savedScript = response.data.script;
         }
-        // 如果进度中已有URL，说明已通过SSE回调处理，不再重复跳转
-        if (!this.savedAudioUrl) {
-        const params = new PodcastResultPageParams(
-          response.data,
-          '多角色互动播客',
-          response.data.script
-        );
-        RouterUtils.pushPathByName(RouterMap.PODCAST_RESULT_PAGE, params);
-        // 清除保存的 URL（已成功获取响应）
-        this.savedAudioUrl = '';
-        this.savedScript = '';
+        // 如果进度中已有URL，说明已通过SSE回调处理，不再重复处理
+        if (!this.savedAudioUrl && response.data.audio_url) {
+          this.savedAudioUrl = response.data.audio_url;
+          // 等待一小段时间确保文件已上传到云存储
+          setTimeout(() => {
+            this.getLatestAudioAndPlay(this.savedAudioUrl);
+            this.savedAudioUrl = '';
+            this.savedScript = '';
+          }, 1000);
         }
       } else {
         // 响应失败，但如果进度中有 URL，会在SSE回调中处理
@@ -339,6 +330,96 @@ export struct PodcastMultiRolePage {
 
   @Local savedAudioUrl: string = '';
   @Local savedScript: string = '';
+
+  /**
+   * 从云存储获取最新音频并播放
+   * @param audioUrl 可选的音频URL，如果提供则优先使用
+   */
+  private async getLatestAudioAndPlay(audioUrl?: string): Promise<void> {
+    try {
+      // 显示加载提示
+      promptAction.showToast({
+        message: '正在获取最新音频...',
+        duration: 2000
+      });
+
+      let audioFile: CloudAudioFile | null = null;
+
+      // 如果提供了 audioUrl，尝试从 URL 提取云侧路径
+      if (audioUrl) {
+        const cloudPath = CloudStorageMusicUtils.extractCloudPath(audioUrl);
+        if (cloudPath) {
+          // 从路径中提取文件名
+          const fileName = cloudPath.split('/').pop() || '';
+          if (fileName) {
+            audioFile = {
+              fileName: fileName,
+              filePath: cloudPath
+            };
+            Logger.info('PodcastMultiRolePage', `使用提供的音频URL: ${fileName}`);
+          }
+        }
+      }
+
+      // 如果无法从 URL 获取，则从云存储列表中选择最新的
+      if (!audioFile) {
+        // 从云存储获取音频文件列表
+        const audioFiles = await CloudStorageMusicUtils.getAudioFileList('outputs/podcasts/');
+        
+        if (audioFiles.length === 0) {
+          promptAction.showToast({
+            message: '未找到音频文件，请稍后重试',
+            duration: 3000
+          });
+          return;
+        }
+
+        // 按文件名排序，获取最新的音频文件（文件名通常包含时间戳）
+        // 例如：podcast_1763144806.wav，数字越大越新
+        const sortedFiles = audioFiles.sort((a, b) => {
+          // 提取文件名中的数字部分进行比较
+          const getTimestamp = (fileName: string): number => {
+            const match = fileName.match(/(\d+)/);
+            return match ? parseInt(match[1]) : 0;
+          };
+          return getTimestamp(b.fileName) - getTimestamp(a.fileName);
+        });
+
+        // 获取最新的音频文件
+        audioFile = sortedFiles[0];
+        Logger.info('PodcastMultiRolePage', `找到最新音频文件: ${audioFile.fileName}`);
+      }
+
+      // 转换为 SongItem
+      const songItem = await CloudStorageMusicUtils.convertToSongItem(audioFile);
+      
+      if (!songItem || !songItem.src) {
+        promptAction.showToast({
+          message: '音频文件准备失败，请稍后重试',
+          duration: 3000
+        });
+        return;
+      }
+
+      // 设置标题
+      songItem.title = audioFile.fileName.replace(/\.[^/.]+$/, '');
+      songItem.singer = '多角色互动播客';
+
+      // 播放音频并显示播放页面
+      MediaService.getInstance().playSong(songItem, true);
+      
+      promptAction.showToast({
+        message: '已开始播放最新播客',
+        duration: 2000
+      });
+    } catch (error) {
+      Logger.error('PodcastMultiRolePage', `获取最新音频失败: ${error}`);
+      promptAction.showToast({
+        message: `获取音频失败: ${error}`,
+        duration: 3000
+      });
+    }
+  }
 
   private startProgressPolling(): void {
     if (!this.jobId || this.jobId.trim().length === 0) {
@@ -374,46 +455,25 @@ export struct PodcastMultiRolePage {
 
       if (status.done) {
         this.stopProgressPolling();
-        // 生成完成，如果进度中有 audio_url（云存储URL），立即跳转到结果页面
-        // 结果页面会自动从云存储下载音频并播放
+        // 生成完成，获取最新音频并播放
         if (status.audio_url && !this.isLoading) {
-          console.info(`[PodcastMultiRolePage] 播客生成完成，音频URL: ${status.audio_url}，跳转到结果页面`);
-          // 使用进度中的云存储URL和脚本创建结果并跳转
-          // AudioPlayer 会自动从云存储下载音频并播放
-          const result: PodcastResult = {
-            audio_url: status.audio_url, // 云存储URL，前端将从云存储下载
-            audio_path: '',
-            file_size_mb: 0,
-            script: this.savedScript || '脚本内容请从进度中查看'
-          };
-          const params = new PodcastResultPageParams(
-            result,
-            '多角色互动播客',
-            this.savedScript || ''
-          );
-          RouterUtils.pushPathByName(RouterMap.PODCAST_RESULT_PAGE, params);
-          // 清除保存的数据
-          this.savedAudioUrl = '';
-          this.savedScript = '';
-          // 停止加载状态（如果有）
+          Logger.info('PodcastMultiRolePage', `播客生成完成，音频URL: ${status.audio_url}，获取最新音频并播放`);
+          this.savedAudioUrl = status.audio_url;
+          // 等待一小段时间确保文件已上传到云存储
+          setTimeout(() => {
+            this.getLatestAudioAndPlay(this.savedAudioUrl);
+            this.savedAudioUrl = '';
+            this.savedScript = '';
+          }, 1000);
           this.isLoading = false;
         } else if (this.savedAudioUrl && !this.isLoading) {
-          // 如果进度中没有 audio_url，但之前保存了，也跳转
-          console.info(`[PodcastMultiRolePage] 使用保存的音频URL: ${this.savedAudioUrl}，跳转到结果页面`);
-          const result: PodcastResult = {
-            audio_url: this.savedAudioUrl, // 云存储URL，前端将从云存储下载
-            audio_path: '',
-            file_size_mb: 0,
-            script: this.savedScript || '脚本内容请从进度中查看'
-          };
-          const params = new PodcastResultPageParams(
-            result,
-            '多角色互动播客',
-            this.savedScript || ''
-          );
-          RouterUtils.pushPathByName(RouterMap.PODCAST_RESULT_PAGE, params);
-          this.savedAudioUrl = '';
-          this.savedScript = '';
+          // 如果进度中没有 audio_url，但之前保存了，也获取并播放
+          Logger.info('PodcastMultiRolePage', `使用保存的音频URL: ${this.savedAudioUrl}，获取最新音频并播放`);
+          setTimeout(() => {
+            this.getLatestAudioAndPlay(this.savedAudioUrl);
+            this.savedAudioUrl = '';
+            this.savedScript = '';
+          }, 1000);
           this.isLoading = false;
         }
       }

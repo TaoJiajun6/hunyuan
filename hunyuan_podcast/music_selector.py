@@ -31,6 +31,35 @@ class MusicSelector:
         "intro": ["开场", "介绍", "intro", "opening"]
     }
     
+    # 播客分类到音乐子目录的映射
+    CATEGORY_TO_MUSIC_DIR = {
+        "商业": "商业（包含创业创新",
+        "科技": "科技（包含科学科普）",
+        "财经": "财经",
+        "新闻": "新闻",
+        "影视": "影视",
+        "音乐": "音乐",
+        "文化艺术": "文化艺术（包含读书阅读）",
+        "历史": "历史",
+        "哲学思考": "哲学思考",
+        "自我成长": "自我成长（包含自我成长与自愈、心理学",
+        "职场": "职场（包含职场万象、职场人际关系、求职就业）",
+        "学习": "学习（包含学习类、考题）",
+        "教育育儿": "教育育儿",
+        "情感恋爱": "情感恋爱",
+        "健康养生": "健康养生（包含运动健身）",
+        "旅游": "旅游",
+        "美食": "美食",
+        "生活方式": "生活方式",
+        "娱乐": "娱乐（包含娱乐八卦、喜剧）",
+        "游戏电竞": "游戏电竞",
+        "体育": "体育",
+        "时尚美妆": "时尚美妆",
+        "汽车": "汽车",
+        "法律": "法律",
+        "宠物": "宠物"
+    }
+    
     def __init__(self, music_dir: Optional[str] = None, use_cloud_storage: bool = True):
         """
         初始化音乐选择器
@@ -69,10 +98,22 @@ class MusicSelector:
         # 优先尝试从云存储获取
         if self.cloud_client:
             try:
-                print(f"尝试从云存储获取音乐文件 (bucket: {self.cloud_client.bucket}, path: {self.cloud_client.music_path})")
+                print(f"=" * 60)
+                print(f"🎵 正在从云存储获取音乐文件")
+                print(f"  存储桶: {self.cloud_client.bucket}")
+                print(f"  音乐路径: {self.cloud_client.music_path}")
+                print(f"=" * 60)
                 cloud_files = self.cloud_client.list_music_files()
                 if cloud_files:
                     print(f"✓ 从云存储获取到 {len(cloud_files)} 个音乐文件")
+                    # 显示一些示例文件路径，帮助用户确认
+                    if len(cloud_files) > 0:
+                        print(f"  示例文件路径:")
+                        for i, music_info in enumerate(cloud_files[:5], 1):
+                            cloud_path = music_info.get('cloud_path', music_info.get('name', 'unknown'))
+                            print(f"    [{i}] {cloud_path}")
+                        if len(cloud_files) > 5:
+                            print(f"    ... 还有 {len(cloud_files) - 5} 个文件")
                     # 预下载所有云存储文件到本地缓存
                     downloaded_count = 0
                     for i, music_info in enumerate(cloud_files, 1):
@@ -178,10 +219,22 @@ class MusicSelector:
         # 优先尝试从云存储获取（只获取列表，不下载）
         if self.cloud_client:
             try:
-                print(f"尝试从云存储获取音乐文件列表 (bucket: {self.cloud_client.bucket}, path: {self.cloud_client.music_path})")
+                print(f"=" * 60)
+                print(f"🎵 正在从云存储获取音乐文件列表")
+                print(f"  存储桶: {self.cloud_client.bucket}")
+                print(f"  音乐路径: {self.cloud_client.music_path}")
+                print(f"=" * 60)
                 cloud_files = self.cloud_client.list_music_files()
                 if cloud_files:
                     print(f"✓ 从云存储获取到 {len(cloud_files)} 个音乐文件（仅元数据，未下载）")
+                    # 显示一些示例文件路径，帮助用户确认
+                    if len(cloud_files) > 0:
+                        print(f"  示例文件路径:")
+                        for i, music_info in enumerate(cloud_files[:5], 1):
+                            cloud_path = music_info.get('cloud_path', music_info.get('name', 'unknown'))
+                            print(f"    [{i}] {cloud_path}")
+                        if len(cloud_files) > 5:
+                            print(f"    ... 还有 {len(cloud_files) - 5} 个文件")
                     # 更新全局缓存
                     _global_music_cache = cloud_files
                     _global_music_cache_cloud_client_id = cloud_client_id
@@ -270,27 +323,213 @@ class MusicSelector:
         
         return None
     
+    def _match_music_directory(self, category: Optional[str], topic: Optional[str] = None) -> Optional[str]:
+        """
+        根据播客分类匹配音乐子目录
+        
+        Args:
+            category: 播客分类
+            topic: 播客主题（可选，用于辅助匹配）
+        
+        Returns:
+            匹配的音乐子目录名称，如果未匹配则返回None
+        """
+        if not category:
+            return None
+        
+        # 直接匹配
+        if category in self.CATEGORY_TO_MUSIC_DIR:
+            return self.CATEGORY_TO_MUSIC_DIR[category]
+        
+        # 模糊匹配：检查 category 是否包含在目录名称中，或目录名称是否包含 category
+        category_lower = category.lower()
+        for cat, dir_name in self.CATEGORY_TO_MUSIC_DIR.items():
+            if category_lower in cat.lower() or cat.lower() in category_lower:
+                return dir_name
+        
+        return None
+    
+    def _filter_music_by_directory(self, music_files: List[Dict[str, str]], directory_name: str) -> List[Dict[str, str]]:
+        """
+        根据子目录名称过滤音乐文件
+        
+        Args:
+            music_files: 音乐文件列表
+            directory_name: 子目录名称（如 "体育"、"财经"、"商业（包含创业创新" 等）
+        
+        Returns:
+            匹配的音乐文件列表
+        """
+        filtered = []
+        # 提取目录名称的核心部分（去除括号及之后的内容，用于匹配）
+        # 例如："商业（包含创业创新" -> "商业"
+        core_dir_name = directory_name.split('（')[0].split('(')[0].strip()
+        directory_name_lower = directory_name.lower()
+        core_dir_name_lower = core_dir_name.lower()
+        
+        for music_info in music_files:
+            # 从云存储路径或本地路径中提取目录信息
+            cloud_path = music_info.get('cloud_path', '')
+            path = music_info.get('path', '')
+            
+            # 检查云存储路径（格式：music/体育/music.mp3 或 music/商业（包含创业创新/music.mp3）
+            if cloud_path:
+                # 提取目录部分：music/体育/music.mp3 -> 体育
+                path_parts = cloud_path.split('/')
+                if len(path_parts) >= 2:
+                    # 跳过 "music" 部分，获取子目录
+                    subdir = path_parts[1] if path_parts[0].lower() == 'music' else path_parts[0]
+                    subdir_lower = subdir.lower()
+                    # 提取子目录的核心部分
+                    subdir_core = subdir.split('（')[0].split('(')[0].strip().lower()
+                    
+                    # 匹配逻辑：
+                    # 1. 完整目录名称匹配（支持模糊匹配）
+                    # 2. 核心部分匹配（去除括号后的部分）
+                    if (directory_name_lower in subdir_lower or subdir_lower in directory_name_lower or
+                        core_dir_name_lower == subdir_core or core_dir_name_lower in subdir_core or subdir_core in core_dir_name_lower):
+                        filtered.append(music_info)
+                        continue
+            
+            # 检查本地路径
+            if path:
+                # 提取目录部分
+                dir_part = os.path.dirname(path)
+                dir_name = os.path.basename(dir_part)
+                dir_name_lower = dir_name.lower()
+                # 提取目录名称的核心部分
+                dir_name_core = dir_name.split('（')[0].split('(')[0].strip().lower()
+                
+                # 匹配逻辑：同上
+                if (directory_name_lower in dir_name_lower or dir_name_lower in directory_name_lower or
+                    core_dir_name_lower == dir_name_core or core_dir_name_lower in dir_name_core or dir_name_core in core_dir_name_lower):
+                    filtered.append(music_info)
+                    continue
+        
+        return filtered
+    
+    def select_music_by_category(
+        self,
+        category: Optional[str] = None,
+        topic: Optional[str] = None,
+        num_music: int = 1
+    ) -> List[str]:
+        """
+        根据播客分类选择背景音乐（新策略：先匹配子目录，再随机选择）
+        
+        Args:
+            category: 播客分类
+            topic: 播客主题（可选，用于辅助匹配）
+            num_music: 需要选择的音乐数量，默认1
+        
+        Returns:
+            选中的音乐文件路径列表
+        """
+        # 扫描音乐文件（只获取文件列表，不预下载）
+        music_files = self.scan_music_files_metadata_only()
+        if not music_files:
+            print(f"警告：没有找到音乐文件（音乐目录: {self.music_dir}）")
+            print(f"提示：请确保音乐文件位于 {self.music_dir} 目录下")
+            return []
+        
+        # 如果只有一个音乐文件，直接下载并返回
+        if len(music_files) == 1:
+            music_info = music_files[0]
+            local_path = self._download_music_if_needed(music_info)
+            if local_path:
+                return [local_path]
+            else:
+                return []
+        
+        # 根据 category 匹配音乐子目录
+        matched_directory = None
+        if category:
+            matched_directory = self._match_music_directory(category, topic)
+            if matched_directory:
+                print(f"✓ 根据分类 '{category}' 匹配到音乐子目录: {matched_directory}")
+            else:
+                print(f"⚠️ 无法根据分类 '{category}' 匹配到音乐子目录，将从所有音乐中随机选择")
+        else:
+            print("⚠️ 未提供播客分类，将从所有音乐中随机选择")
+        
+        # 如果匹配到子目录，在该子目录中过滤音乐文件
+        if matched_directory:
+            filtered_music = self._filter_music_by_directory(music_files, matched_directory)
+            if filtered_music:
+                print(f"✓ 在子目录 '{matched_directory}' 中找到 {len(filtered_music)} 个音乐文件")
+                music_files = filtered_music
+            else:
+                print(f"⚠️ 在子目录 '{matched_directory}' 中未找到音乐文件，将从所有音乐中随机选择")
+                music_files = music_files  # 使用全部音乐文件
+        
+        # 随机选择音乐
+        import random
+        if len(music_files) == 0:
+            print("⚠️ 没有可用的音乐文件")
+            return []
+        
+        selected_count = min(num_music, len(music_files))
+        selected_indices = random.sample(range(len(music_files)), selected_count)
+        
+        # 获取选中的音乐文件路径（只下载选中的文件）
+        selected_music = []
+        for idx in selected_indices:
+            music_info = music_files[idx]
+            local_path = self._download_music_if_needed(music_info)
+            if local_path:
+                selected_music.append(local_path)
+            else:
+                print(f"警告：无法下载音乐文件 {music_info.get('name', 'unknown')}，跳过")
+        
+        if selected_music:
+            print(f"✓ 随机选择音乐: {[os.path.basename(p) for p in selected_music]}")
+            if matched_directory:
+                print(f"  来源子目录: {matched_directory}")
+        else:
+            print("⚠️ 未能成功选择任何音乐文件")
+        
+        return selected_music
+    
     def select_music_by_ai(
         self,
         text: str,
         podcast_name: Optional[str] = None,
         topic: Optional[str] = None,
         scene_types: Optional[List[str]] = None,
+        category: Optional[str] = None,
         num_music: int = 1
     ) -> List[str]:
         """
         使用AI分析文本内容，自动选择合适的背景音乐
+        
+        新策略：如果提供了 category，则先根据分类匹配子目录，然后在子目录中随机选择
+        否则，使用原有的AI分析方式
         
         Args:
             text: 播客文本内容
             topic: 播客主题（可选）
             podcast_name: 播客名称（可选）
             scene_types: 场景类型列表（可选）
+            category: 播客分类（可选），如果提供则使用分类匹配策略
             num_music: 需要选择的音乐数量，默认1
         
         Returns:
             选中的音乐文件路径列表
         """
+        # 如果提供了 category，使用新的分类匹配策略
+        if category:
+            print("=" * 60)
+            print("🎵 使用分类匹配策略选择背景音乐")
+            print(f"  播客分类: {category}")
+            print(f"  播客主题: {topic or '未指定'}")
+            print("=" * 60)
+            return self.select_music_by_category(category=category, topic=topic, num_music=num_music)
+        
+        # 否则，使用原有的AI分析方式
+        print("=" * 60)
+        print("🎵 使用AI分析策略选择背景音乐")
+        print("=" * 60)
+        
         # 扫描音乐文件（只获取文件列表，不预下载）
         # 优化：先选择音乐，再下载选中的文件，避免下载所有文件
         music_files = self.scan_music_files_metadata_only()
