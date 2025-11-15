@@ -66,7 +66,7 @@ class MusicSelector:
         
         Args:
             music_dir: 音乐文件夹路径，如果为None则使用默认路径
-            use_cloud_storage: 是否优先使用云存储，默认False（优先使用本地文件）
+            use_cloud_storage: 是否优先使用云存储，默认False（但即使为False也会尝试从云存储下载，不使用本地文件系统）
         """
         self.music_dir = music_dir or MUSIC_DIR
         self.api_client = get_client()
@@ -74,20 +74,17 @@ class MusicSelector:
         self.use_cloud_storage = use_cloud_storage
         self.cloud_client: Optional[CloudStorageMusicClient] = None
         
-        # 如果启用云存储，尝试初始化云存储客户端
-        if self.use_cloud_storage:
-            self.cloud_client = get_cloud_music_client()
-            if self.cloud_client:
-                print("已启用云存储音乐支持")
-            else:
-                print("云存储配置不完整，将使用本地音乐文件")
+        # 始终尝试初始化云存储客户端（即使use_cloud_storage=False，也要从云存储下载）
+        self.cloud_client = get_cloud_music_client()
+        if self.cloud_client:
+            print("已启用云存储音乐支持（从云存储下载到后端）")
         else:
-            print(f"使用本地音乐文件（目录: {self.music_dir}）")
+            print("⚠️ 云存储配置不完整，无法从云存储获取音乐文件")
     
     def scan_music_files(self) -> List[Dict[str, str]]:
         """
         扫描音乐文件夹，获取所有音乐文件
-        优先使用本地文件，如果启用云存储且本地文件不可用则从云存储获取
+        优先从云存储获取并下载，不使用本地文件系统（即使本地有文件）
         
         Returns:
             音乐文件列表，每个元素包含 {'path': 文件路径, 'name': 文件名, 'style': 推断的风格, 'cloud_path': 云存储路径（如果有）}
@@ -97,35 +94,7 @@ class MusicSelector:
         
         music_files = []
         
-        # 优先使用本地文件系统
-        if os.path.exists(self.music_dir):
-            # 支持的音频格式
-            audio_extensions = ['*.mp3', '*.wav', '*.m4a', '*.flac', '*.ogg']
-            
-            # 递归扫描所有子目录
-            for ext in audio_extensions:
-                # 使用 ** 递归匹配所有子目录
-                pattern = os.path.join(self.music_dir, '**', ext)
-                files = glob.glob(pattern, recursive=True)
-                for file_path in files:
-                    filename = os.path.basename(file_path)
-                    # 从文件名推断风格
-                    style = self._infer_style_from_filename(filename)
-                    # 计算相对路径（相对于music_dir），用于匹配子目录
-                    relative_path = os.path.relpath(file_path, self.music_dir)
-                    music_files.append({
-                        'path': file_path,
-                        'name': filename,
-                        'style': style,
-                        'relative_path': relative_path  # 添加相对路径，用于子目录匹配
-                    })
-            
-            if music_files:
-                self._music_cache = music_files
-                print(f"从本地扫描到 {len(music_files)} 个音乐文件（递归扫描子目录）")
-                return music_files
-        
-        # 如果本地文件不可用且启用了云存储，尝试从云存储获取
+        # 优先从云存储获取（即使本地有文件也跳过本地文件系统）
         if self.cloud_client:
             try:
                 print(f"=" * 60)
@@ -169,20 +138,19 @@ class MusicSelector:
                     self._music_cache = cloud_files
                     return cloud_files
                 else:
-                    print("⚠️ 云存储中没有找到音乐文件，将尝试使用本地文件")
+                    print("⚠️ 云存储中没有找到音乐文件")
             except Exception as e:
                 import traceback
                 print(f"✗ 从云存储获取音乐文件失败: {str(e)}")
                 print(f"  错误详情: {traceback.format_exc()}")
-                print("  将尝试使用本地文件")
         
-        # 如果本地和云存储都不可用
+        # 如果云存储不可用或获取失败，也不使用本地文件
         if not music_files:
-            print(f"警告：音乐文件夹不存在: {self.music_dir}")
+            print(f"警告：无法从云存储获取音乐文件")
             if self.cloud_client:
-                print(f"提示：请确保云存储中有 music/ 文件夹，或创建本地音乐目录: {self.music_dir}")
+                print(f"提示：请确保云存储中有 music/ 文件夹，并检查云存储配置")
             else:
-                print(f"提示：请创建本地音乐目录: {self.music_dir}")
+                print(f"提示：请配置云存储（AGC_STORAGE_URL, AGC_BUCKET等环境变量）")
         
         return music_files
     
@@ -211,6 +179,7 @@ class MusicSelector:
         """
         扫描音乐文件，只获取元数据，不预下载文件
         优化性能：避免在扫描时下载所有文件，使用全局缓存
+        优先从云存储获取，不使用本地文件系统（即使本地有文件）
         
         Returns:
             音乐文件列表，每个元素包含 {'path': 文件路径（可能为None）, 'name': 文件名, 'style': 推断的风格, 'cloud_path': 云存储路径（如果有）, 'url': 下载URL（如果有）}
@@ -228,37 +197,7 @@ class MusicSelector:
         
         music_files = []
         
-        # 优先使用本地文件系统
-        if os.path.exists(self.music_dir):
-            # 支持的音频格式
-            audio_extensions = ['*.mp3', '*.wav', '*.m4a', '*.flac', '*.ogg']
-            
-            # 递归扫描所有子目录
-            for ext in audio_extensions:
-                # 使用 ** 递归匹配所有子目录
-                pattern = os.path.join(self.music_dir, '**', ext)
-                files = glob.glob(pattern, recursive=True)
-                for file_path in files:
-                    filename = os.path.basename(file_path)
-                    # 从文件名推断风格
-                    style = self._infer_style_from_filename(filename)
-                    # 计算相对路径（相对于music_dir），用于匹配子目录
-                    relative_path = os.path.relpath(file_path, self.music_dir)
-                    music_files.append({
-                        'path': file_path,
-                        'name': filename,
-                        'style': style,
-                        'relative_path': relative_path  # 添加相对路径，用于子目录匹配
-                    })
-            
-            if music_files:
-                print(f"从本地扫描到 {len(music_files)} 个音乐文件（递归扫描子目录，仅元数据）")
-                # 更新全局缓存
-                _global_music_cache = music_files
-                _global_music_cache_cloud_client_id = cloud_client_id
-                return music_files
-        
-        # 如果本地文件不可用且启用了云存储，尝试从云存储获取（只获取列表，不下载）
+        # 优先从云存储获取（即使本地有文件也跳过本地文件系统）
         if self.cloud_client:
             try:
                 print(f"=" * 60)
@@ -283,20 +222,19 @@ class MusicSelector:
                     # 不预下载，只返回元数据
                     return cloud_files
                 else:
-                    print("⚠️ 云存储中没有找到音乐文件，将尝试使用本地文件")
+                    print("⚠️ 云存储中没有找到音乐文件")
             except Exception as e:
                 import traceback
                 print(f"✗ 从云存储获取音乐文件失败: {str(e)}")
                 print(f"  错误详情: {traceback.format_exc()}")
-                print("  将尝试使用本地文件")
         
-        # 如果本地和云存储都不可用
+        # 如果云存储不可用或获取失败，也不使用本地文件
         if not music_files:
-            print(f"警告：音乐文件夹不存在: {self.music_dir}")
+            print(f"警告：无法从云存储获取音乐文件")
             if self.cloud_client:
-                print(f"提示：请确保云存储中有 music/ 文件夹，或创建本地音乐目录: {self.music_dir}")
+                print(f"提示：请确保云存储中有 music/ 文件夹，并检查云存储配置")
             else:
-                print(f"提示：请创建本地音乐目录: {self.music_dir}")
+                print(f"提示：请配置云存储（AGC_STORAGE_URL, AGC_BUCKET等环境变量）")
         
         # 更新全局缓存
         _global_music_cache = music_files
