@@ -366,7 +366,6 @@ class MusicSelector:
         
         # 调试：打印匹配信息
         print(f"  匹配目录: '{directory_name}'")
-        print(f"  待匹配文件数量: {len(music_files)}")
         
         for music_info in music_files:
             # 从云存储路径或本地路径中提取目录信息
@@ -375,40 +374,12 @@ class MusicSelector:
             
             # 检查云存储路径（格式：music/sports/music.mp3 或 music/business/music.mp3）
             if cloud_path:
-                # 规范化路径：移除开头的/，确保路径格式一致
-                normalized_cloud_path = cloud_path.lstrip('/')
-                
                 # 提取目录部分：music/sports/music.mp3 -> sports
-                path_parts = normalized_cloud_path.split('/')
-                
-                # 调试：打印路径信息（仅前几个文件）
-                if len(filtered) < 3:
-                    print(f"    检查文件: {cloud_path} -> 路径部分: {path_parts}")
-                
-                # 确定子目录
-                subdir = None
-                if len(path_parts) >= 3:
-                    # 格式：music/technology/filename.mp3
-                    if path_parts[0].lower() == 'music':
-                        subdir = path_parts[1]  # technology
-                elif len(path_parts) == 2:
-                    # 格式可能是：technology/filename.mp3 或 music/filename.mp3
-                    if path_parts[0].lower() == 'music':
-                        # music/filename.mp3 - 文件直接在music目录下，没有子目录
-                        subdir = None
-                    else:
-                        # technology/filename.mp3 - 直接是子目录
-                        subdir = path_parts[0]
-                elif len(path_parts) == 1:
-                    # 只有文件名，没有目录
-                    subdir = None
-                
-                if subdir:
+                path_parts = cloud_path.split('/')
+                if len(path_parts) >= 2:
+                    # 跳过 "music" 部分，获取子目录
+                    subdir = path_parts[1] if path_parts[0].lower() == 'music' else path_parts[0]
                     subdir_lower = subdir.lower().strip()
-                    
-                    # 调试：打印每个文件的路径信息（仅前几个）
-                    if len(filtered) < 3:
-                        print(f"    提取子目录: '{subdir}' (lower: '{subdir_lower}')")
                     
                     # 匹配逻辑：完全匹配或部分匹配（支持下划线和连字符）
                     # 例如：business 匹配 business, self_improvement 匹配 self_improvement
@@ -423,11 +394,6 @@ class MusicSelector:
                         print(f"    ✓ 匹配: {cloud_path} (子目录: '{subdir}')")
                         filtered.append(music_info)
                         continue
-                else:
-                    # 如果路径只有文件名，没有子目录，跳过
-                    if len(filtered) < 3:
-                        print(f"    跳过（无子目录）: {cloud_path}")
-                    continue
             
             # 检查本地路径
             if path:

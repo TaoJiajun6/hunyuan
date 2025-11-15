@@ -180,7 +180,7 @@ export struct MusicInfo {
       .borderRadius(12)
       .backgroundColor('#11ffffff')
     } else {
-      Blank()
+    Blank()
     }
   }
 
