@@ -188,61 +188,78 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
             
             # 优化上传：使用Session和连接池（每次重试创建新的session）
             session = requests.Session()
+            # 增大连接池大小，提高并发性能
             adapter = requests.adapters.HTTPAdapter(
-                pool_connections=10,
-                pool_maxsize=20,
+                pool_connections=20,  # 增加连接池数量
+                pool_maxsize=50,  # 增加每个连接池的最大连接数
                 max_retries=0  # 禁用urllib3的重试，我们自己处理
             )
             session.mount('http://', adapter)
             session.mount('https://', adapter)
             
             try:
-                # 根据文件大小动态调整chunk_size：大文件使用更大的chunk以提高上传速度
-                # 对于几MB到几十MB的文件，使用更大的chunk_size可以显著提高上传速度
-                if file_size_mb > 20:
-                    chunk_size = 2 * 1024 * 1024  # 2MB chunks，超大文件（>20MB）
-                elif file_size_mb > 10:
-                    chunk_size = 1024 * 1024  # 1MB chunks，大文件（10-20MB）
-                elif file_size_mb > 5:
-                    chunk_size = 512 * 1024  # 512KB chunks，中等文件（5-10MB）
-                else:
-                    chunk_size = 256 * 1024  # 256KB chunks，小文件（<5MB）
-                
-                logger.info(f"使用chunk_size: {chunk_size / 1024:.0f} KB (文件大小: {file_size_mb:.2f} MB)")
+                # 目标：1-2MB文件在2秒内完成上传，需要至少0.75-1 MB/s的速度
+                # 对于小文件（<5MB），不使用流式上传，一次性读取并上传，可能更快
                 upload_start = time.time()
                 
-                def file_stream():
-                    """生成器函数，用于流式读取文件"""
-                    try:
-                        with open(file_path, 'rb') as f:
-                            bytes_sent = 0
-                            last_log_time = upload_start
-                            while True:
-                                chunk = f.read(chunk_size)
-                                if not chunk:
-                                    break
-                                bytes_sent += len(chunk)
-                                # 每2秒记录一次进度（避免日志过多，同时提供实时反馈）
-                                current_time = time.time()
-                                if current_time - last_log_time >= 2.0:
-                                    elapsed = current_time - upload_start
-                                    if elapsed > 0:
-                                        speed = (bytes_sent / (1024 * 1024)) / elapsed
-                                        progress = (bytes_sent / file_size) * 100
-                                        logger.info(f"上传进度: {progress:.1f}% ({bytes_sent / (1024 * 1024):.2f}/{file_size_mb:.2f} MB), 速度: {speed:.2f} MB/s")
-                                    last_log_time = current_time
-                                yield chunk
-                    except Exception as e:
-                        logger.error(f"读取文件流失败: {str(e)}")
-                        raise
-                
-                resp = session.put(
-                    url, 
-                    data=file_stream(),  # 使用生成器进行流式上传
-                    headers=headers, 
-                    timeout=(connect_timeout, read_timeout),  # (连接超时, 读取超时)
-                    allow_redirects=True
-                )
+                # 对于小文件，一次性读取并上传（非流式）
+                if file_size_mb < 5:
+                    logger.info(f"使用非流式上传（一次性上传，适合小文件，目标2秒内完成，文件大小: {file_size_mb:.2f} MB）")
+                    # 一次性读取整个文件
+                    with open(file_path, 'rb') as f:
+                        file_data = f.read()
+                    
+                    resp = session.put(
+                        url, 
+                        data=file_data,  # 直接上传完整文件数据
+                        headers=headers, 
+                        timeout=(connect_timeout, read_timeout),  # (连接超时, 读取超时)
+                        allow_redirects=True
+                    )
+                else:
+                    # 对于大文件（>=5MB），使用流式上传以节省内存
+                    # 根据文件大小动态调整chunk_size
+                    if file_size_mb > 20:
+                        chunk_size = 2 * 1024 * 1024  # 2MB chunks，超大文件（>20MB）
+                    elif file_size_mb > 10:
+                        chunk_size = 2 * 1024 * 1024  # 2MB chunks，大文件（10-20MB）
+                    else:
+                        chunk_size = 2 * 1024 * 1024  # 2MB chunks，中等文件（5-10MB）
+                    
+                    logger.info(f"使用流式上传，chunk_size: {chunk_size / 1024:.0f} KB (文件大小: {file_size_mb:.2f} MB)")
+                    
+                    def file_stream():
+                        """生成器函数，用于流式读取文件"""
+                        try:
+                            with open(file_path, 'rb') as f:
+                                bytes_sent = 0
+                                last_log_time = upload_start
+                                while True:
+                                    chunk = f.read(chunk_size)
+                                    if not chunk:
+                                        break
+                                    bytes_sent += len(chunk)
+                                    # 每2秒记录一次进度（避免日志过多，同时提供实时反馈）
+                                    current_time = time.time()
+                                    if current_time - last_log_time >= 2.0:
+                                        elapsed = current_time - upload_start
+                                        if elapsed > 0:
+                                            speed = (bytes_sent / (1024 * 1024)) / elapsed
+                                            progress = (bytes_sent / file_size) * 100
+                                            logger.info(f"上传进度: {progress:.1f}% ({bytes_sent / (1024 * 1024):.2f}/{file_size_mb:.2f} MB), 速度: {speed:.2f} MB/s")
+                                        last_log_time = current_time
+                                    yield chunk
+                        except Exception as e:
+                            logger.error(f"读取文件流失败: {str(e)}")
+                            raise
+                    
+                    resp = session.put(
+                        url, 
+                        data=file_stream(),  # 使用生成器进行流式上传
+                        headers=headers, 
+                        timeout=(connect_timeout, read_timeout),  # (连接超时, 读取超时)
+                        allow_redirects=True
+                    )
             finally:
                 session.close()
             
