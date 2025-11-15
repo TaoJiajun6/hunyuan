@@ -164,11 +164,52 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
     last_exc = None
     retries = 3
     backoff_factor = 0.5
+    
     for attempt in range(1, retries + 1):
         try:
-            with open(file_path, 'rb') as f:
-                resp = requests.put(url, data=f, headers=headers, timeout=timeout)
-            logger.info(f"上传响应: status_code={resp.status_code}, headers={dict(resp.headers)}")
+            # 优化上传：使用Session和连接池（每次重试创建新的session）
+            session = requests.Session()
+            adapter = requests.adapters.HTTPAdapter(
+                pool_connections=10,
+                pool_maxsize=20,
+                max_retries=0  # 禁用urllib3的重试，我们自己处理
+            )
+            session.mount('http://', adapter)
+            session.mount('https://', adapter)
+            
+            try:
+                # 优化超时设置：连接超时10秒，读取超时根据文件大小动态调整
+                connect_timeout = 10
+                read_timeout = timeout
+                
+                # 流式上传（使用更大的chunk_size以提高上传速度）
+                chunk_size = 256 * 1024  # 256KB chunks，提高上传速度
+                upload_start = time.time()
+                
+                def file_stream():
+                    """生成器函数，用于流式读取文件"""
+                    with open(file_path, 'rb') as f:
+                        while True:
+                            chunk = f.read(chunk_size)
+                            if not chunk:
+                                break
+                            yield chunk
+                
+                resp = session.put(
+                    url, 
+                    data=file_stream(),  # 使用生成器进行流式上传
+                    headers=headers, 
+                    timeout=(connect_timeout, read_timeout),  # (连接超时, 读取超时)
+                    allow_redirects=True
+                )
+            finally:
+                session.close()
+            
+            upload_time = time.time() - upload_start
+            upload_speed = (file_size / (1024 * 1024)) / upload_time if upload_time > 0 else 0
+            
+            logger.info(f"上传响应: status_code={resp.status_code}, 耗时: {upload_time:.2f}秒, 速度: {upload_speed:.2f} MB/s")
+            logger.info(f"  响应头: {dict(resp.headers)}")
             if resp.text:
                 logger.info(f"上传响应内容: {resp.text[:500]}")
             resp.raise_for_status()
