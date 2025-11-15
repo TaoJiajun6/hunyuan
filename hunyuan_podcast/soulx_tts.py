@@ -181,7 +181,7 @@ class SoulXTTS:
             speakers: 说话人信息字典，格式为 {角色名: {"prompt_audio": 路径, "prompt_text": 文本}}
             dialogues: 对话列表，格式为 [(角色名, 文本), ...]
             output_path: 输出音频路径
-            silence_interval: 角色切换静音间隔（毫秒），如果为None则使用默认值400ms
+            silence_interval: 角色切换静音间隔（毫秒），如果为None则使用默认值300ms
             verbose: 是否输出详细信息
         
         Returns:
@@ -256,9 +256,10 @@ class SoulXTTS:
         
         # SoulX-Podcast 输出采样率为 24000
         sr = 24000
-        # 使用传入的静音间隔，如果没有则使用默认值400ms（比配置的800ms稍短以保持流畅）
-        silence_interval_ms = silence_interval if silence_interval is not None else 400
-        fade_duration_ms = 200  # 淡入淡出时长（毫秒），用于对话开始和结束
+        # 使用传入的静音间隔，如果没有则使用默认值500ms（保持对话流畅自然）
+        silence_interval_ms = silence_interval if silence_interval is not None else 500
+        fade_in_duration_ms = 500  # 淡入时长（毫秒），增加到500ms以实现慢慢渐入
+        fade_out_duration_ms = 300  # 淡出时长（毫秒），保持适中
         
         processed_segments = []
         
@@ -279,25 +280,56 @@ class SoulXTTS:
             # 只在第一个片段（对话开始）应用淡入效果
             # 只在最后一个片段（对话结束）应用淡出效果
             # 中间片段不添加淡入淡出，保持真实对话切换
-            fade_samples = int(sr * fade_duration_ms / 1000.0)
             
-            if fade_samples > 0 and wav.shape[1] > fade_samples * 2:
-                # 第一个片段：应用淡入效果（对话开始）
-                if i == 0:
-                    fade_in_curve = torch.linspace(0, 1, fade_samples, device=device).unsqueeze(0)
-                    wav[:, :fade_samples] = wav[:, :fade_samples] * fade_in_curve
+            # 第一个片段：应用淡入效果（对话开始）- 慢慢渐入且清晰
+            if i == 0:
+                fade_in_samples = int(sr * fade_in_duration_ms / 1000.0)
+                # 确保淡入长度不超过音频长度的一半
+                fade_in_samples = min(fade_in_samples, wav.shape[1] // 2)
                 
-                # 最后一个片段：应用淡出效果（对话结束）
-                if i == len(generated_wavs) - 1:
-                    fade_out_curve = torch.linspace(1, 0, fade_samples, device=device).unsqueeze(0)
-                    fade_out_start = wav.shape[1] - fade_samples
+                if fade_in_samples > 0 and wav.shape[1] > fade_in_samples:
+                    # 使用平方曲线实现更平滑的淡入，让声音更快达到清晰状态
+                    # 平方曲线：从0到1的平方，让声音在前半段快速提升，后半段达到清晰
+                    linear_curve = torch.linspace(0, 1, fade_in_samples, device=device)
+                    # 使用平方曲线，让声音更快达到清晰（前30%快速提升，后70%达到清晰）
+                    fade_in_curve = linear_curve ** 1.5  # 1.5次方，介于线性和平方之间，更平滑
+                    # 确保曲线从0开始，到1结束，让声音清晰
+                    fade_in_curve = fade_in_curve.unsqueeze(0)
+                    wav[:, :fade_in_samples] = wav[:, :fade_in_samples] * fade_in_curve
+            
+            # 最后一个片段：应用淡出效果（对话结束）
+            if i == len(generated_wavs) - 1:
+                fade_out_samples = int(sr * fade_out_duration_ms / 1000.0)
+                # 确保淡出长度不超过音频长度的一半
+                fade_out_samples = min(fade_out_samples, wav.shape[1] // 2)
+                
+                if fade_out_samples > 0 and wav.shape[1] > fade_out_samples:
+                    # 使用平方曲线实现更平滑的淡出
+                    linear_curve = torch.linspace(1, 0, fade_out_samples, device=device)
+                    fade_out_curve = linear_curve ** 1.5  # 1.5次方，更平滑
+                    fade_out_curve = fade_out_curve.unsqueeze(0)
+                    fade_out_start = wav.shape[1] - fade_out_samples
                     wav[:, fade_out_start:] = wav[:, fade_out_start:] * fade_out_curve
             
             processed_segments.append(wav)
             
             # 在片段之间添加静音间隔（除了最后一个），确保在正确的设备上
+            # 优化：如果下一段是同一角色，使用更短的静音间隔；如果是不同角色，使用正常间隔
             if i < len(generated_wavs) - 1:
-                silence_samples = int(sr * silence_interval_ms / 1000.0)
+                # 检查下一段对话是否是同一角色
+                current_role = dialogues[i][0] if i < len(dialogues) else None
+                next_role = dialogues[i + 1][0] if (i + 1) < len(dialogues) else None
+                
+                # 如果是同一角色连续发言，使用更短的静音间隔（100ms）
+                # 如果是不同角色切换，使用正常静音间隔
+                if current_role == next_role:
+                    # 同一角色连续发言，使用更短的间隔
+                    actual_silence_ms = min(100, silence_interval_ms // 3)
+                else:
+                    # 不同角色切换，使用正常间隔
+                    actual_silence_ms = silence_interval_ms
+                
+                silence_samples = int(sr * actual_silence_ms / 1000.0)
                 silence = torch.zeros(1, silence_samples, device=device)
                 processed_segments.append(silence)
         
