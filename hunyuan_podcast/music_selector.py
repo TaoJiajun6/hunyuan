@@ -60,13 +60,13 @@ class MusicSelector:
         "宠物": "pets"
     }
     
-    def __init__(self, music_dir: Optional[str] = None, use_cloud_storage: bool = True):
+    def __init__(self, music_dir: Optional[str] = None, use_cloud_storage: bool = False):
         """
         初始化音乐选择器
         
         Args:
             music_dir: 音乐文件夹路径，如果为None则使用默认路径
-            use_cloud_storage: 是否优先使用云存储，默认True
+            use_cloud_storage: 是否优先使用云存储，默认False（优先使用本地文件）
         """
         self.music_dir = music_dir or MUSIC_DIR
         self.api_client = get_client()
@@ -81,11 +81,13 @@ class MusicSelector:
                 print("已启用云存储音乐支持")
             else:
                 print("云存储配置不完整，将使用本地音乐文件")
+        else:
+            print(f"使用本地音乐文件（目录: {self.music_dir}）")
     
     def scan_music_files(self) -> List[Dict[str, str]]:
         """
         扫描音乐文件夹，获取所有音乐文件
-        优先从云存储获取，如果云存储不可用则使用本地文件
+        优先使用本地文件，如果启用云存储且本地文件不可用则从云存储获取
         
         Returns:
             音乐文件列表，每个元素包含 {'path': 文件路径, 'name': 文件名, 'style': 推断的风格, 'cloud_path': 云存储路径（如果有）}
@@ -95,7 +97,35 @@ class MusicSelector:
         
         music_files = []
         
-        # 优先尝试从云存储获取
+        # 优先使用本地文件系统
+        if os.path.exists(self.music_dir):
+            # 支持的音频格式
+            audio_extensions = ['*.mp3', '*.wav', '*.m4a', '*.flac', '*.ogg']
+            
+            # 递归扫描所有子目录
+            for ext in audio_extensions:
+                # 使用 ** 递归匹配所有子目录
+                pattern = os.path.join(self.music_dir, '**', ext)
+                files = glob.glob(pattern, recursive=True)
+                for file_path in files:
+                    filename = os.path.basename(file_path)
+                    # 从文件名推断风格
+                    style = self._infer_style_from_filename(filename)
+                    # 计算相对路径（相对于music_dir），用于匹配子目录
+                    relative_path = os.path.relpath(file_path, self.music_dir)
+                    music_files.append({
+                        'path': file_path,
+                        'name': filename,
+                        'style': style,
+                        'relative_path': relative_path  # 添加相对路径，用于子目录匹配
+                    })
+            
+            if music_files:
+                self._music_cache = music_files
+                print(f"从本地扫描到 {len(music_files)} 个音乐文件（递归扫描子目录）")
+                return music_files
+        
+        # 如果本地文件不可用且启用了云存储，尝试从云存储获取
         if self.cloud_client:
             try:
                 print(f"=" * 60)
@@ -146,32 +176,14 @@ class MusicSelector:
                 print(f"  错误详情: {traceback.format_exc()}")
                 print("  将尝试使用本地文件")
         
-        # 如果云存储不可用，使用本地文件系统
-        if not os.path.exists(self.music_dir):
+        # 如果本地和云存储都不可用
+        if not music_files:
             print(f"警告：音乐文件夹不存在: {self.music_dir}")
-            # 如果配置了云存储但本地目录不存在，提示用户
             if self.cloud_client:
                 print(f"提示：请确保云存储中有 music/ 文件夹，或创建本地音乐目录: {self.music_dir}")
-            return []
+            else:
+                print(f"提示：请创建本地音乐目录: {self.music_dir}")
         
-        # 支持的音频格式
-        audio_extensions = ['*.mp3', '*.wav', '*.m4a', '*.flac', '*.ogg']
-        
-        for ext in audio_extensions:
-            pattern = os.path.join(self.music_dir, ext)
-            files = glob.glob(pattern)
-            for file_path in files:
-                filename = os.path.basename(file_path)
-                # 从文件名推断风格
-                style = self._infer_style_from_filename(filename)
-                music_files.append({
-                    'path': file_path,
-                    'name': filename,
-                    'style': style
-                })
-        
-        self._music_cache = music_files
-        print(f"从本地扫描到 {len(music_files)} 个音乐文件")
         return music_files
     
     def _infer_style_from_filename(self, filename: str) -> str:
@@ -216,7 +228,37 @@ class MusicSelector:
         
         music_files = []
         
-        # 优先尝试从云存储获取（只获取列表，不下载）
+        # 优先使用本地文件系统
+        if os.path.exists(self.music_dir):
+            # 支持的音频格式
+            audio_extensions = ['*.mp3', '*.wav', '*.m4a', '*.flac', '*.ogg']
+            
+            # 递归扫描所有子目录
+            for ext in audio_extensions:
+                # 使用 ** 递归匹配所有子目录
+                pattern = os.path.join(self.music_dir, '**', ext)
+                files = glob.glob(pattern, recursive=True)
+                for file_path in files:
+                    filename = os.path.basename(file_path)
+                    # 从文件名推断风格
+                    style = self._infer_style_from_filename(filename)
+                    # 计算相对路径（相对于music_dir），用于匹配子目录
+                    relative_path = os.path.relpath(file_path, self.music_dir)
+                    music_files.append({
+                        'path': file_path,
+                        'name': filename,
+                        'style': style,
+                        'relative_path': relative_path  # 添加相对路径，用于子目录匹配
+                    })
+            
+            if music_files:
+                print(f"从本地扫描到 {len(music_files)} 个音乐文件（递归扫描子目录，仅元数据）")
+                # 更新全局缓存
+                _global_music_cache = music_files
+                _global_music_cache_cloud_client_id = cloud_client_id
+                return music_files
+        
+        # 如果本地文件不可用且启用了云存储，尝试从云存储获取（只获取列表，不下载）
         if self.cloud_client:
             try:
                 print(f"=" * 60)
@@ -248,30 +290,14 @@ class MusicSelector:
                 print(f"  错误详情: {traceback.format_exc()}")
                 print("  将尝试使用本地文件")
         
-        # 如果云存储不可用，使用本地文件系统
-        if not os.path.exists(self.music_dir):
+        # 如果本地和云存储都不可用
+        if not music_files:
             print(f"警告：音乐文件夹不存在: {self.music_dir}")
             if self.cloud_client:
                 print(f"提示：请确保云存储中有 music/ 文件夹，或创建本地音乐目录: {self.music_dir}")
-            return []
+            else:
+                print(f"提示：请创建本地音乐目录: {self.music_dir}")
         
-        # 支持的音频格式
-        audio_extensions = ['*.mp3', '*.wav', '*.m4a', '*.flac', '*.ogg']
-        
-        for ext in audio_extensions:
-            pattern = os.path.join(self.music_dir, ext)
-            files = glob.glob(pattern)
-            for file_path in files:
-                filename = os.path.basename(file_path)
-                # 从文件名推断风格
-                style = self._infer_style_from_filename(filename)
-                music_files.append({
-                    'path': file_path,
-                    'name': filename,
-                    'style': style
-                })
-        
-        print(f"从本地扫描到 {len(music_files)} 个音乐文件")
         # 更新全局缓存
         _global_music_cache = music_files
         _global_music_cache_cloud_client_id = cloud_client_id
@@ -368,11 +394,30 @@ class MusicSelector:
         print(f"  匹配目录: '{directory_name}'")
         
         for music_info in music_files:
-            # 从云存储路径或本地路径中提取目录信息
-            cloud_path = music_info.get('cloud_path', '')
-            path = music_info.get('path', '')
+            # 优先检查相对路径（本地文件）
+            relative_path = music_info.get('relative_path', '')
+            if relative_path:
+                # 提取目录部分：sports/music.mp3 -> sports
+                path_parts = relative_path.split(os.sep)  # 使用os.sep支持跨平台
+                if len(path_parts) >= 2:
+                    subdir = path_parts[0]  # 第一个部分就是子目录名
+                    subdir_lower = subdir.lower().strip()
+                    
+                    # 匹配逻辑：完全匹配或部分匹配（支持下划线和连字符）
+                    is_match = (
+                        directory_name_lower == subdir_lower or  # 完全匹配
+                        directory_name_lower.replace('_', '-') == subdir_lower.replace('_', '-') or  # 支持下划线和连字符互换
+                        directory_name_lower in subdir_lower or  # 包含匹配
+                        subdir_lower in directory_name_lower  # 反向包含
+                    )
+                    
+                    if is_match:
+                        print(f"    ✓ 匹配: {relative_path} (子目录: '{subdir}')")
+                        filtered.append(music_info)
+                        continue
             
             # 检查云存储路径（格式：music/sports/music.mp3 或 music/business/music.mp3）
+            cloud_path = music_info.get('cloud_path', '')
             if cloud_path:
                 # 提取目录部分：music/sports/music.mp3 -> sports
                 path_parts = cloud_path.split('/')
@@ -395,7 +440,8 @@ class MusicSelector:
                         filtered.append(music_info)
                         continue
             
-            # 检查本地路径
+            # 检查本地路径（备用方案，从完整路径提取）
+            path = music_info.get('path', '')
             if path:
                 # 提取目录部分
                 dir_part = os.path.dirname(path)

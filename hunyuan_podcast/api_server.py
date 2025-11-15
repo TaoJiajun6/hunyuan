@@ -1454,7 +1454,7 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 _update_progress(request.job_id, "selecting_music", 22, "正在选择背景音乐")
                 logger.info("开始自动选择背景音乐...")
                 music_selection_start = time.time()
-                music_selector = MusicSelector(use_cloud_storage=True)
+                music_selector = MusicSelector(use_cloud_storage=False)
                 selected_music = music_selector.select_music_by_ai(
                     text=text_content,  # 使用完整的文本内容（包括AI生成的对话）
                     podcast_name=request.podcast_name,
@@ -1817,7 +1817,7 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
                 _update_progress(request.job_id, "selecting_music", 22, "正在选择背景音乐")
                 logger.info("开始自动选择背景音乐...")
                 music_selection_start = time.time()
-                music_selector = MusicSelector(use_cloud_storage=True)
+                music_selector = MusicSelector(use_cloud_storage=False)
                 selected_music = music_selector.select_music_by_ai(
                     text=cleaned_text,  # 使用完整的文本内容（包括AI生成的对话）
                     podcast_name=None,
@@ -2070,7 +2070,7 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
                 _update_progress(request.job_id, "selecting_music", 22, "正在选择背景音乐")
                 logger.info("开始自动选择背景音乐...")
                 music_selection_start = time.time()
-                music_selector = MusicSelector(use_cloud_storage=True)
+                music_selector = MusicSelector(use_cloud_storage=False)
                 selected_music = music_selector.select_music_by_ai(
                     text=cleaned_text,  # 使用完整的文本内容（包括AI生成的对话）
                     podcast_name=None,

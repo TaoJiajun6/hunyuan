@@ -87,7 +87,7 @@ def wrap_multi_role_podcast(
             print("=" * 60)
             print("开始AI自动选择背景音乐...")
             from .music_selector import MusicSelector
-            selector = MusicSelector(use_cloud_storage=True)
+            selector = MusicSelector(use_cloud_storage=False)
             background_music_processed = selector.select_music_by_ai(
                 text=text,
                 podcast_name=podcast_name if podcast_name and podcast_name.strip() else None,
