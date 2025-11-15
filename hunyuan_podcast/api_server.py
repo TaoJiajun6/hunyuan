@@ -443,6 +443,28 @@ def is_pcm_file(file_path: str) -> bool:
         return False
 
 
+# 全局 Session 对象，用于复用连接池，提高下载速度
+# 注意：在Python中，GIL确保了Session对象的线程安全性
+_download_session = None
+
+def _get_download_session():
+    """获取全局下载 Session，实现连接池复用"""
+    global _download_session
+    if _download_session is None:
+        _download_session = requests.Session()
+        # 优化连接池配置，提高并发下载性能
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=50,  # 增加连接池数量（支持更多并发连接）
+            pool_maxsize=100,  # 增加每个连接池的最大连接数
+            max_retries=0  # 禁用urllib3的重试，我们自己处理
+        )
+        _download_session.mount('http://', adapter)
+        _download_session.mount('https://', adapter)
+        # 设置默认超时
+        _download_session.timeout = (10, 120)  # (连接超时, 读取超时)
+    return _download_session
+
+
 def download_audio_from_url(url: str, suffix: str = ".wav", timeout: int = 120) -> str:
     """从URL下载音频文件并保存到临时文件
     
@@ -474,29 +496,18 @@ def download_audio_from_url(url: str, suffix: str = ".wav", timeout: int = 120) 
             connect_timeout = 10
             read_timeout = timeout
             
-            # 使用Session以复用连接，提高下载速度
-            session = requests.Session()
-            # 配置连接池，提高性能
-            # 增大连接池大小，提高并发性能
-            adapter = requests.adapters.HTTPAdapter(
-                pool_connections=20,  # 增加连接池数量
-                pool_maxsize=50,  # 增加每个连接池的最大连接数
-                max_retries=0  # 禁用urllib3的重试，我们自己处理
-            )
-            session.mount('http://', adapter)
-            session.mount('https://', adapter)
+            # 使用全局Session以复用连接池，提高下载速度
+            session = _get_download_session()
             
-            try:
-                response = session.get(
-                    url, 
-                    timeout=(connect_timeout, read_timeout),  # (连接超时, 读取超时)
-                    stream=True, 
-                    headers=headers,
-                    allow_redirects=True
-                )
-                response.raise_for_status()
-            finally:
-                session.close()
+            # 发送请求（使用全局Session，实现连接复用）
+            response = session.get(
+                url, 
+                timeout=(connect_timeout, read_timeout),  # (连接超时, 读取超时)
+                stream=True, 
+                headers=headers,
+                allow_redirects=True
+            )
+            response.raise_for_status()
             
             # 检查Content-Length
             content_length = response.headers.get("content-length")
@@ -512,43 +523,64 @@ def download_audio_from_url(url: str, suffix: str = ".wav", timeout: int = 120) 
                         detail=f"音频文件过大: {file_size_mb:.2f} MB (限制: {MAX_AUDIO_FILE_SIZE / 1024 / 1024:.2f} MB)"
                     )
             
-            # 保存到临时文件
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-            
-            # 流式下载（根据文件大小动态调整chunk_size以提高下载速度）
-            downloaded_size = 0
-            # 根据Content-Length动态调整chunk_size
-            # 对于所有文件，使用更大的chunk_size以提高下载速度
+            # 根据文件大小选择下载策略
             if content_length:
-                file_size_mb = int(content_length) / (1024 * 1024)
-                if file_size_mb > 20:
-                    chunk_size = 2 * 1024 * 1024  # 2MB chunks，超大文件
-                elif file_size_mb > 10:
-                    chunk_size = 1024 * 1024  # 1MB chunks，大文件
-                elif file_size_mb > 2:
-                    chunk_size = 1024 * 1024  # 1MB chunks，中等文件（2-10MB）
-                else:
-                    chunk_size = 512 * 1024  # 512KB chunks，小文件（<2MB，但仍使用较大chunk）
+                file_size = int(content_length)
+                file_size_mb = file_size / (1024 * 1024)
             else:
-                chunk_size = 1024 * 1024  # 默认1MB，如果没有Content-Length
-            logger.info(f"使用chunk_size: {chunk_size / 1024:.0f} KB (文件大小: {file_size_mb:.2f} MB)" if content_length else f"使用chunk_size: {chunk_size / 1024:.0f} KB (文件大小未知)")
+                file_size = None
+                file_size_mb = None
+            
             start_time = time.time()
             
-            try:
-                for chunk in response.iter_content(chunk_size=chunk_size):
-                    if chunk:
-                        temp_file.write(chunk)
-                        downloaded_size += len(chunk)
-                        # 检查下载大小
-                        if downloaded_size > MAX_AUDIO_FILE_SIZE:
-                            temp_file.close()
-                            os.unlink(temp_file.name)
-                            raise HTTPException(
-                                status_code=400,
-                                detail=f"音频文件过大: {downloaded_size / (1024 * 1024):.2f} MB (限制: {MAX_AUDIO_FILE_SIZE / 1024 / 1024:.2f} MB)"
-                            )
-            finally:
-                temp_file.close()
+            # 对于小文件（<1MB），直接下载可能更快
+            if content_length and file_size < 1024 * 1024:
+                # 小文件直接下载
+                logger.info(f"小文件直接下载 (文件大小: {file_size_mb:.2f} MB)")
+                downloaded_data = response.content
+                downloaded_size = len(downloaded_data)
+                
+                # 保存到临时文件
+                temp_file_obj = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+                temp_file_obj.write(downloaded_data)
+                temp_file_obj.close()
+                temp_file_path = temp_file_obj.name
+            else:
+                # 大文件使用流式下载，增大 chunk_size 以提高下载速度
+                temp_file_obj = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+                downloaded_size = 0
+                
+                # 根据文件大小动态调整chunk_size，增大以提升下载速度
+                if content_length:
+                    if file_size_mb > 20:
+                        chunk_size = 4 * 1024 * 1024  # 4MB chunks，超大文件
+                    elif file_size_mb > 10:
+                        chunk_size = 2 * 1024 * 1024  # 2MB chunks，大文件
+                    elif file_size_mb > 2:
+                        chunk_size = 2 * 1024 * 1024  # 2MB chunks，中等文件（2-10MB）
+                    else:
+                        chunk_size = 1024 * 1024  # 1MB chunks，小文件（1-2MB）
+                else:
+                    chunk_size = 2 * 1024 * 1024  # 默认2MB，如果没有Content-Length
+                
+                logger.info(f"使用流式下载，chunk_size: {chunk_size / 1024 / 1024:.1f} MB (文件大小: {file_size_mb:.2f} MB)" if content_length else f"使用流式下载，chunk_size: {chunk_size / 1024 / 1024:.1f} MB (文件大小未知)")
+                
+                try:
+                    for chunk in response.iter_content(chunk_size=chunk_size):
+                        if chunk:
+                            temp_file_obj.write(chunk)
+                            downloaded_size += len(chunk)
+                            # 检查下载大小
+                            if downloaded_size > MAX_AUDIO_FILE_SIZE:
+                                temp_file_obj.close()
+                                os.unlink(temp_file_obj.name)
+                                raise HTTPException(
+                                    status_code=400,
+                                    detail=f"音频文件过大: {downloaded_size / (1024 * 1024):.2f} MB (限制: {MAX_AUDIO_FILE_SIZE / 1024 / 1024:.2f} MB)"
+                                )
+                finally:
+                    temp_file_obj.close()
+                temp_file_path = temp_file_obj.name
             
             download_time = time.time() - start_time
             download_speed = (downloaded_size / (1024 * 1024)) / download_time if download_time > 0 else 0
@@ -559,22 +591,22 @@ def download_audio_from_url(url: str, suffix: str = ".wav", timeout: int = 120) 
                 logger.info(f"音频文件下载完成: {download_time:.2f}秒，速度: {download_speed:.2f} MB/s")
             
             # 检测文件格式：如果扩展名是.wav但实际是PCM格式，转换为WAV
-            if suffix == ".wav" and is_pcm_file(temp_file.name):
+            if suffix == ".wav" and is_pcm_file(temp_file_path):
                 logger.info(f"检测到PCM格式文件，正在转换为WAV格式...")
                 wav_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
                 wav_file.close()
                 try:
-                    convert_pcm_to_wav(temp_file.name, wav_file.name)
+                    convert_pcm_to_wav(temp_file_path, wav_file.name)
                     # 删除原始PCM文件
-                    os.unlink(temp_file.name)
+                    os.unlink(temp_file_path)
                     logger.info(f"PCM文件已转换为WAV: {wav_file.name}")
                     return wav_file.name
                 except Exception as e:
                     logger.error(f"PCM转WAV失败: {str(e)}，使用原始文件")
                     # 如果转换失败，返回原始文件
-                    return temp_file.name
+                    return temp_file_path
             
-            return temp_file.name
+            return temp_file_path
             
         except requests.exceptions.Timeout as e:
             if attempt < max_retries - 1:
@@ -1339,43 +1371,14 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
             _update_progress(request.job_id, "downloading_voices", 5, "正在下载角色音色文件")
             voice_download_start = time.time()
             
-            # 使用并发下载以提高速度（多个角色文件同时下载）
-            if use_cloud_storage and len(role_voice_data) > 1:
-                # 并发下载多个文件
-                logger.info(f"使用并发下载 {len(role_voice_data)} 个角色音色文件...")
-                import concurrent.futures
-                
-                def download_role_voice(role_voice_tuple):
-                    role, voice_data = role_voice_tuple
-                    role_download_start = time.time()
-                    logger.info(f"开始下载角色 '{role}' 的音频文件...")
-                    try:
-                        temp_file = download_audio_from_url(voice_data)
-                        role_download_time = time.time() - role_download_start
-                        logger.info(f"角色 '{role}' 音频文件下载完成，耗时: {role_download_time:.2f}s")
-                        return role, temp_file, role_download_time
-                    except Exception as e:
-                        logger.error(f"角色 '{role}' 音频文件下载失败: {str(e)}")
-                        raise
-                
-                # 使用线程池并发下载（最多3个并发，避免过多连接）
-                with concurrent.futures.ThreadPoolExecutor(max_workers=min(3, len(role_voice_data))) as executor:
-                    future_to_role = {executor.submit(download_role_voice, item): item[0] for item in role_voice_data.items()}
-                    for future in concurrent.futures.as_completed(future_to_role):
-                        role = future_to_role[future]
-                        try:
-                            role_name, temp_file, role_download_time = future.result()
-                            retrieval_timings[f"角色音色下载_{role_name}"] = role_download_time
-                            temp_files.append(temp_file)
-                            role_voices[role_name] = temp_file
-                        except Exception as e:
-                            logger.error(f"角色 '{role}' 下载失败: {str(e)}")
-                            raise
-            else:
-                # 串行下载（单个文件或base64解码）
-                for role, voice_data in role_voice_data.items():
-                    role_download_start = time.time()
-                    logger.info(f"获取角色 '{role}' 的音频文件...")
+            # 使用并发下载以提高速度（所有角色文件同时下载，包括单个文件）
+            import concurrent.futures
+            
+            def download_role_voice(role_voice_tuple):
+                role, voice_data = role_voice_tuple
+                role_download_start = time.time()
+                logger.info(f"开始获取角色 '{role}' 的音频文件...")
+                try:
                     if use_cloud_storage:
                         # 从云存储URL下载
                         logger.info(f"从云存储下载: {voice_data}")
@@ -1385,10 +1388,26 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                         logger.info(f"从base64解码")
                         temp_file = decode_base64_audio(voice_data)
                     role_download_time = time.time() - role_download_start
-                    retrieval_timings[f"角色音色下载_{role}"] = role_download_time
-                    temp_files.append(temp_file)
-                    role_voices[role] = temp_file
                     logger.info(f"角色 '{role}' 音频文件获取完成，耗时: {role_download_time:.2f}s")
+                    return role, temp_file, role_download_time
+                except Exception as e:
+                    logger.error(f"角色 '{role}' 音频文件获取失败: {str(e)}")
+                    raise
+            
+            # 使用线程池并发下载（最多5个并发，提高下载速度）
+            logger.info(f"使用并发下载 {len(role_voice_data)} 个角色音色文件...")
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(5, len(role_voice_data))) as executor:
+                future_to_role = {executor.submit(download_role_voice, item): item[0] for item in role_voice_data.items()}
+                for future in concurrent.futures.as_completed(future_to_role):
+                    role = future_to_role[future]
+                    try:
+                        role_name, temp_file, role_download_time = future.result()
+                        retrieval_timings[f"角色音色下载_{role_name}"] = role_download_time
+                        temp_files.append(temp_file)
+                        role_voices[role_name] = temp_file
+                    except Exception as e:
+                        logger.error(f"角色 '{role}' 下载失败: {str(e)}")
+                        raise
             
             voice_download_total = time.time() - voice_download_start
             retrieval_timings["角色音色下载_总计"] = voice_download_total
@@ -1766,21 +1785,44 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
         
         try:
             _update_progress(request.job_id, "downloading_voices", 5, "正在下载角色音色文件")
-            for char in request.characters:
-                logger.info(f"从云存储下载角色 '{char.name}' 的音频文件: {char.voice_url}")
-                # 从云存储URL下载
-                temp_file = download_audio_from_url(char.voice_url)
-                temp_files.append(temp_file)
-                role_voices[char.name] = temp_file
-                logger.info(f"角色 '{char.name}' 音频文件下载完成")
-                
-                character_descriptions[char.name] = {
-                    "identity": char.identity or "",
-                    "personality": char.personality or "",
-                    "catchphrase": char.catchphrase or "",
-                    "speaking_style": char.speaking_style or "",
-                    "relationship": char.relationship or ""
-                }
+            
+            # 使用并发下载以提高速度
+            import concurrent.futures
+            import time as time_module
+            
+            def download_character_voice(char):
+                voice_download_start = time_module.time()
+                logger.info(f"开始下载角色 '{char.name}' 的音频文件: {char.voice_url}")
+                try:
+                    temp_file = download_audio_from_url(char.voice_url)
+                    voice_download_time = time_module.time() - voice_download_start
+                    logger.info(f"角色 '{char.name}' 音频文件下载完成，耗时: {voice_download_time:.2f}s")
+                    return char, temp_file, voice_download_time
+                except Exception as e:
+                    logger.error(f"角色 '{char.name}' 音频文件下载失败: {str(e)}")
+                    raise
+            
+            # 并发下载所有角色的音色文件
+            logger.info(f"使用并发下载 {len(request.characters)} 个角色音色文件...")
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(5, len(request.characters))) as executor:
+                future_to_char = {executor.submit(download_character_voice, char): char.name for char in request.characters}
+                for future in concurrent.futures.as_completed(future_to_char):
+                    char_name = future_to_char[future]
+                    try:
+                        char, temp_file, voice_download_time = future.result()
+                        temp_files.append(temp_file)
+                        role_voices[char.name] = temp_file
+                        
+                        character_descriptions[char.name] = {
+                            "identity": char.identity or "",
+                            "personality": char.personality or "",
+                            "catchphrase": char.catchphrase or "",
+                            "speaking_style": char.speaking_style or "",
+                            "relationship": char.relationship or ""
+                        }
+                    except Exception as e:
+                        logger.error(f"角色 '{char_name}' 下载失败: {str(e)}")
+                        raise
             
             # 获取文本素材
             text_material = request.text
@@ -2026,18 +2068,44 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
         
         try:
             _update_progress(request.job_id, "downloading_voices", 5, "正在下载角色音色文件")
+            
+            # 使用并发下载以提高速度
+            import concurrent.futures
+            import time as time_module
+            
             role_names = ["角色A", "角色B", "角色C"][:request.num_characters]
-            for i, role_name in enumerate(role_names):
-                if role_name in request.role_voice_urls:
-                    voice_url = request.role_voice_urls[role_name]
-                    logger.info(f"从云存储下载角色 '{role_name}' 的音频文件: {voice_url}")
-                    # 从云存储URL下载
-                    temp_file = download_audio_from_url(voice_url)
-                    temp_files.append(temp_file)
-                    role_voices[role_name] = temp_file
-                    logger.info(f"角色 '{role_name}' 音频文件下载完成")
-                else:
+            
+            # 验证所有角色都有音色URL
+            for role_name in role_names:
+                if role_name not in request.role_voice_urls:
                     raise HTTPException(status_code=400, detail=f"缺少角色 '{role_name}' 的音色文件URL")
+            
+            def download_role_voice(role_name):
+                voice_url = request.role_voice_urls[role_name]
+                voice_download_start = time_module.time()
+                logger.info(f"开始下载角色 '{role_name}' 的音频文件: {voice_url}")
+                try:
+                    temp_file = download_audio_from_url(voice_url)
+                    voice_download_time = time_module.time() - voice_download_start
+                    logger.info(f"角色 '{role_name}' 音频文件下载完成，耗时: {voice_download_time:.2f}s")
+                    return role_name, temp_file, voice_download_time
+                except Exception as e:
+                    logger.error(f"角色 '{role_name}' 音频文件下载失败: {str(e)}")
+                    raise
+            
+            # 并发下载所有角色的音色文件
+            logger.info(f"使用并发下载 {len(role_names)} 个角色音色文件...")
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(5, len(role_names))) as executor:
+                future_to_role = {executor.submit(download_role_voice, role_name): role_name for role_name in role_names}
+                for future in concurrent.futures.as_completed(future_to_role):
+                    role_name = future_to_role[future]
+                    try:
+                        role_name_result, temp_file, voice_download_time = future.result()
+                        temp_files.append(temp_file)
+                        role_voices[role_name_result] = temp_file
+                    except Exception as e:
+                        logger.error(f"角色 '{role_name}' 下载失败: {str(e)}")
+                        raise
             
             # 生成对话文本
             logger.info("调用混元大模型生成深度对话文本...")

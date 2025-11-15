@@ -550,14 +550,23 @@ def load_multiple_audios(
         audio_list = []
         max_len = 0
         for path in valid_paths:
-            audio, _ = load_audio(path, target_sr)
-            audio_list.append(audio)
-            # 确保都是单声道
-            if audio.dim() > 1 and audio.shape[0] > 1:
-                audio = torch.mean(audio, dim=0, keepdim=True)
-            if audio.dim() == 1:
-                audio = audio.unsqueeze(0)
-            max_len = max(max_len, audio.shape[1])
+            try:
+                audio, _ = load_audio(path, target_sr)
+                audio_list.append(audio)
+                # 确保都是单声道
+                if audio.dim() > 1 and audio.shape[0] > 1:
+                    audio = torch.mean(audio, dim=0, keepdim=True)
+                if audio.dim() == 1:
+                    audio = audio.unsqueeze(0)
+                max_len = max(max_len, audio.shape[1])
+            except Exception as e:
+                # 如果加载失败，记录错误但继续处理其他文件
+                print(f"⚠️ 加载文件失败 {path}: {e}")
+                continue
+        
+        # 如果没有成功加载任何文件，抛出错误
+        if not audio_list:
+            raise ValueError("没有成功加载任何音频文件")
         
         # 将所有音频调整到相同长度并混合
         mixed = None
