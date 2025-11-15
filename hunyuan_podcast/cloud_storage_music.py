@@ -247,8 +247,8 @@ class CloudStorageMusicClient:
             # 优化下载：使用Session和更大的chunk_size
             session = requests.Session()
             adapter = requests.adapters.HTTPAdapter(
-                pool_connections=10,
-                pool_maxsize=20,
+                pool_connections=20,  # 增加连接池数量
+                pool_maxsize=50,  # 增加每个连接池的最大连接数
                 max_retries=0
             )
             session.mount('http://', adapter)
@@ -256,6 +256,7 @@ class CloudStorageMusicClient:
             
             try:
                 # 优化超时设置：连接超时10秒，读取超时120秒
+                # 先使用stream=True，根据Content-Length决定是否使用流式
                 response = session.get(
                     download_url, 
                     timeout=(10, 120), 
@@ -265,37 +266,46 @@ class CloudStorageMusicClient:
                 )
                 response.raise_for_status()
             finally:
-                session.close()
+                # 注意：这里不关闭session，因为可能还需要读取内容
+                pass
             
             # 检查Content-Length
             content_length = response.headers.get("content-length")
+            file_size_mb = 0
             if content_length:
                 file_size = int(content_length)
                 file_size_mb = file_size / (1024 * 1024)
                 print(f"  文件大小: {file_size_mb:.2f} MB")
             
-            # 流式下载（根据文件大小动态调整chunk_size以提高下载速度）
+            # 对于中小文件（<20MB），使用非流式下载（一次性下载），更快且更稳定
             downloaded_size = 0
-            # 根据Content-Length动态调整chunk_size
-            if content_length:
-                file_size_mb = int(content_length) / (1024 * 1024)
-                if file_size_mb > 20:
-                    chunk_size = 2 * 1024 * 1024  # 2MB chunks，超大文件
-                elif file_size_mb > 10:
-                    chunk_size = 1024 * 1024  # 1MB chunks，大文件
-                elif file_size_mb > 5:
-                    chunk_size = 512 * 1024  # 512KB chunks，中等文件
-                else:
-                    chunk_size = 256 * 1024  # 256KB chunks，小文件
-            else:
-                chunk_size = 512 * 1024  # 默认512KB，如果没有Content-Length
             import time
             download_start = time.time()
+            
             with open(local_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=chunk_size):
-                    if chunk:
-                        f.write(chunk)
-                        downloaded_size += len(chunk)
+                # 根据文件大小决定使用流式还是非流式下载
+                if content_length and file_size_mb < 20:
+                    # 中小文件使用非流式下载（一次性下载）
+                    print(f"  使用非流式下载（一次性下载，适合中小文件，文件大小: {file_size_mb:.2f} MB）")
+                    content = response.content  # 一次性获取所有内容
+                    downloaded_size = len(content)
+                    f.write(content)
+                else:
+                    # 超大文件或未知大小，使用流式下载
+                    # 根据文件大小动态调整chunk_size
+                    if content_length and file_size_mb >= 20:
+                        chunk_size = 4 * 1024 * 1024  # 4MB chunks，超大文件
+                    else:
+                        chunk_size = 2 * 1024 * 1024  # 2MB chunks，未知大小时使用
+                    
+                    print(f"  使用流式下载，chunk_size: {chunk_size / 1024:.0f} KB (文件大小: {file_size_mb:.2f} MB)" if content_length else f"  使用流式下载，chunk_size: {chunk_size / 1024:.0f} KB (文件大小未知)")
+                    
+                    for chunk in response.iter_content(chunk_size=chunk_size):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded_size += len(chunk)
+            
+            session.close()
             
             download_time = time.time() - download_start
             download_speed = (downloaded_size / (1024 * 1024)) / download_time if download_time > 0 else 0
@@ -396,8 +406,8 @@ class CloudStorageMusicClient:
             # 优化下载：使用Session和更大的chunk_size
             session = requests.Session()
             adapter = requests.adapters.HTTPAdapter(
-                pool_connections=10,
-                pool_maxsize=20,
+                pool_connections=20,  # 增加连接池数量
+                pool_maxsize=50,  # 增加每个连接池的最大连接数
                 max_retries=0
             )
             session.mount('http://', adapter)
@@ -405,6 +415,7 @@ class CloudStorageMusicClient:
             
             try:
                 # 优化超时设置：连接超时10秒，读取超时120秒
+                # 先使用stream=True，根据Content-Length决定是否使用流式
                 response = session.get(
                     music_url, 
                     timeout=(10, 120), 
@@ -414,37 +425,46 @@ class CloudStorageMusicClient:
                 )
                 response.raise_for_status()
             finally:
-                session.close()
+                # 注意：这里不关闭session，因为可能还需要读取内容
+                pass
             
             # 检查Content-Length
             content_length = response.headers.get("content-length")
+            file_size_mb = 0
             if content_length:
                 file_size = int(content_length)
                 file_size_mb = file_size / (1024 * 1024)
                 print(f"  文件大小: {file_size_mb:.2f} MB")
             
-            # 流式下载（根据文件大小动态调整chunk_size以提高下载速度）
+            # 对于中小文件（<20MB），使用非流式下载（一次性下载），更快且更稳定
             downloaded_size = 0
-            # 根据Content-Length动态调整chunk_size
-            if content_length:
-                file_size_mb = int(content_length) / (1024 * 1024)
-                if file_size_mb > 20:
-                    chunk_size = 2 * 1024 * 1024  # 2MB chunks，超大文件
-                elif file_size_mb > 10:
-                    chunk_size = 1024 * 1024  # 1MB chunks，大文件
-                elif file_size_mb > 5:
-                    chunk_size = 512 * 1024  # 512KB chunks，中等文件
-                else:
-                    chunk_size = 256 * 1024  # 256KB chunks，小文件
-            else:
-                chunk_size = 512 * 1024  # 默认512KB，如果没有Content-Length
             import time
             download_start = time.time()
+            
             with open(local_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=chunk_size):
-                    if chunk:
-                        f.write(chunk)
-                        downloaded_size += len(chunk)
+                # 根据文件大小决定使用流式还是非流式下载
+                if content_length and file_size_mb < 20:
+                    # 中小文件使用非流式下载（一次性下载）
+                    print(f"  使用非流式下载（一次性下载，适合中小文件，文件大小: {file_size_mb:.2f} MB）")
+                    content = response.content  # 一次性获取所有内容
+                    downloaded_size = len(content)
+                    f.write(content)
+                else:
+                    # 超大文件或未知大小，使用流式下载
+                    # 根据文件大小动态调整chunk_size
+                    if content_length and file_size_mb >= 20:
+                        chunk_size = 4 * 1024 * 1024  # 4MB chunks，超大文件
+                    else:
+                        chunk_size = 2 * 1024 * 1024  # 2MB chunks，未知大小时使用
+                    
+                    print(f"  使用流式下载，chunk_size: {chunk_size / 1024:.0f} KB (文件大小: {file_size_mb:.2f} MB)" if content_length else f"  使用流式下载，chunk_size: {chunk_size / 1024:.0f} KB (文件大小未知)")
+                    
+                    for chunk in response.iter_content(chunk_size=chunk_size):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded_size += len(chunk)
+            
+            session.close()
             
             download_time = time.time() - download_start
             download_speed = (downloaded_size / (1024 * 1024)) / download_time if download_time > 0 else 0

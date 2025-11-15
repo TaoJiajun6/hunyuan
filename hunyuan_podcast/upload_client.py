@@ -170,13 +170,13 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
     
     # 根据文件大小动态调整超时时间（在循环外计算，避免重复计算）
     file_size_mb = file_size / (1024 * 1024)
-    # 对于大文件（几MB到几十MB），假设最小上传速度为0.2 MB/s（比0.1 MB/s更合理）
+    # 对于大文件（几MB到几十MB），假设最小上传速度为0.15 MB/s（保守估计，确保有足够时间）
     # 这样可以减少不必要的超时时间，同时仍为慢速网络预留足够时间
-    min_upload_speed_mbps = 0.2  # 最小上传速度（MB/s），适合大文件
+    min_upload_speed_mbps = 0.15  # 最小上传速度（MB/s），保守估计
     # 计算所需时间：文件大小(MB) / 最小速度(MB/s) + 缓冲时间
-    calculated_timeout = int((file_size_mb / min_upload_speed_mbps) + 120)  # 至少120秒缓冲
-    # 使用传入的timeout和计算出的timeout中的较大值，但不超过1800秒（30分钟）
-    base_read_timeout = max(timeout, min(calculated_timeout, 1800))
+    calculated_timeout = int((file_size_mb / min_upload_speed_mbps) + 180)  # 至少180秒缓冲（3分钟）
+    # 使用传入的timeout和计算出的timeout中的较大值，但不超过3600秒（60分钟）
+    base_read_timeout = max(timeout, min(calculated_timeout, 3600))
     connect_timeout = 15  # 连接超时15秒
     
     for attempt in range(1, retries + 1):
@@ -202,9 +202,10 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
                 # 对于小文件（<5MB），不使用流式上传，一次性读取并上传，可能更快
                 upload_start = time.time()
                 
-                # 对于小文件，一次性读取并上传（非流式）
-                if file_size_mb < 5:
-                    logger.info(f"使用非流式上传（一次性上传，适合小文件，目标2秒内完成，文件大小: {file_size_mb:.2f} MB）")
+                # 对于中小文件（<20MB），使用非流式上传（一次性上传），可能更快且更稳定
+                # 对于超大文件（>=20MB），使用流式上传以节省内存
+                if file_size_mb < 20:
+                    logger.info(f"使用非流式上传（一次性上传，适合中小文件，文件大小: {file_size_mb:.2f} MB）")
                     # 一次性读取整个文件
                     with open(file_path, 'rb') as f:
                         file_data = f.read()
@@ -217,14 +218,9 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
                         allow_redirects=True
                     )
                 else:
-                    # 对于大文件（>=5MB），使用流式上传以节省内存
-                    # 根据文件大小动态调整chunk_size
-                    if file_size_mb > 20:
-                        chunk_size = 2 * 1024 * 1024  # 2MB chunks，超大文件（>20MB）
-                    elif file_size_mb > 10:
-                        chunk_size = 2 * 1024 * 1024  # 2MB chunks，大文件（10-20MB）
-                    else:
-                        chunk_size = 2 * 1024 * 1024  # 2MB chunks，中等文件（5-10MB）
+                    # 对于超大文件（>=20MB），使用流式上传以节省内存
+                    # 使用更大的chunk_size以提高上传速度
+                    chunk_size = 4 * 1024 * 1024  # 4MB chunks，超大文件使用更大的chunk
                     
                     logger.info(f"使用流式上传，chunk_size: {chunk_size / 1024:.0f} KB (文件大小: {file_size_mb:.2f} MB)")
                     
