@@ -27,6 +27,8 @@ export struct PodcastDeepPage {
   @Local jobId: string = '';
   @Local progressPercent: number = 0;
   @Local progressMessage: string = '';
+  private targetProgress: number = 0; // 目标进度值，用于平滑动画
+  private progressAnimationTimer: number = 0; // 进度条动画定时器
   @Local windowModel: WindowModel = AppStorageV2.connect(WindowModel, () => new WindowModel())!;
 
   readonly depthLevels: string[] = ['深度', '中等', '浅层'];
@@ -122,10 +124,13 @@ export struct PodcastDeepPage {
     this.progressPercent = 1;
     this.progressMessage = '任务已提交';
     
-    // SSE进度回调
+    // 进度回调
     const onProgress = (progress: ProgressStatus) => {
-      this.progressPercent = progress.percent || 0;
+      // 更新目标进度值，触发平滑动画
+      this.targetProgress = progress.percent || 0;
       this.progressMessage = progress.message || '';
+      // 启动平滑动画
+      this.startProgressAnimation();
       
       // 如果任务失败，显示错误
       if (progress.done && progress.error) {
@@ -156,13 +161,19 @@ export struct PodcastDeepPage {
       const response = await podcastService.generateDeepPodcast(request, this.jobId, onProgress);
 
       if (response.success && response.data) {
-        const resultData: PodcastResult = response.data;
-        const params = new PodcastResultPageParams(
-          resultData,
-          '主题深度播客',
-          resultData.script
-        );
-        RouterUtils.pushPathByName(RouterMap.PODCAST_RESULT_PAGE, params);
+        // 确保进度条到达100%
+        this.targetProgress = 100;
+        this.startProgressAnimation();
+        // 等待一小段时间让进度条动画完成，然后跳转
+        setTimeout(() => {
+          const resultData: PodcastResult = response.data!;
+          const params = new PodcastResultPageParams(
+            resultData,
+            '主题深度播客',
+            resultData.script
+          );
+          RouterUtils.pushPathByName(RouterMap.PODCAST_RESULT_PAGE, params);
+        }, 500);
       } else {
         promptAction.showToast({
           message: response.error || response.message || '生成失败',
@@ -177,6 +188,53 @@ export struct PodcastDeepPage {
     } finally {
       this.isLoading = false;
     }
+  }
+
+  /**
+   * 启动进度条平滑动画
+   * 将当前进度值平滑过渡到目标进度值
+   */
+  private startProgressAnimation(): void {
+    // 清除之前的动画定时器
+    if (this.progressAnimationTimer) {
+      clearInterval(this.progressAnimationTimer);
+    }
+
+    // 如果目标进度和当前进度相同，不需要动画
+    if (Math.abs(this.progressPercent - this.targetProgress) < 0.1) {
+      this.progressPercent = this.targetProgress;
+      return;
+    }
+
+    // 计算动画步长（每次增加约1%，约50ms更新一次，总共约5秒完成）
+    const animationDuration = 5000; // 5秒完成动画
+    const updateInterval = 50; // 每50ms更新一次
+    const steps = animationDuration / updateInterval; // 总步数
+    const stepSize = (this.targetProgress - this.progressPercent) / steps;
+
+    // 启动动画
+    this.progressAnimationTimer = setInterval(() => {
+      if (Math.abs(this.progressPercent - this.targetProgress) < 0.1) {
+        // 接近目标值，直接设置为目标值并停止动画
+        this.progressPercent = this.targetProgress;
+        if (this.progressAnimationTimer) {
+          clearInterval(this.progressAnimationTimer);
+          this.progressAnimationTimer = 0;
+        }
+      } else {
+        // 继续向目标值移动
+        this.progressPercent += stepSize;
+        // 确保不超过目标值
+        if ((stepSize > 0 && this.progressPercent > this.targetProgress) ||
+            (stepSize < 0 && this.progressPercent < this.targetProgress)) {
+          this.progressPercent = this.targetProgress;
+          if (this.progressAnimationTimer) {
+            clearInterval(this.progressAnimationTimer);
+            this.progressAnimationTimer = 0;
+          }
+        }
+      }
+    }, updateInterval)  as number;
   }
 
   build() {
