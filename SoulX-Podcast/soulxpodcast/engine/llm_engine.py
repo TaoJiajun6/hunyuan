@@ -150,7 +150,57 @@ class VLLMEngine:
                 gpu_name = torch.cuda.get_device_name(0)
                 print(f"[INFO] VLLM Engine - GPU: {gpu_name}, 计算能力: {compute_cap[0]}.{compute_cap[1]}, 自动选择 dtype: {vllm_dtype}")
             
-            self.model = LLM(model=model, enforce_eager=True, dtype=vllm_dtype, max_model_len=8192, enable_prefix_caching=True,)
+            # V100 (compute capability 7.0) 在使用 float16 时有 Triton 编译问题
+            # 错误发生在 prefix_prefill.py 的 attention kernel 编译时
+            # 错误信息: "LLVM ERROR: Unsupported rounding mode for conversion"
+            # 
+            # 解决方案（按推荐顺序）：
+            # 1. 使用 float32（自动处理，较慢但兼容）
+            # 2. 禁用 prefix caching + float16（可能不够，但可尝试）
+            # 3. 使用 HF 引擎（最推荐用于 V100）
+            compute_cap = torch.cuda.get_device_capability(0) if torch.cuda.is_available() else (0, 0)
+            use_prefix_caching = True
+            
+            # 检查是否有环境变量强制使用 float32（用于 V100 兼容性）
+            # 默认对于 V100，建议使用 float32 以避免 Triton 编译错误
+            v100_auto_float32 = os.environ.get("VLLM_V100_AUTO_FLOAT32", "true").lower() == "true"
+            force_float32 = os.environ.get("VLLM_V100_FORCE_FLOAT32", "false").lower() == "true"
+            
+            if compute_cap[0] == 7 and vllm_dtype == "half":
+                if force_float32 or v100_auto_float32:
+                    # V100 + float16 有 Triton 编译问题，自动使用 float32
+                    vllm_dtype = "float"
+                    if v100_auto_float32:
+                        print(f"[WARNING] V100 GPU: 检测到 float16 + Triton 兼容性问题，自动切换到 float32")
+                        print(f"[INFO] float32 比 float16 慢约 2 倍，但兼容 V100")
+                        print(f"[INFO] 如果想强制使用 float16，设置: export VLLM_V100_AUTO_FLOAT32=false")
+                    else:
+                        print(f"[WARNING] V100 GPU: 检测到环境变量 VLLM_V100_FORCE_FLOAT32=true，使用 float32")
+                else:
+                    # 尝试禁用 prefix caching，但可能仍然失败
+                    use_prefix_caching = False
+                    print(f"[WARNING] V100 GPU 使用 float16: 禁用 prefix caching 以避免 Triton 编译错误")
+                    print(f"[WARNING] 注意: 可能仍然会遇到 Triton 编译错误")
+                    print(f"[INFO] 如果出错，建议：")
+                    print(f"[INFO]   1. 设置环境变量: export VLLM_V100_AUTO_FLOAT32=true (使用 float32)")
+                    print(f"[INFO]   2. 或切换到 HF 引擎: llm_engine='hf' (推荐)")
+            
+            # 设置 Triton 相关环境变量以减少编译问题
+            if compute_cap[0] == 7:
+                # V100 可能需要禁用某些 Triton 优化
+                os.environ.setdefault("TRITON_CACHE_DIR", "/tmp/triton_cache")
+                # 禁用 Triton 的一些可能导致问题的优化
+                os.environ.setdefault("TRITON_INTERPRET", "0")
+            
+            # 初始化 VLLM 模型
+            self.model = LLM(
+                model=model, 
+                enforce_eager=True, 
+                dtype=vllm_dtype, 
+                max_model_len=8192, 
+                enable_prefix_caching=use_prefix_caching,
+                disable_custom_all_reduce=False,  # 保持默认
+            )
         else:
             raise ImportError("Not Support VLLM now!!!")
         self.config = config
