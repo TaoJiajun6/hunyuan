@@ -67,6 +67,57 @@ class TextProcessor:
         
         return content.strip()
     
+    def split_dialogue_by_punctuation(self, content: str) -> List[str]:
+        """
+        根据标点符号将对话内容拆分成多个句子，增强断句效果
+        
+        Args:
+            content: 对话内容
+        
+        Returns:
+            拆分后的句子列表
+        """
+        if not content:
+            return []
+        
+        # 清理内容
+        content = self.clean_dialogue_content(content)
+        
+        # 如果内容很短或没有明显的标点，直接返回
+        if len(content) < 10:
+            return [content] if content else []
+        
+        # 定义句子结束标点（中文和英文）
+        sentence_endings = r'[。！？.!?]'
+        
+        # 按句子结束标点拆分，但保留标点
+        sentences = re.split(f'({sentence_endings})', content)
+        
+        # 合并标点和前面的内容
+        result = []
+        i = 0
+        while i < len(sentences):
+            sentence = sentences[i].strip()
+            if not sentence:
+                i += 1
+                continue
+            
+            # 如果下一个元素是标点，合并
+            if i + 1 < len(sentences) and re.match(sentence_endings, sentences[i + 1]):
+                sentence += sentences[i + 1]
+                i += 2
+            else:
+                i += 1
+            
+            if sentence:
+                result.append(sentence)
+        
+        # 如果没有拆分出多个句子，返回原内容
+        if len(result) <= 1:
+            return [content] if content else []
+        
+        return result
+    
     def parse_role_text(self, text: str) -> List[Tuple[str, str]]:
         """
         解析包含角色标记的文本，支持情绪标注和音效标注
@@ -115,7 +166,12 @@ class TextProcessor:
                 # 如果角色改变，保存之前的对话
                 if current_role and current_role != role_name:
                     if current_content:
-                        dialogues.append((current_role, ' '.join(current_content)))
+                        full_content = ' '.join(current_content)
+                        # 根据标点拆分对话，增强断句效果
+                        sentences = self.split_dialogue_by_punctuation(full_content)
+                        for sentence in sentences:
+                            if sentence.strip():
+                                dialogues.append((current_role, sentence.strip()))
                         current_content = []
                 
                 # 更新当前角色和内容
@@ -144,7 +200,12 @@ class TextProcessor:
                 # 如果角色改变，保存之前的对话
                 if current_role and current_role != role_name:
                     if current_content:
-                        dialogues.append((current_role, ' '.join(current_content)))
+                        full_content = ' '.join(current_content)
+                        # 根据标点拆分对话，增强断句效果
+                        sentences = self.split_dialogue_by_punctuation(full_content)
+                        for sentence in sentences:
+                            if sentence.strip():
+                                dialogues.append((current_role, sentence.strip()))
                         current_content = []
                 
                 # 更新当前角色和内容（动作描述会被跳过，不包含在内容中）
@@ -210,7 +271,12 @@ class TextProcessor:
                 # 如果角色改变，保存之前的对话
                 if current_role and current_role != role_name:
                     if current_content:
-                        dialogues.append((current_role, ' '.join(current_content)))
+                        full_content = ' '.join(current_content)
+                        # 根据标点拆分对话，增强断句效果
+                        sentences = self.split_dialogue_by_punctuation(full_content)
+                        for sentence in sentences:
+                            if sentence.strip():
+                                dialogues.append((current_role, sentence.strip()))
                         current_content = []
                 
                 # 更新当前角色
@@ -228,7 +294,12 @@ class TextProcessor:
         
         # 保存最后一个角色的对话
         if current_role and current_content:
-            dialogues.append((current_role, ' '.join(current_content)))
+            full_content = ' '.join(current_content)
+            # 根据标点拆分对话，增强断句效果
+            sentences = self.split_dialogue_by_punctuation(full_content)
+            for sentence in sentences:
+                if sentence.strip():
+                    dialogues.append((current_role, sentence.strip()))
         
         return dialogues
     

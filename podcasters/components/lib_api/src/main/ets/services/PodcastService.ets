@@ -183,6 +183,15 @@ export interface BatchResponse {
 }
 
 /**
+ * 任务结果
+ */
+export interface TaskResult {
+  file_size_mb?: number;
+  output_path?: string;
+  audio_url?: string;
+}
+
+/**
  * 任务状态
  */
 export interface TaskStatus {
@@ -195,11 +204,7 @@ export interface TaskStatus {
   started_at?: number;
   completed_at?: number;
   error?: string;
-  result?: {
-    file_size_mb?: number;
-    output_path?: string;
-    audio_url?: string;
-  };
+  result?: TaskResult;
 }
 
 /**

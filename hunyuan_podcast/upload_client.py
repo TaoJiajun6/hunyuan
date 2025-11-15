@@ -33,8 +33,17 @@ from typing import Optional, Dict, Any
 import requests
 from requests import RequestException
 
+# 配置日志（支持文件导出）
+try:
+    from .log_config import setup_logging
+    # 只在第一次导入时配置日志（避免重复配置）
+    if not logging.getLogger().handlers:
+        setup_logging(log_file="upload_client.log")
+except ImportError:
+    # 如果log_config模块不存在，使用基本配置
+    logging.basicConfig(level=logging.INFO)
+
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 
 
 # Simple module-level token cache to avoid fetching token repeatedly within its lifetime
@@ -173,12 +182,13 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
     backoff_factor = 0.5
     
     # 根据文件大小动态调整超时时间（在循环外计算，避免重复计算）
-    # 对于上传操作，需要考虑写入超时，假设最小上传速度为0.1 MB/s（考虑慢速网络）
-    min_upload_speed_mbps = 0.1  # 最小上传速度（MB/s），考虑慢速网络
+    # 对于上传操作，需要考虑写入超时，假设最小上传速度为0.03 MB/s（考虑非常慢的网络）
+    # 从实际日志看，上传速度可能只有0.04-0.05 MB/s，所以设置更保守的值
+    min_upload_speed_mbps = 0.03  # 最小上传速度（MB/s），考虑非常慢的网络
     # 计算所需时间：文件大小(MB) / 最小速度(MB/s) + 缓冲时间
-    calculated_timeout = int((file_size_mb / min_upload_speed_mbps) + 300)  # 至少300秒缓冲
-    # 使用传入的timeout和计算出的timeout中的较大值，但不超过3600秒（60分钟）
-    base_read_timeout = max(timeout, min(calculated_timeout, 3600))
+    calculated_timeout = int((file_size_mb / min_upload_speed_mbps) + 600)  # 至少600秒缓冲
+    # 使用传入的timeout和计算出的timeout中的较大值，但不超过7200秒（120分钟）
+    base_read_timeout = max(timeout, min(calculated_timeout, 7200))
     connect_timeout = 30  # 连接超时30秒
     
     for attempt in range(1, retries + 1):
@@ -271,28 +281,52 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
             logger.info(f"  响应头: {dict(resp.headers)}")
             if resp.text:
                 logger.info(f"上传响应内容: {resp.text[:500]}")
-            resp.raise_for_status()
-            logger.info(f"上传成功！")
-            return resp
+            
+            # 如果状态码是成功的（2xx），即使之前有超时警告也认为成功
+            if 200 <= resp.status_code < 300:
+                logger.info(f"上传成功！")
+                return resp
+            else:
+                resp.raise_for_status()
+                return resp
         except requests.exceptions.Timeout as e:
             last_exc = e
+            # 检查是否是写入超时，如果是且还有重试机会，继续重试
+            # 写入超时可能发生在数据传输过程中，但服务器可能已经接收了完整数据
+            is_write_timeout = "write operation timed out" in str(e).lower() or "timed out" in str(e).lower()
             logger.error(f"上传超时 (attempt {attempt}/{retries}): {str(e)}")
             logger.error(f"  文件大小: {file_size_mb:.2f} MB")
             logger.error(f"  超时设置: 连接={connect_timeout}秒, 读取={read_timeout}秒")
+            if is_write_timeout:
+                logger.warning(f"  检测到写入超时，但数据可能已经成功上传到服务器")
             if attempt < retries:
                 wait = backoff_factor * (2 ** (attempt - 1))
                 logger.warning(f"  {wait}s 后重试（下次将使用更长的超时时间）...")
                 time.sleep(wait)
             else:
+                # 最后一次尝试也超时，但如果是写入超时，数据可能已经上传成功
+                # 由于无法验证，我们只能抛出错误，但提示用户可能实际上传已成功
+                if is_write_timeout:
+                    logger.warning(f"  写入超时，但数据可能已经成功上传。建议检查服务器上的文件是否存在。")
                 raise AGCUploadError(f"文件上传超时（已重试{retries}次）: {str(e)}")
         except RequestException as e:
             last_exc = e
+            # 检查是否有响应，如果有且状态码是成功的，则认为上传成功
             if hasattr(e, 'response') and e.response is not None:
+                if 200 <= e.response.status_code < 300:
+                    logger.warning(f"上传过程中出现异常，但响应状态码为 {e.response.status_code}，认为上传成功")
+                    logger.info(f"  响应头: {dict(e.response.headers)}")
+                    return e.response
                 logger.error(f"上传失败 (attempt {attempt}/{retries}): HTTP {e.response.status_code}")
                 logger.error(f"  响应头: {dict(e.response.headers)}")
                 logger.error(f"  响应内容: {e.response.text[:500] if e.response.text else '(empty)'}")
             else:
+                # 对于连接错误（如写入超时），如果这是最后一次尝试，检查是否实际上传成功
+                # 由于无法直接检查，我们只能记录错误并重试
                 logger.error(f"上传失败 (attempt {attempt}/{retries}): {e}")
+                # 如果是写入超时但还有重试机会，继续重试
+                if "write operation timed out" in str(e).lower() and attempt < retries:
+                    logger.warning(f"  写入超时，但将继续重试（可能实际上传已成功）")
             if attempt < retries:
                 wait = backoff_factor * (2 ** (attempt - 1))
                 logger.warning(f"  {wait}s 后重试...")

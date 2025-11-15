@@ -276,9 +276,13 @@ class SoulXTTS:
             # 获取音频的设备，确保所有操作在同一设备上
             device = wav.device
             
+            # 重要：完整保留音频开头，不进行任何trim或裁剪操作
+            # 这样可以确保接话者的开头部分不会被卡掉
+            # 即使音频开头有很短的静音（<50ms），也完整保留，因为可能是语音的自然起音
+            
             # 只在最后一个片段（对话结束）应用淡出效果
             # 第一个片段（对话开始）不添加淡入效果，直接开始，保持清晰
-            # 中间片段不添加淡入淡出，保持真实对话切换
+            # 中间片段不添加淡入淡出，保持真实对话切换，确保接话者开头完整
             fade_out_samples = int(sr * fade_duration_ms / 1000.0)
             
             # 最后一个片段：应用淡出效果（对话结束）
@@ -288,9 +292,12 @@ class SoulXTTS:
                     fade_out_start = wav.shape[1] - fade_out_samples
                     wav[:, fade_out_start:] = wav[:, fade_out_start:] * fade_out_curve
             
+            # 直接添加音频片段，不进行任何trim操作
             processed_segments.append(wav)
             
             # 在片段之间添加静音间隔（除了最后一个），确保在正确的设备上
+            # 注意：静音间隔放在前一个片段之后，不会影响下一个片段的开头
+            # 这样可以确保接话者的音频开头完整保留
             if i < len(generated_wavs) - 1:
                 silence_samples = int(sr * silence_interval_ms / 1000.0)
                 silence = torch.zeros(1, silence_samples, device=device)

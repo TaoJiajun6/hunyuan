@@ -44,11 +44,19 @@ from .input_processor import InputProcessor, get_processor
 from .music_selector import MusicSelector
 
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# 配置日志（支持文件导出）
+try:
+    from .log_config import setup_logging
+    # 只在第一次导入时配置日志（避免重复配置）
+    if not logging.getLogger().handlers:
+        setup_logging(log_file="api_server.log")
+except ImportError:
+    # 如果log_config模块不存在，使用基本配置
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+
 logger = logging.getLogger(__name__)
 
 # 强制使用 HF 引擎（移除 vllm 支持）
@@ -1605,10 +1613,12 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
         
         # 性能统计：检索信息
         retrieval_timings = {}
+        retrieval_details = {}
         
         try:
             _update_progress(request.job_id, "downloading_voices", 5, "正在下载角色音色文件")
             voice_download_start = time.time()
+            downloaded_roles = []
             for role, voice_data in role_voice_data.items():
                 role_download_start = time.time()
                 logger.info(f"获取角色 '{role}' 的音频文件...")
@@ -1616,17 +1626,22 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                     # 从云存储URL下载
                     logger.info(f"从云存储下载: {voice_data}")
                     temp_file = download_audio_from_url(voice_data)
+                    search_content = f"角色: {role}, URL: {voice_data[:50]}..." if len(voice_data) > 50 else f"角色: {role}, URL: {voice_data}"
                 else:
                     # 从base64解码
                     logger.info(f"从base64解码")
                     temp_file = decode_base64_audio(voice_data)
+                    search_content = f"角色: {role}, base64长度: {len(voice_data)} 字符"
                 role_download_time = time.time() - role_download_start
                 retrieval_timings[f"角色音色下载_{role}"] = role_download_time
+                retrieval_details[f"角色音色下载_{role}"] = {"搜索内容": search_content}
+                downloaded_roles.append(role)
                 temp_files.append(temp_file)
                 role_voices[role] = temp_file
                 logger.info(f"角色 '{role}' 音频文件获取完成，耗时: {role_download_time:.2f}s")
             voice_download_total = time.time() - voice_download_start
             retrieval_timings["角色音色下载_总计"] = voice_download_total
+            retrieval_details["角色音色下载_总计"] = {"搜索内容": f"下载角色: {', '.join(downloaded_roles)}, 总计: {len(downloaded_roles)} 个"}
             logger.info(f"所有角色音色文件下载完成，总耗时: {voice_download_total:.2f}s")
             
             # 音效文件支持（如果未来需要）
@@ -1678,6 +1693,10 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 )
                 text_generation_time = time.time() - text_generation_start
                 retrieval_timings["对话文本生成"] = text_generation_time
+                text_search_content = f"主题: {request.topic or '未指定'}, 播客名: {request.podcast_name or '未指定'}, 角色数: {num_characters}"
+                if request.scene_types:
+                    text_search_content += f", 场景: {', '.join(request.scene_types[:3])}"
+                retrieval_details["对话文本生成"] = {"搜索内容": text_search_content}
                 logger.info(f"对话文本生成完成，耗时: {text_generation_time:.2f}s，文本长度: {len(generated_text)}")
                 
                 generated_text = processor.clean_text(generated_text)
@@ -1700,6 +1719,15 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 )
                 music_selection_time = time.time() - music_selection_start
                 retrieval_timings["背景音乐选择"] = music_selection_time
+                # 记录背景音乐选择的搜索内容
+                music_search_content = f"主题: {request.topic or '未指定'}, 播客名: {request.podcast_name or '未指定'}"
+                if request.scene_types:
+                    music_search_content += f", 场景: {', '.join(request.scene_types[:3])}"
+                if hasattr(request, 'category') and request.category:
+                    music_search_content += f", 分类: {request.category}"
+                if selected_music and len(selected_music) > 0:
+                    music_search_content += f", 选中: {os.path.basename(selected_music[0])}"
+                retrieval_details["背景音乐选择"] = {"搜索内容": music_search_content}
                 logger.info(f"背景音乐选择完成，耗时: {music_selection_time:.2f}s")
                 
                 if selected_music and len(selected_music) > 0:
@@ -1720,6 +1748,8 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 if "music_selection_start" in locals():
                     music_selection_time = time.time() - music_selection_start
                     retrieval_timings["背景音乐选择"] = music_selection_time
+                    music_search_content = f"主题: {request.topic or '未指定'}, 播客名: {request.podcast_name or '未指定'}, 选择失败"
+                    retrieval_details["背景音乐选择"] = {"搜索内容": music_search_content}
             
             # 生成播客
             logger.info("开始生成播客音频...")
@@ -1754,7 +1784,10 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
             logger.info("=" * 60)
             logger.info("【中间过程-检索信息】")
             for key, timing in retrieval_timings.items():
+                detail = retrieval_details.get(key, {})
+                search_content = detail.get("搜索内容", "无")
                 logger.info(f"  - {key}: {timing:.2f}s")
+                logger.info(f"    搜索内容: {search_content}")
             retrieval_total = sum(retrieval_timings.values())
             logger.info(f"  - 检索总耗时: {retrieval_total:.2f}s")
             logger.info("=" * 60)
@@ -2040,10 +2073,48 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
             
             cleaned_text = processor.clean_text(generated_text)
             
+            # 解析对话并统计脚本信息
+            dialogues = processor.parse_role_text(cleaned_text)
+            dialogue_count = len(dialogues)
+            total_chars = sum(len(content) for _, content in dialogues)
+            avg_chars_per_dialogue = total_chars / dialogue_count if dialogue_count > 0 else 0
+            unique_roles = set(role for role, _ in dialogues)
+            role_count = len(unique_roles)
+            
+            # 输出脚本信息
+            logger.info("=" * 60)
+            logger.info("【输出脚本信息】")
+            logger.info(f"  - 对话段数: {dialogue_count} 段")
+            logger.info(f"  - 对话总字数: {total_chars} 字")
+            logger.info(f"  - 平均每段字数: {avg_chars_per_dialogue:.1f} 字")
+            logger.info(f"  - 角色数量: {role_count} 个")
+            logger.info(f"  - 角色列表: {', '.join(sorted(unique_roles))}")
+            logger.info("=" * 60)
+            
             # 输出完整脚本内容到控制台
             logger.info("=" * 60)
             logger.info("【完整脚本内容】")
             logger.info(cleaned_text)
+            logger.info("=" * 60)
+            
+            # 中间过程-检索信息
+            retrieval_timings = {
+                "文本生成": text_generation_time
+            }
+            retrieval_details = {
+                "文本生成": {
+                    "搜索内容": f"主题: {request.topic or '未指定'}, 角色数: {len(request.characters)}, 文本素材长度: {len(request.text)} 字符"
+                }
+            }
+            logger.info("=" * 60)
+            logger.info("【中间过程-检索信息】")
+            for key, timing in retrieval_timings.items():
+                detail = retrieval_details.get(key, {})
+                search_content = detail.get("搜索内容", "无")
+                logger.info(f"  - {key}: {timing:.2f}s")
+                logger.info(f"    搜索内容: {search_content}")
+            retrieval_total = sum(retrieval_timings.values())
+            logger.info(f"  - 检索总耗时: {retrieval_total:.2f}s")
             logger.info("=" * 60)
             
             # 自动选择背景音乐（在AI生成对话之后，使用完整的文本内容）
@@ -2063,6 +2134,12 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
                 )
                 music_selection_time = time.time() - music_selection_start
                 logger.info(f"背景音乐选择完成，耗时: {music_selection_time:.2f}s")
+                retrieval_timings["背景音乐选择"] = music_selection_time
+                # 记录背景音乐选择的搜索内容
+                music_search_content = f"主题: {request.topic or '未指定'}, 分类: {request.category or '未指定'}"
+                if selected_music and len(selected_music) > 0:
+                    music_search_content += f", 选中: {os.path.basename(selected_music[0])}"
+                retrieval_details["背景音乐选择"] = {"搜索内容": music_search_content}
                 
                 if selected_music and len(selected_music) > 0:
                     background_music_path = selected_music[0]
@@ -2079,6 +2156,10 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
                 import traceback
                 logger.debug(f"错误详情: {traceback.format_exc()}")
                 background_music_path = None
+                if "music_selection_start" in locals():
+                    music_selection_time = time.time() - music_selection_start
+                    retrieval_timings["背景音乐选择"] = music_selection_time
+                    retrieval_details["背景音乐选择"] = {"搜索内容": f"主题: {request.topic or '未指定'}, 分类: {request.category or '未指定'}, 选择失败"}
             
             # 生成播客
             logger.info("开始生成播客音频...")
@@ -2095,11 +2176,42 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
             generation_time = time.time() - generation_start
             logger.info(f"播客音频生成完成，耗时: {generation_time:.2f}s")
             
+            # 【必须】生成时延统计
+            logger.info("=" * 60)
+            logger.info("【必须】生成时延统计（单位：s）：")
+            logger.info(f"  - 总耗时: {generation_time:.2f}s（{generation_time/60:.2f} 分钟）")
+            if dialogue_count > 0:
+                avg_time_per_segment = generation_time / dialogue_count
+                logger.info(f"  - 平均时延: {avg_time_per_segment:.2f}s/段")
+                logger.info(f"  - 对话段数: {dialogue_count} 段")
+                logger.info(f"  - 每段平均字数: {avg_chars_per_dialogue:.1f} 字")
+                logger.info(f"  - 生成速度: {avg_chars_per_dialogue/avg_time_per_segment:.1f} 字/秒")
+            
+            # 更新检索信息（包含背景音乐选择的搜索内容）
+            logger.info("=" * 60)
+            logger.info("【中间过程-检索信息】（完整）")
+            for key, timing in retrieval_timings.items():
+                detail = retrieval_details.get(key, {})
+                search_content = detail.get("搜索内容", "无")
+                logger.info(f"  - {key}: {timing:.2f}s")
+                logger.info(f"    搜索内容: {search_content}")
+            retrieval_total = sum(retrieval_timings.values())
+            logger.info(f"  - 检索总耗时: {retrieval_total:.2f}s")
+            logger.info("=" * 60)
+            
+            # 汇总所有耗时
+            logger.info("=" * 60)
+            logger.info("【总耗时汇总】")
+            logger.info(f"  - 检索耗时: {retrieval_total:.2f}s")
+            logger.info(f"  - 生成耗时: {generation_time:.2f}s")
+            total_time = time.time() - start_time
+            logger.info(f"  - 总耗时: {total_time:.2f}s（{total_time/60:.2f} 分钟）")
+            logger.info("=" * 60)
+            
             # 编码输出音频
             logger.info("编码输出音频文件...")
             audio_base64 = encode_file_to_base64(output_path)
             file_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
-            total_time = time.time() - start_time
             logger.info(f"自定义角色播客生成成功，总耗时: {total_time:.2f}s，输出文件大小: {file_size:.2f} MB")
             
             # 尝试启动后台 AGC 上传任务（不阻塞主请求）
@@ -2293,10 +2405,48 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
             
             cleaned_text = processor.clean_text(generated_text)
             
+            # 解析对话并统计脚本信息
+            dialogues = processor.parse_role_text(cleaned_text)
+            dialogue_count = len(dialogues)
+            total_chars = sum(len(content) for _, content in dialogues)
+            avg_chars_per_dialogue = total_chars / dialogue_count if dialogue_count > 0 else 0
+            unique_roles = set(role for role, _ in dialogues)
+            role_count = len(unique_roles)
+            
+            # 输出脚本信息
+            logger.info("=" * 60)
+            logger.info("【输出脚本信息】")
+            logger.info(f"  - 对话段数: {dialogue_count} 段")
+            logger.info(f"  - 对话总字数: {total_chars} 字")
+            logger.info(f"  - 平均每段字数: {avg_chars_per_dialogue:.1f} 字")
+            logger.info(f"  - 角色数量: {role_count} 个")
+            logger.info(f"  - 角色列表: {', '.join(sorted(unique_roles))}")
+            logger.info("=" * 60)
+            
             # 输出完整脚本内容到控制台
             logger.info("=" * 60)
             logger.info("【完整脚本内容】")
             logger.info(cleaned_text)
+            logger.info("=" * 60)
+            
+            # 中间过程-检索信息
+            retrieval_timings = {
+                "文本生成": text_generation_time
+            }
+            retrieval_details = {
+                "文本生成": {
+                    "搜索内容": f"主题: {request.topic or '未指定'}, 深度级别: {request.depth_level or '未指定'}, 角色数: {request.num_characters}"
+                }
+            }
+            logger.info("=" * 60)
+            logger.info("【中间过程-检索信息】")
+            for key, timing in retrieval_timings.items():
+                detail = retrieval_details.get(key, {})
+                search_content = detail.get("搜索内容", "无")
+                logger.info(f"  - {key}: {timing:.2f}s")
+                logger.info(f"    搜索内容: {search_content}")
+            retrieval_total = sum(retrieval_timings.values())
+            logger.info(f"  - 检索总耗时: {retrieval_total:.2f}s")
             logger.info("=" * 60)
             
             # 自动选择背景音乐（在AI生成对话之后，使用完整的文本内容）
@@ -2316,6 +2466,12 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
                 )
                 music_selection_time = time.time() - music_selection_start
                 logger.info(f"背景音乐选择完成，耗时: {music_selection_time:.2f}s")
+                retrieval_timings["背景音乐选择"] = music_selection_time
+                # 记录背景音乐选择的搜索内容
+                music_search_content = f"主题: {request.topic or '未指定'}, 分类: {request.category or '未指定'}"
+                if selected_music and len(selected_music) > 0:
+                    music_search_content += f", 选中: {os.path.basename(selected_music[0])}"
+                retrieval_details["背景音乐选择"] = {"搜索内容": music_search_content}
                 
                 if selected_music and len(selected_music) > 0:
                     background_music_path = selected_music[0]
@@ -2332,6 +2488,9 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
                 import traceback
                 logger.debug(f"错误详情: {traceback.format_exc()}")
                 background_music_path = None
+                if "music_selection_start" in locals():
+                    music_selection_time = time.time() - music_selection_start
+                    retrieval_timings["背景音乐选择"] = music_selection_time
             
             # 生成播客
             logger.info("开始生成播客音频...")
@@ -2348,11 +2507,42 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
             generation_time = time.time() - generation_start
             logger.info(f"播客音频生成完成，耗时: {generation_time:.2f}s")
             
+            # 【必须】生成时延统计
+            logger.info("=" * 60)
+            logger.info("【必须】生成时延统计（单位：s）：")
+            logger.info(f"  - 总耗时: {generation_time:.2f}s（{generation_time/60:.2f} 分钟）")
+            if dialogue_count > 0:
+                avg_time_per_segment = generation_time / dialogue_count
+                logger.info(f"  - 平均时延: {avg_time_per_segment:.2f}s/段")
+                logger.info(f"  - 对话段数: {dialogue_count} 段")
+                logger.info(f"  - 每段平均字数: {avg_chars_per_dialogue:.1f} 字")
+                logger.info(f"  - 生成速度: {avg_chars_per_dialogue/avg_time_per_segment:.1f} 字/秒")
+            
+            # 更新检索信息（包含背景音乐选择的搜索内容）
+            logger.info("=" * 60)
+            logger.info("【中间过程-检索信息】（完整）")
+            for key, timing in retrieval_timings.items():
+                detail = retrieval_details.get(key, {})
+                search_content = detail.get("搜索内容", "无")
+                logger.info(f"  - {key}: {timing:.2f}s")
+                logger.info(f"    搜索内容: {search_content}")
+            retrieval_total = sum(retrieval_timings.values())
+            logger.info(f"  - 检索总耗时: {retrieval_total:.2f}s")
+            logger.info("=" * 60)
+            
+            # 汇总所有耗时
+            logger.info("=" * 60)
+            logger.info("【总耗时汇总】")
+            logger.info(f"  - 检索耗时: {retrieval_total:.2f}s")
+            logger.info(f"  - 生成耗时: {generation_time:.2f}s")
+            total_time = time.time() - start_time
+            logger.info(f"  - 总耗时: {total_time:.2f}s（{total_time/60:.2f} 分钟）")
+            logger.info("=" * 60)
+            
             # 编码输出音频
             logger.info("编码输出音频文件...")
             audio_base64 = encode_file_to_base64(output_path)
             file_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
-            total_time = time.time() - start_time
             logger.info(f"主题深度播客生成成功，总耗时: {total_time:.2f}s，输出文件大小: {file_size:.2f} MB")
             
             # 尝试启动后台 AGC 上传任务（不阻塞主请求）
