@@ -244,9 +244,28 @@ class CloudStorageMusicClient:
                 print(f"  ✗ 获取token失败: {str(e)}")
                 return None
             
-            # 下载文件（使用流式下载）
-            response = requests.get(download_url, timeout=60, stream=True, headers=headers)
-            response.raise_for_status()
+            # 优化下载：使用Session和更大的chunk_size
+            session = requests.Session()
+            adapter = requests.adapters.HTTPAdapter(
+                pool_connections=10,
+                pool_maxsize=20,
+                max_retries=0
+            )
+            session.mount('http://', adapter)
+            session.mount('https://', adapter)
+            
+            try:
+                # 优化超时设置：连接超时10秒，读取超时120秒
+                response = session.get(
+                    download_url, 
+                    timeout=(10, 120), 
+                    stream=True, 
+                    headers=headers,
+                    allow_redirects=True
+                )
+                response.raise_for_status()
+            finally:
+                session.close()
             
             # 检查Content-Length
             content_length = response.headers.get("content-length")
@@ -255,15 +274,20 @@ class CloudStorageMusicClient:
                 file_size_mb = file_size / (1024 * 1024)
                 print(f"  文件大小: {file_size_mb:.2f} MB")
             
-            # 流式下载
+            # 流式下载（使用更大的chunk_size以提高下载速度）
             downloaded_size = 0
+            chunk_size = 256 * 1024  # 256KB chunks，提高下载速度
+            import time
+            download_start = time.time()
             with open(local_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
+                for chunk in response.iter_content(chunk_size=chunk_size):
                     if chunk:
                         f.write(chunk)
                         downloaded_size += len(chunk)
             
-            print(f"✓ 音乐文件下载完成: {local_path} ({downloaded_size / (1024 * 1024):.2f} MB)")
+            download_time = time.time() - download_start
+            download_speed = (downloaded_size / (1024 * 1024)) / download_time if download_time > 0 else 0
+            print(f"✓ 音乐文件下载完成: {local_path} ({downloaded_size / (1024 * 1024):.2f} MB, {download_time:.2f}秒, {download_speed:.2f} MB/s)")
             return local_path
             
         except requests.exceptions.HTTPError as e:
@@ -357,8 +381,28 @@ class CloudStorageMusicClient:
                     except Exception as e:
                         print(f"  获取token失败，使用无认证方式下载: {str(e)}")
             
-            response = requests.get(music_url, timeout=60, stream=True, headers=headers)
-            response.raise_for_status()
+            # 优化下载：使用Session和更大的chunk_size
+            session = requests.Session()
+            adapter = requests.adapters.HTTPAdapter(
+                pool_connections=10,
+                pool_maxsize=20,
+                max_retries=0
+            )
+            session.mount('http://', adapter)
+            session.mount('https://', adapter)
+            
+            try:
+                # 优化超时设置：连接超时10秒，读取超时120秒
+                response = session.get(
+                    music_url, 
+                    timeout=(10, 120), 
+                    stream=True, 
+                    headers=headers,
+                    allow_redirects=True
+                )
+                response.raise_for_status()
+            finally:
+                session.close()
             
             # 检查Content-Length
             content_length = response.headers.get("content-length")
@@ -367,15 +411,20 @@ class CloudStorageMusicClient:
                 file_size_mb = file_size / (1024 * 1024)
                 print(f"  文件大小: {file_size_mb:.2f} MB")
             
-            # 流式下载
+            # 流式下载（使用更大的chunk_size以提高下载速度）
             downloaded_size = 0
+            chunk_size = 256 * 1024  # 256KB chunks，提高下载速度
+            import time
+            download_start = time.time()
             with open(local_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
+                for chunk in response.iter_content(chunk_size=chunk_size):
                     if chunk:
                         f.write(chunk)
                         downloaded_size += len(chunk)
             
-            print(f"✓ 音乐文件下载完成: {local_path} ({downloaded_size / (1024 * 1024):.2f} MB)")
+            download_time = time.time() - download_start
+            download_speed = (downloaded_size / (1024 * 1024)) / download_time if download_time > 0 else 0
+            print(f"✓ 音乐文件下载完成: {local_path} ({downloaded_size / (1024 * 1024):.2f} MB, {download_time:.2f}秒, {download_speed:.2f} MB/s)")
             return local_path
             
         except requests.exceptions.HTTPError as e:
