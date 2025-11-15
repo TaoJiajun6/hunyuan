@@ -276,21 +276,16 @@ class SoulXTTS:
             # 获取音频的设备，确保所有操作在同一设备上
             device = wav.device
             
-            # 只在第一个片段（对话开始）应用淡入效果
             # 只在最后一个片段（对话结束）应用淡出效果
+            # 第一个片段（对话开始）不添加淡入效果，直接开始，保持清晰
             # 中间片段不添加淡入淡出，保持真实对话切换
-            fade_samples = int(sr * fade_duration_ms / 1000.0)
+            fade_out_samples = int(sr * fade_duration_ms / 1000.0)
             
-            if fade_samples > 0 and wav.shape[1] > fade_samples * 2:
-                # 第一个片段：应用淡入效果（对话开始）
-                if i == 0:
-                    fade_in_curve = torch.linspace(0, 1, fade_samples, device=device).unsqueeze(0)
-                    wav[:, :fade_samples] = wav[:, :fade_samples] * fade_in_curve
-                
-                # 最后一个片段：应用淡出效果（对话结束）
-                if i == len(generated_wavs) - 1:
-                    fade_out_curve = torch.linspace(1, 0, fade_samples, device=device).unsqueeze(0)
-                    fade_out_start = wav.shape[1] - fade_samples
+            # 最后一个片段：应用淡出效果（对话结束）
+            if i == len(generated_wavs) - 1:
+                if fade_out_samples > 0 and wav.shape[1] > fade_out_samples:
+                    fade_out_curve = torch.linspace(1, 0, fade_out_samples, device=device).unsqueeze(0)
+                    fade_out_start = wav.shape[1] - fade_out_samples
                     wav[:, fade_out_start:] = wav[:, fade_out_start:] * fade_out_curve
             
             processed_segments.append(wav)

@@ -450,6 +450,10 @@ class InputProcessor:
                 raise ValueError("网页类型需要提供 input_url 参数")
             extracted_text = self.extract_text_from_webpage(input_url)
             
+            # 如果包含指令标记，解析指令
+            if has_instruction:
+                extracted_text, extracted_instruction = self.parse_instruction(extracted_text)
+            
         elif base_type in ["pdf"] or input_type_lower in ["pdf"]:
             # PDF文件（优先使用文件路径，如果没有则使用URL）
             if input_file_path:
