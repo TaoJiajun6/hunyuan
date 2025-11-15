@@ -543,12 +543,17 @@ class CloudStorageMusicClient:
                 # 规范化路径（移除开头的/）
                 file_path = file_path.lstrip('/')
                 
-                # 检查是否在music目录下
+                # 如果 file_path 不包含 normalized_path 前缀，可能是相对路径，需要补充
+                # 例如：normalized_path = "music/technology/", file_path = "filename.mp3"
+                # 应该转换为：file_path = "music/technology/filename.mp3"
                 if normalized_path:
-                    # normalized_path 已经是 music/ 格式（没有开头的/）
                     if not file_path.startswith(normalized_path):
-                        # 如果文件路径是 music/filename.mp3 格式，需要检查
-                        if not file_path.startswith(normalized_path.lstrip('/')):
+                        # 如果路径是相对于 normalized_path 的，补充完整路径
+                        if not file_path.startswith('music/'):
+                            # 确保路径以 music/ 开头
+                            file_path = f"{normalized_path.rstrip('/')}/{file_path.lstrip('/')}"
+                        else:
+                            # 如果已经以 music/ 开头但不匹配 normalized_path，跳过
                             continue
                 
                 # 检查是否是音频文件
@@ -607,6 +612,14 @@ class CloudStorageMusicClient:
                         print(f"  正在获取子目录: {subdir_path}")
                         sub_files = sub_client._list_files_via_api()
                         print(f"  ✓ 从子目录 {subdir_path} 获取到 {len(sub_files)} 个音乐文件")
+                        # 确保子目录文件的 cloud_path 包含完整路径
+                        for sub_file in sub_files:
+                            # 如果 cloud_path 不包含完整路径，补充完整路径
+                            cloud_path = sub_file.get('cloud_path', '')
+                            if cloud_path and not cloud_path.startswith('music/'):
+                                # 如果路径是相对于子目录的，补充完整路径
+                                if not cloud_path.startswith(subdir_path.rstrip('/')):
+                                    sub_file['cloud_path'] = f"{subdir_path.rstrip('/')}/{cloud_path.lstrip('/')}"
                         music_files.extend(sub_files)
                     except Exception as e:
                         print(f"  ✗ 获取子目录 {subdir_path} 失败: {str(e)}")

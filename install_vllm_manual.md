@@ -3,8 +3,32 @@
 ## 前置要求
 
 1. **Python 环境**：Python 3.11（推荐）
+   - **Conda 环境**：如果使用 conda，请确保已激活目标环境
+   - **虚拟环境**：如果使用 venv/virtualenv，请确保已激活环境
 2. **CUDA 支持**：需要 NVIDIA GPU 和 CUDA
 3. **已安装基础依赖**：torch, transformers 等
+
+## 重要提示：Conda 环境
+
+**如果你使用 Conda 环境，请确保：**
+
+1. 先激活 conda 环境：
+   ```bash
+   # 激活你的 conda 环境
+   conda activate <your_env_name>
+   ```
+
+2. 使用环境内的 pip 安装（而不是系统 pip）：
+   ```bash
+   # 在 conda 环境中，直接使用 pip（会自动使用环境内的 pip）
+   pip install vllm==0.10.1
+   ```
+
+3. 验证安装路径：
+   ```bash
+   # 确认 vllm 安装在正确的环境中
+   python -c "import vllm; import sys; print('Python:', sys.executable); print('VLLM 路径:', vllm.__file__)"
+   ```
 
 ## 安装步骤
 
@@ -28,11 +52,17 @@ chmod +x install_vllm.sh
 #### 步骤 1：安装基础 VLLM 0.10.1
 
 ```bash
-# 使用 pip 安装基础版本
+# 如果使用 conda 环境，请先激活环境
+conda activate <your_env_name>
+
+# 使用 pip 安装基础版本（conda 环境中会自动使用环境内的 pip）
 pip install vllm==0.10.1
 ```
 
-**注意**：如果 pip 安装失败，可能需要从源码安装。先尝试 pip，如果失败再使用源码安装。
+**注意**：
+- **Conda 环境**：确保已激活目标 conda 环境，然后直接使用 `pip install`
+- 如果 pip 安装失败，可能需要从源码安装。先尝试 pip，如果失败再使用源码安装。
+- 验证安装：`python -c "import vllm; print('安装成功')"`
 
 #### 步骤 2：克隆修改版 VLLM 仓库
 
@@ -157,4 +187,42 @@ $env:SOULX_PODCAST_LLM_ENGINE = "hf"
 ```
 
 系统会自动使用 HF 引擎，不会报错。
+
+## 卸载 VLLM
+
+如果需要卸载 VLLM（例如在 conda 环境中重新安装）：
+
+### 方法 1：使用 pip 卸载（推荐）
+
+```bash
+# 如果使用 conda 环境，先激活环境
+conda activate <your_env_name>
+
+# 卸载 vllm
+pip uninstall vllm -y
+```
+
+### 方法 2：手动检查并清理
+
+如果卸载后仍有残留，可以手动检查：
+
+```bash
+# 查看 vllm 是否已完全卸载
+python -c "import vllm" 2>&1
+# 如果显示 ModuleNotFoundError，说明已卸载成功
+
+# 检查是否还有 vllm 相关的包
+pip list | grep -i vllm  # Linux/Mac
+pip list | findstr vllm  # Windows
+```
+
+### 验证卸载
+
+```bash
+# 尝试导入，应该会失败
+python -c "import vllm"
+# 预期输出：ModuleNotFoundError: No module named 'vllm'
+```
+
+卸载完成后，如果需要重新安装，请按照上述安装步骤重新安装。
 
