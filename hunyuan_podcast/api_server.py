@@ -52,10 +52,10 @@ try:
         setup_logging(log_file="api_server.log")
 except ImportError:
     # 如果log_config模块不存在，使用基本配置
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
 
 logger = logging.getLogger(__name__)
 
