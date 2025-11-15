@@ -10,7 +10,7 @@ import logging
 import time
 import requests
 import json
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request, BackgroundTasks
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -279,7 +279,7 @@ async def log_requests(request: Request, call_next):
 class MultiRoleRequest(BaseModel):
     """多角色互动播客请求"""
     text: Optional[str] = Field(None, description="播客文本（支持角色标记或普通文本，如果使用text_file_url或input_url，此字段可为空）")
-    text_file_url: Optional[str] = Field(None, description="文本文件云存储URL（.txt或Word文件，如果提供，优先使用）")
+    text_file_url: Optional[Union[str, List[str]]] = Field(None, description="文本文件云存储URL（.txt或Word文件，如果提供，优先使用）。支持单个URL字符串或URL数组（多个文件）")
     input_type: Optional[str] = Field(None, description="输入类型，可选值：文字、文字+指令、公众号、公众号+指令、网页、网页+指令、文件、文件+指令、文字+英文指令")
     input_url: Optional[str] = Field(None, description="输入URL（用于公众号、网页、PDF等类型）")
     instruction: Optional[str] = Field(None, description="指令内容（可选，用于控制播客生成过程，如'生成5分钟播客'、'使用轻松风格'等）")
@@ -529,19 +529,46 @@ def download_audio_from_url(url: str, suffix: str = ".wav", timeout: int = 60) -
         raise HTTPException(status_code=500, detail=f"下载音频文件异常: {str(e)}")
 
 
-def download_text_from_url(url: str, timeout: int = 60) -> str:
+def download_text_from_url(url: Union[str, List[str]], timeout: int = 60) -> str:
     """从URL下载文本文件并返回内容（支持.txt、Word文件和PDF文件）
     
     Args:
-        url: 文本文件的云存储URL
+        url: 文本文件的云存储URL（单个字符串）或URL列表（多个文件，内容会合并）
         timeout: 超时时间（秒）
         
     Returns:
-        文本内容（字符串）
-    
+        文本内容（字符串），多个文件时内容会合并，用换行分隔
+        
     注意：华为AGC云存储的下载URL通常可以直接访问，不需要额外认证。
     如果下载失败（如403 Forbidden），可能需要检查云存储的安全规则配置。
     """
+    # 如果传入的是列表，处理多个文件
+    if isinstance(url, list):
+        logger.info(f"从多个URL下载文本文件: {len(url)} 个文件")
+        all_texts = []
+        for i, single_url in enumerate(url):
+            logger.info(f"正在下载第 {i+1}/{len(url)} 个文件: {single_url}")
+            try:
+                text = download_text_from_url(single_url, timeout)  # 递归调用处理单个文件
+                if text:
+                    all_texts.append(text)
+                    logger.info(f"第 {i+1} 个文件下载成功: {len(text)} 字符")
+                else:
+                    logger.warning(f"第 {i+1} 个文件下载后内容为空")
+            except Exception as e:
+                logger.error(f"第 {i+1} 个文件下载失败: {str(e)}")
+                # 继续处理其他文件，不中断
+                continue
+        
+        if not all_texts:
+            raise Exception("所有文件下载失败或内容为空")
+        
+        # 合并所有文件内容，用两个换行分隔
+        merged_text = "\n\n".join(all_texts)
+        logger.info(f"所有文件下载完成，合并后总长度: {len(merged_text)} 字符")
+        return merged_text
+    
+    # 单个文件处理（原有逻辑）
     try:
         logger.info(f"从URL下载文本文件: {url}")
         
@@ -946,7 +973,11 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
     
     # 验证文本输入（text、text_file_url或input_url至少有一个）
     has_text = request.text and request.text.strip()
-    has_text_file = request.text_file_url and request.text_file_url.strip()
+    # 支持单个URL字符串或URL列表
+    if isinstance(request.text_file_url, list):
+        has_text_file = len(request.text_file_url) > 0 and any(url and url.strip() for url in request.text_file_url)
+    else:
+        has_text_file = request.text_file_url and request.text_file_url.strip()
     has_input_url = request.input_url and request.input_url.strip()
     has_input_type = request.input_type and request.input_type.strip()
     
@@ -1021,10 +1052,14 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
             raise HTTPException(status_code=400, detail=f"处理{input_type}类型输入失败: {str(e)}")
     elif input_type in file_types:
         # 文件类型：从云存储URL读取文件（支持.txt、.doc、.docx、.pdf等格式）
-        logger.info(f"从云存储URL读取文件: {request.text_file_url}")
+        # 支持单个URL或URL列表
+        file_urls = request.text_file_url
+        if isinstance(file_urls, str):
+            file_urls = [file_urls]  # 转换为列表统一处理
+        logger.info(f"从云存储URL读取文件: {len(file_urls)} 个文件")
         try:
-            _update_progress(request.job_id, "downloading_text", 3, "正在下载文件")
-            text_content = download_text_from_url(request.text_file_url)
+            _update_progress(request.job_id, "downloading_text", 3, f"正在下载{len(file_urls)}个文件")
+            text_content = download_text_from_url(file_urls)
             logger.info(f"文件读取成功: {len(text_content)} 字符")
             
             # 如果输入类型包含指令，尝试解析指令
@@ -1068,10 +1103,14 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 raise HTTPException(status_code=400, detail=f"处理{input_type}类型输入失败: {str(e)}")
         elif has_text_file:
             # 从云存储URL读取文本文件（兼容旧逻辑）
-            logger.info(f"从云存储URL读取文本文件: {request.text_file_url}")
+            # 支持单个URL或URL列表
+            file_urls = request.text_file_url
+            if isinstance(file_urls, str):
+                file_urls = [file_urls]  # 转换为列表统一处理
+            logger.info(f"从云存储URL读取文本文件: {len(file_urls)} 个文件")
             try:
-                _update_progress(request.job_id, "downloading_text", 3, "正在下载文本文件")
-                text_content = download_text_from_url(request.text_file_url)
+                _update_progress(request.job_id, "downloading_text", 3, f"正在下载{len(file_urls)}个文本文件")
+                text_content = download_text_from_url(file_urls)
                 logger.info(f"文本文件读取成功: {len(text_content)} 字符")
             except HTTPException:
                 raise
