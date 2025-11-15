@@ -248,7 +248,8 @@ class SoulXTTS:
             print(f"[INFO] 音频生成完成，耗时: {generation_time:.2f} 秒（{generation_time/60:.2f} 分钟）")
             print(f"      平均每段对话耗时: {generation_time/len(dialogues):.2f} 秒")
         
-        # 处理音频片段，添加静音间隔和淡入淡出效果以改善角色衔接
+        # 处理音频片段，添加静音间隔以改善角色衔接
+        # 只在对话最开始和结束时应用淡入淡出效果，中间片段保持真实切换
         generated_wavs = results_dict["generated_wavs"]
         if not generated_wavs:
             raise ValueError("未生成任何音频片段")
@@ -257,7 +258,7 @@ class SoulXTTS:
         sr = 24000
         # 使用传入的静音间隔，如果没有则使用默认值400ms（比配置的800ms稍短以保持流畅）
         silence_interval_ms = silence_interval if silence_interval is not None else 400
-        fade_duration_ms = 80  # 淡入淡出时长（毫秒），平滑过渡
+        fade_duration_ms = 200  # 淡入淡出时长（毫秒），用于对话开始和结束
         
         processed_segments = []
         
@@ -275,19 +276,22 @@ class SoulXTTS:
             # 获取音频的设备，确保所有操作在同一设备上
             device = wav.device
             
-            # 应用淡入淡出效果，让衔接更自然
+            # 只在第一个片段（对话开始）应用淡入效果
+            # 只在最后一个片段（对话结束）应用淡出效果
+            # 中间片段不添加淡入淡出，保持真实对话切换
             fade_samples = int(sr * fade_duration_ms / 1000.0)
+            
             if fade_samples > 0 and wav.shape[1] > fade_samples * 2:
-                # 淡入曲线（从0到1），确保在正确的设备上
-                fade_in_curve = torch.linspace(0, 1, fade_samples, device=device).unsqueeze(0)
-                # 使用非原地操作或先克隆再操作
-                wav[:, :fade_samples] = wav[:, :fade_samples] * fade_in_curve
+                # 第一个片段：应用淡入效果（对话开始）
+                if i == 0:
+                    fade_in_curve = torch.linspace(0, 1, fade_samples, device=device).unsqueeze(0)
+                    wav[:, :fade_samples] = wav[:, :fade_samples] * fade_in_curve
                 
-                # 淡出曲线（从1到0），确保在正确的设备上
-                fade_out_curve = torch.linspace(1, 0, fade_samples, device=device).unsqueeze(0)
-                fade_out_start = wav.shape[1] - fade_samples
-                # 使用非原地操作或先克隆再操作
-                wav[:, fade_out_start:] = wav[:, fade_out_start:] * fade_out_curve
+                # 最后一个片段：应用淡出效果（对话结束）
+                if i == len(generated_wavs) - 1:
+                    fade_out_curve = torch.linspace(1, 0, fade_samples, device=device).unsqueeze(0)
+                    fade_out_start = wav.shape[1] - fade_samples
+                    wav[:, fade_out_start:] = wav[:, fade_out_start:] * fade_out_curve
             
             processed_segments.append(wav)
             

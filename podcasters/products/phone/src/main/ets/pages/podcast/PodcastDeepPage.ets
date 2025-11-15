@@ -31,6 +31,7 @@ export struct PodcastDeepPage {
   @Local progressMessage: string = '';
   private targetProgress: number = 0; // 目标进度值，用于平滑动画
   private progressAnimationTimer: number = 0; // 进度条动画定时器
+  @Local savedScript: string = ''; // 保存的对话内容
   @Local windowModel: WindowModel = AppStorageV2.connect(WindowModel, () => new WindowModel())!;
 
   readonly depthLevels: string[] = ['深度', '中等', '浅层'];
@@ -171,6 +172,12 @@ export struct PodcastDeepPage {
       // 设置标题
       songItem.title = audioFile.fileName.replace(/\.[^/.]+$/, '');
       songItem.singer = '主题深度播客';
+      
+      // 保存对话内容到 SongItem
+      if (this.savedScript && this.savedScript.trim().length > 0) {
+        songItem.script = this.savedScript;
+        Logger.info('PodcastDeepPage', `已保存对话内容到 SongItem，长度: ${this.savedScript.length} 字符`);
+      }
 
       // 播放音频并显示播放页面
       MediaService.getInstance().playSong(songItem, true);
@@ -230,6 +237,7 @@ export struct PodcastDeepPage {
         // 等待一小段时间确保文件已上传到云存储
         setTimeout(() => {
           this.getLatestAudioAndPlay(progress.audio_url);
+          this.savedScript = '';
         }, 1000);
       }
       
@@ -262,12 +270,17 @@ export struct PodcastDeepPage {
       const response = await podcastService.generateDeepPodcast(request, this.jobId, onProgress);
 
       if (response.success && response.data) {
+        // 保存 script，以便在播放时使用
+        if (response.data.script) {
+          this.savedScript = response.data.script;
+        }
         // 确保进度条到达100%
         this.targetProgress = 100;
         this.startProgressAnimation();
         // 等待一小段时间确保文件已上传到云存储，然后获取最新音频并播放
         setTimeout(() => {
           this.getLatestAudioAndPlay(response.data!.audio_url);
+          this.savedScript = '';
         }, 1000);
       } else {
         promptAction.showToast({

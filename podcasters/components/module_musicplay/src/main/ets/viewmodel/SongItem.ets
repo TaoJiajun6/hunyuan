@@ -79,4 +79,8 @@ export class SongItem {
   @Trace downloadCount: number = 2;
   // 分享次数
   @Trace shareCount: number = 5;
+  /**
+   * 播客对话内容（script）
+   */
+  @Trace script: string = '';
 }

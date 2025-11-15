@@ -38,6 +38,7 @@ export struct PodcastCharacterPage {
   @Local isRecording: boolean = false; // 是否正在录制
   @Local recordingDuration: number = 0; // 录音时长（秒）
   @Local recordingTimer: number = 0; // 录音计时器
+  @Local savedScript: string = ''; // 保存的对话内容
   // 播客分类选项列表
   private readonly categoryOptions: SelectOption[] = [
     { value: '商业' },
@@ -386,6 +387,12 @@ export struct PodcastCharacterPage {
       // 设置标题
       songItem.title = audioFile.fileName.replace(/\.[^/.]+$/, '');
       songItem.singer = '自定义角色播客';
+      
+      // 保存对话内容到 SongItem
+      if (this.savedScript && this.savedScript.trim().length > 0) {
+        songItem.script = this.savedScript;
+        Logger.info('PodcastCharacterPage', `已保存对话内容到 SongItem，长度: ${this.savedScript.length} 字符`);
+      }
 
       // 播放音频并显示播放页面
       MediaService.getInstance().playSong(songItem, true);
@@ -448,6 +455,7 @@ export struct PodcastCharacterPage {
         // 等待一小段时间确保文件已上传到云存储
         setTimeout(() => {
           this.getLatestAudioAndPlay(progress.audio_url);
+          this.savedScript = '';
         }, 1000);
       }
       
@@ -478,12 +486,17 @@ export struct PodcastCharacterPage {
       const response = await podcastService.generateCharacterPodcast(request, this.jobId, onProgress);
 
       if (response.success && response.data) {
+        // 保存 script，以便在播放时使用
+        if (response.data.script) {
+          this.savedScript = response.data.script;
+        }
         // 确保进度条到达100%
         this.targetProgress = 100;
         this.startProgressAnimation();
         // 等待一小段时间确保文件已上传到云存储，然后获取最新音频并播放
         setTimeout(() => {
           this.getLatestAudioAndPlay(response.data!.audio_url);
+          this.savedScript = '';
         }, 1000);
       } else {
         promptAction.showToast({
