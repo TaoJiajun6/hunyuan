@@ -377,7 +377,7 @@ class PodcastGenerator:
         generated_text = self.api_client.generate_text(
             prompt=prompt,
             temperature=0.7,  # 降低温度以加快生成速度
-            max_tokens=1500  # 降低以加快生成速度
+            max_tokens=3000  # 增加到3000以支持更长的对话（5-6分钟播客）
         )
         
         if verbose:
@@ -434,7 +434,7 @@ class PodcastGenerator:
         generated_text = self.api_client.generate_text(
             prompt=prompt,
             temperature=0.7,
-            max_tokens=2000  # 降低以加快生成速度
+            max_tokens=3500  # 增加到3500以支持更长的对话（5-6分钟播客）
         )
         
         if verbose:
@@ -482,7 +482,7 @@ class PodcastGenerator:
         generated_text = self.api_client.generate_text(
             prompt=prompt,
             temperature=0.7,  # 降低温度以加快生成速度
-            max_tokens=1500  # 降低以加快生成速度
+            max_tokens=3500  # 增加到3500以支持更长的对话（5-6分钟播客）
         )
         
         if verbose:
