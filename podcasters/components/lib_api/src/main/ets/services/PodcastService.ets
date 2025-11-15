@@ -64,7 +64,7 @@ export interface CharacterInfo {
  */
 export interface MultiRoleRequest {
   text?: string; // 播客文本（如果使用text_file_url或input_url，此字段可为空）
-  text_file_url?: string; // 文本文件云存储URL（.txt或Word文件，如果提供，优先使用）
+  text_file_url?: string | string[]; // 文本文件云存储URL（.txt或Word文件，如果提供，优先使用）。支持单个URL或URL数组（多个文件）
   input_type?: string; // 输入类型，可选值：文字、文字+指令、公众号、公众号+指令、网页、文件、文件+指令、文字+英文指令
   input_url?: string; // 输入URL（用于公众号、网页、PDF等类型）
   instruction?: string; // 指令内容（可选，用于控制播客生成过程）
@@ -161,7 +161,7 @@ export interface ProgressStatus {
  */
 class MultiRoleRequestBody {
   text?: string; // 播客文本（如果使用text_file_url或input_url，此字段可为空）
-  text_file_url?: string; // 文本文件云存储URL
+  text_file_url?: string | string[]; // 文本文件云存储URL（支持单个URL或URL数组）
   input_type?: string; // 输入类型
   input_url?: string; // 输入URL（用于公众号、网页、PDF等类型）
   instruction?: string; // 指令内容
@@ -185,7 +185,7 @@ class MultiRoleRequestBody {
 
   constructor(
     text: string | undefined,
-    text_file_url: string | undefined,
+    text_file_url: string | string[] | undefined,
     input_type: string | undefined,
     input_url: string | undefined,
     instruction: string | undefined,
@@ -576,7 +576,12 @@ export class PodcastService {
       try {
         // 验证请求参数（text、text_file_url或input_url至少有一个）
         const hasText = request.text && request.text.trim().length > 0;
-        const hasTextFile = request.text_file_url && request.text_file_url.trim().length > 0;
+        // 支持单个URL字符串或URL数组
+        const hasTextFile = request.text_file_url && (
+          Array.isArray(request.text_file_url) 
+            ? request.text_file_url.length > 0 && request.text_file_url.some(url => url && url.trim().length > 0)
+            : request.text_file_url.trim().length > 0
+        );
         const hasInputUrl = request.input_url && request.input_url.trim().length > 0;
         
         if (!hasText && !hasTextFile && !hasInputUrl) {
@@ -628,7 +633,9 @@ export class PodcastService {
 
         const roleCount = Object.keys(roleVoiceUrls).length;
         const textLength = request.text ? request.text.length : 0;
-        const textFileStatus = request.text_file_url ? '是' : '否';
+        const textFileStatus = request.text_file_url 
+          ? (Array.isArray(request.text_file_url) ? `${request.text_file_url.length}个文件` : '是')
+          : '否';
         Logger.info(TAG,
           `开始生成多角色播客: 文本长度=${textLength}, 文本文件=${textFileStatus}, 角色数=${roleCount}, 使用云存储`);
 
@@ -681,11 +688,30 @@ export class PodcastService {
           }
         );
       } catch (error) {
-        Logger.error(TAG, `多角色播客生成异常: ${JSON.stringify(error)}`);
+        // 提取详细的错误信息
+        let errorMessage = '未知错误';
+        let errorDetails = '';
+        
+        if (error instanceof Error) {
+          errorMessage = error.message || '错误对象没有消息';
+          errorDetails = error.stack || error.toString();
+        } else if (error && typeof error === 'object') {
+          // 尝试提取 BusinessError 的属性
+          const businessError = error as BusinessError;
+          errorMessage = businessError.message || businessError.code?.toString() || '业务错误';
+          errorDetails = `code: ${businessError.code}, message: ${businessError.message}`;
+        } else {
+          errorMessage = String(error) || '未知错误';
+        }
+        
+        Logger.error(TAG, `多角色播客生成异常: ${errorMessage}`);
+        Logger.error(TAG, `错误详情: ${errorDetails}`);
+        Logger.error(TAG, `错误对象类型: ${typeof error}, 值: ${JSON.stringify(error)}`);
+        
         resolve({
           success: false,
           message: '播客生成失败',
-          error: error instanceof Error ? error.message : String(error),
+          error: errorMessage,
         });
       }
     });
@@ -1002,11 +1028,30 @@ export class PodcastService {
           }
         );
       } catch (error) {
-        Logger.error(TAG, `主题深度播客生成异常: ${JSON.stringify(error)}`);
+        // 提取详细的错误信息
+        let errorMessage = '未知错误';
+        let errorDetails = '';
+        
+        if (error instanceof Error) {
+          errorMessage = error.message || '错误对象没有消息';
+          errorDetails = error.stack || error.toString();
+        } else if (error && typeof error === 'object') {
+          // 尝试提取 BusinessError 的属性
+          const businessError = error as BusinessError;
+          errorMessage = businessError.message || businessError.code?.toString() || '业务错误';
+          errorDetails = `code: ${businessError.code}, message: ${businessError.message}`;
+        } else {
+          errorMessage = String(error) || '未知错误';
+        }
+        
+        Logger.error(TAG, `主题深度播客生成异常: ${errorMessage}`);
+        Logger.error(TAG, `错误详情: ${errorDetails}`);
+        Logger.error(TAG, `错误对象类型: ${typeof error}, 值: ${JSON.stringify(error)}`);
+        
         resolve({
           success: false,
           message: '播客生成失败',
-          error: error instanceof Error ? error.message : String(error),
+          error: errorMessage,
         });
       }
     });

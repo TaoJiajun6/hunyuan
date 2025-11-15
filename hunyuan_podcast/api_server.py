@@ -220,7 +220,12 @@ async def log_requests(request: Request, call_next):
                     # 检查必需字段
                     if path == "/api/v1/podcast/multi_role":
                         has_text = body_json.get("text") and str(body_json.get("text")).strip() and str(body_json.get("text")).strip() != "长度: 0 字符"
-                        has_text_file = body_json.get("text_file_url") and str(body_json.get("text_file_url")).strip()
+                        # 支持单个URL字符串或URL数组
+                        text_file_url_value = body_json.get("text_file_url")
+                        if isinstance(text_file_url_value, list):
+                            has_text_file = len(text_file_url_value) > 0 and any(url and str(url).strip() for url in text_file_url_value)
+                        else:
+                            has_text_file = text_file_url_value and str(text_file_url_value).strip()
                         has_input_url = body_json.get("input_url") and str(body_json.get("input_url")).strip()
                         has_voice_urls = body_json.get("role_voice_urls") and len(body_json.get("role_voice_urls", {})) > 0
                         has_voices = body_json.get("role_voices") and len(body_json.get("role_voices", {})) > 0
@@ -438,7 +443,7 @@ def is_pcm_file(file_path: str) -> bool:
         return False
 
 
-def download_audio_from_url(url: str, suffix: str = ".wav", timeout: int = 60) -> str:
+def download_audio_from_url(url: str, suffix: str = ".wav", timeout: int = 120) -> str:
     """从URL下载音频文件并保存到临时文件
     
     注意：华为AGC云存储的下载URL通常可以直接访问，不需要额外认证。
@@ -452,10 +457,18 @@ def download_audio_from_url(url: str, suffix: str = ".wav", timeout: int = 60) -
         # 下载文件（华为AGC云存储的下载URL通常可以直接访问）
         # 如果URL需要认证，可以在headers中添加Authorization头
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': '*/*',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive'  # 保持连接，提高下载速度
         }
-        response = requests.get(url, timeout=timeout, stream=True, headers=headers)
-        response.raise_for_status()
+        # 使用Session以复用连接，提高下载速度
+        session = requests.Session()
+        try:
+            response = session.get(url, timeout=timeout, stream=True, headers=headers)
+            response.raise_for_status()
+        finally:
+            session.close()
         
         # 检查Content-Length
         content_length = response.headers.get("content-length")
@@ -474,9 +487,11 @@ def download_audio_from_url(url: str, suffix: str = ".wav", timeout: int = 60) -
         # 保存到临时文件
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
         
-        # 流式下载
+        # 流式下载（使用更大的chunk_size以提高下载速度）
         downloaded_size = 0
-        for chunk in response.iter_content(chunk_size=8192):
+        chunk_size = 64 * 1024  # 64KB chunks，提高下载速度
+        start_time = time.time()
+        for chunk in response.iter_content(chunk_size=chunk_size):
             if chunk:
                 temp_file.write(chunk)
                 downloaded_size += len(chunk)
@@ -488,6 +503,10 @@ def download_audio_from_url(url: str, suffix: str = ".wav", timeout: int = 60) -
                         status_code=400,
                         detail=f"音频文件过大: {downloaded_size / (1024 * 1024):.2f} MB (限制: {MAX_AUDIO_FILE_SIZE / 1024 / 1024:.2f} MB)"
                     )
+        
+        download_time = time.time() - start_time
+        if download_time > 5:  # 如果下载时间超过5秒，记录警告
+            logger.warning(f"音频文件下载较慢: {download_time:.2f}秒，文件大小: {downloaded_size / (1024 * 1024):.2f} MB")
         
         temp_file.close()
         
@@ -529,7 +548,7 @@ def download_audio_from_url(url: str, suffix: str = ".wav", timeout: int = 60) -
         raise HTTPException(status_code=500, detail=f"下载音频文件异常: {str(e)}")
 
 
-def download_text_from_url(url: Union[str, List[str]], timeout: int = 60) -> str:
+def download_text_from_url(url: Union[str, List[str]], timeout: int = 120) -> str:
     """从URL下载文本文件并返回内容（支持.txt、Word文件和PDF文件）
     
     Args:
@@ -542,30 +561,66 @@ def download_text_from_url(url: Union[str, List[str]], timeout: int = 60) -> str
     注意：华为AGC云存储的下载URL通常可以直接访问，不需要额外认证。
     如果下载失败（如403 Forbidden），可能需要检查云存储的安全规则配置。
     """
-    # 如果传入的是列表，处理多个文件
+    # 如果传入的是列表，处理多个文件（使用并发下载）
     if isinstance(url, list):
         logger.info(f"从多个URL下载文本文件: {len(url)} 个文件")
+        
+        # 如果只有一个文件，直接下载
+        if len(url) == 1:
+            return download_text_from_url(url[0], timeout)
+        
+        # 多个文件使用并发下载
+        import concurrent.futures
         all_texts = []
-        for i, single_url in enumerate(url):
-            logger.info(f"正在下载第 {i+1}/{len(url)} 个文件: {single_url}")
+        file_urls_with_index = [(i, single_url) for i, single_url in enumerate(url)]
+        
+        def download_single_file(index_url_tuple):
+            index, single_url = index_url_tuple
+            logger.info(f"开始下载第 {index+1}/{len(url)} 个文件: {single_url}")
             try:
                 text = download_text_from_url(single_url, timeout)  # 递归调用处理单个文件
                 if text:
-                    all_texts.append(text)
-                    logger.info(f"第 {i+1} 个文件下载成功: {len(text)} 字符")
+                    logger.info(f"第 {index+1} 个文件下载成功: {len(text)} 字符")
+                    return index, text, None
                 else:
-                    logger.warning(f"第 {i+1} 个文件下载后内容为空")
+                    logger.warning(f"第 {index+1} 个文件下载后内容为空")
+                    return index, None, "内容为空"
             except Exception as e:
-                logger.error(f"第 {i+1} 个文件下载失败: {str(e)}")
-                # 继续处理其他文件，不中断
-                continue
+                logger.error(f"第 {index+1} 个文件下载失败: {str(e)}")
+                return index, None, str(e)
+        
+        # 使用线程池并发下载（最多5个并发，文本文件通常较小）
+        download_start = time.time()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(5, len(url))) as executor:
+            future_to_index = {executor.submit(download_single_file, item): item[0] for item in file_urls_with_index}
+            results = {}
+            for future in concurrent.futures.as_completed(future_to_index):
+                index = future_to_index[future]
+                try:
+                    result_index, text, error = future.result()
+                    results[result_index] = (text, error)
+                except Exception as e:
+                    logger.error(f"文件 {index+1} 下载异常: {str(e)}")
+                    results[index] = (None, str(e))
+        
+        # 按原始顺序合并文件内容
+        for i in range(len(url)):
+            if i in results:
+                text, error = results[i]
+                if text:
+                    all_texts.append(text)
+                elif error:
+                    logger.warning(f"文件 {i+1} 下载失败: {error}")
+        
+        download_time = time.time() - download_start
+        logger.info(f"所有文件下载完成，总耗时: {download_time:.2f}秒")
         
         if not all_texts:
             raise Exception("所有文件下载失败或内容为空")
         
         # 合并所有文件内容，用两个换行分隔
         merged_text = "\n\n".join(all_texts)
-        logger.info(f"所有文件下载完成，合并后总长度: {len(merged_text)} 字符")
+        logger.info(f"文件内容合并完成，合并后总长度: {len(merged_text)} 字符")
         return merged_text
     
     # 单个文件处理（原有逻辑）
@@ -575,10 +630,18 @@ def download_text_from_url(url: Union[str, List[str]], timeout: int = 60) -> str
         # 下载文件（华为AGC云存储的下载URL通常可以直接访问）
         # 如果URL需要认证，可以在headers中添加Authorization头
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': '*/*',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive'  # 保持连接，提高下载速度
         }
-        response = requests.get(url, timeout=timeout, stream=True, headers=headers)
-        response.raise_for_status()
+        # 使用Session以复用连接，提高下载速度
+        session = requests.Session()
+        try:
+            response = session.get(url, timeout=timeout, stream=True, headers=headers)
+            response.raise_for_status()
+        finally:
+            session.close()
         
         # 检查Content-Type
         content_type = response.headers.get("content-type", "").lower()
@@ -586,8 +649,16 @@ def download_text_from_url(url: Union[str, List[str]], timeout: int = 60) -> str
         url_path = url.split('?')[0]  # 移除查询参数
         file_extension = url_path.lower().split('.')[-1] if '.' in url_path else ''
         
-        # 读取文件内容
-        content_bytes = response.content
+        # 流式读取文件内容（使用更大的chunk_size以提高下载速度）
+        content_bytes = b''
+        chunk_size = 64 * 1024  # 64KB chunks，提高下载速度
+        download_start = time.time()
+        for chunk in response.iter_content(chunk_size=chunk_size):
+            if chunk:
+                content_bytes += chunk
+        download_time = time.time() - download_start
+        if download_time > 3:  # 如果下载时间超过3秒，记录警告
+            logger.warning(f"文本文件下载较慢: {download_time:.2f}秒，文件大小: {len(content_bytes) / (1024 * 1024):.2f} MB")
         
         # 如果无法从URL确定文件类型，尝试从Content-Type判断
         if not file_extension:
@@ -1174,22 +1245,58 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
         try:
             _update_progress(request.job_id, "downloading_voices", 5, "正在下载角色音色文件")
             voice_download_start = time.time()
-            for role, voice_data in role_voice_data.items():
-                role_download_start = time.time()
-                logger.info(f"获取角色 '{role}' 的音频文件...")
-                if use_cloud_storage:
-                    # 从云存储URL下载
-                    logger.info(f"从云存储下载: {voice_data}")
-                    temp_file = download_audio_from_url(voice_data)
-                else:
-                    # 从base64解码
-                    logger.info(f"从base64解码")
-                    temp_file = decode_base64_audio(voice_data)
-                role_download_time = time.time() - role_download_start
-                retrieval_timings[f"角色音色下载_{role}"] = role_download_time
-                temp_files.append(temp_file)
-                role_voices[role] = temp_file
-                logger.info(f"角色 '{role}' 音频文件获取完成，耗时: {role_download_time:.2f}s")
+            
+            # 使用并发下载以提高速度（多个角色文件同时下载）
+            if use_cloud_storage and len(role_voice_data) > 1:
+                # 并发下载多个文件
+                logger.info(f"使用并发下载 {len(role_voice_data)} 个角色音色文件...")
+                import concurrent.futures
+                
+                def download_role_voice(role_voice_tuple):
+                    role, voice_data = role_voice_tuple
+                    role_download_start = time.time()
+                    logger.info(f"开始下载角色 '{role}' 的音频文件...")
+                    try:
+                        temp_file = download_audio_from_url(voice_data)
+                        role_download_time = time.time() - role_download_start
+                        logger.info(f"角色 '{role}' 音频文件下载完成，耗时: {role_download_time:.2f}s")
+                        return role, temp_file, role_download_time
+                    except Exception as e:
+                        logger.error(f"角色 '{role}' 音频文件下载失败: {str(e)}")
+                        raise
+                
+                # 使用线程池并发下载（最多3个并发，避免过多连接）
+                with concurrent.futures.ThreadPoolExecutor(max_workers=min(3, len(role_voice_data))) as executor:
+                    future_to_role = {executor.submit(download_role_voice, item): item[0] for item in role_voice_data.items()}
+                    for future in concurrent.futures.as_completed(future_to_role):
+                        role = future_to_role[future]
+                        try:
+                            role_name, temp_file, role_download_time = future.result()
+                            retrieval_timings[f"角色音色下载_{role_name}"] = role_download_time
+                            temp_files.append(temp_file)
+                            role_voices[role_name] = temp_file
+                        except Exception as e:
+                            logger.error(f"角色 '{role}' 下载失败: {str(e)}")
+                            raise
+            else:
+                # 串行下载（单个文件或base64解码）
+                for role, voice_data in role_voice_data.items():
+                    role_download_start = time.time()
+                    logger.info(f"获取角色 '{role}' 的音频文件...")
+                    if use_cloud_storage:
+                        # 从云存储URL下载
+                        logger.info(f"从云存储下载: {voice_data}")
+                        temp_file = download_audio_from_url(voice_data)
+                    else:
+                        # 从base64解码
+                        logger.info(f"从base64解码")
+                        temp_file = decode_base64_audio(voice_data)
+                    role_download_time = time.time() - role_download_start
+                    retrieval_timings[f"角色音色下载_{role}"] = role_download_time
+                    temp_files.append(temp_file)
+                    role_voices[role] = temp_file
+                    logger.info(f"角色 '{role}' 音频文件获取完成，耗时: {role_download_time:.2f}s")
+            
             voice_download_total = time.time() - voice_download_start
             retrieval_timings["角色音色下载_总计"] = voice_download_total
             logger.info(f"所有角色音色文件下载完成，总耗时: {voice_download_total:.2f}s")
