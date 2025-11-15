@@ -274,9 +274,21 @@ class CloudStorageMusicClient:
                 file_size_mb = file_size / (1024 * 1024)
                 print(f"  文件大小: {file_size_mb:.2f} MB")
             
-            # 流式下载（使用更大的chunk_size以提高下载速度）
+            # 流式下载（根据文件大小动态调整chunk_size以提高下载速度）
             downloaded_size = 0
-            chunk_size = 256 * 1024  # 256KB chunks，提高下载速度
+            # 根据Content-Length动态调整chunk_size
+            if content_length:
+                file_size_mb = int(content_length) / (1024 * 1024)
+                if file_size_mb > 20:
+                    chunk_size = 2 * 1024 * 1024  # 2MB chunks，超大文件
+                elif file_size_mb > 10:
+                    chunk_size = 1024 * 1024  # 1MB chunks，大文件
+                elif file_size_mb > 5:
+                    chunk_size = 512 * 1024  # 512KB chunks，中等文件
+                else:
+                    chunk_size = 256 * 1024  # 256KB chunks，小文件
+            else:
+                chunk_size = 512 * 1024  # 默认512KB，如果没有Content-Length
             import time
             download_start = time.time()
             with open(local_path, 'wb') as f:
@@ -411,9 +423,21 @@ class CloudStorageMusicClient:
                 file_size_mb = file_size / (1024 * 1024)
                 print(f"  文件大小: {file_size_mb:.2f} MB")
             
-            # 流式下载（使用更大的chunk_size以提高下载速度）
+            # 流式下载（根据文件大小动态调整chunk_size以提高下载速度）
             downloaded_size = 0
-            chunk_size = 256 * 1024  # 256KB chunks，提高下载速度
+            # 根据Content-Length动态调整chunk_size
+            if content_length:
+                file_size_mb = int(content_length) / (1024 * 1024)
+                if file_size_mb > 20:
+                    chunk_size = 2 * 1024 * 1024  # 2MB chunks，超大文件
+                elif file_size_mb > 10:
+                    chunk_size = 1024 * 1024  # 1MB chunks，大文件
+                elif file_size_mb > 5:
+                    chunk_size = 512 * 1024  # 512KB chunks，中等文件
+                else:
+                    chunk_size = 256 * 1024  # 256KB chunks，小文件
+            else:
+                chunk_size = 512 * 1024  # 默认512KB，如果没有Content-Length
             import time
             download_start = time.time()
             with open(local_path, 'wb') as f:
