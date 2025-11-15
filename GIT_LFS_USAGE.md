@@ -92,11 +92,40 @@ git lfs ls-files | ForEach-Object { git lfs pointer --file=$_ }
 # 1. 确保文件已添加到 Git
 git add music/
 
-# 2. 迁移到 LFS
+# 2. 迁移到 LFS（这会重写历史）
 git lfs migrate import --include="music/**/*.mp3,music/**/*.wav,music/**/*.m4a,music/**/*.flac,music/**/*.ogg,music/**/*.aac" --everything
 
-# 3. 推送到远程
+# 3. 推送到远程（需要强制推送，因为历史被重写）
 git push --force
+```
+
+**注意**：迁移会重写 Git 历史，如果已经推送到远程，需要强制推送。请确保团队成员知道这个操作。
+
+### 处理分支分叉（推送被拒绝）
+
+如果遇到 "non-fast-forward" 错误，说明本地和远程分支已分叉：
+
+```bash
+# 方法1：使用 rebase（推荐，保持历史线性）
+git pull --rebase origin computer
+# 如果有冲突，解决后继续：
+git add .
+git rebase --continue
+# 然后推送
+git push origin computer
+
+# 方法2：使用 merge（会创建合并提交）
+git pull origin computer
+# 如果有冲突，解决后：
+git add .
+git commit -m "合并远程更改"
+# 然后推送
+git push origin computer
+
+# 方法3：如果确定要覆盖远程（危险，谨慎使用）
+git push --force origin computer
+# 或者更安全的强制推送（只覆盖远程分支，不删除其他分支）
+git push --force-with-lease origin computer
 ```
 
 ## 注意事项
