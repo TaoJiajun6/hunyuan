@@ -487,25 +487,19 @@ def download_audio_from_url(url: str, suffix: str = ".wav", timeout: int = 120) 
             session.mount('https://', adapter)
             
             try:
-                # 对于中小文件（<20MB），不使用stream模式，让requests一次性下载，可能更快且更稳定
-                # 对于超大文件（>=20MB），使用stream模式以节省内存
-                # 先发送HEAD请求获取文件大小（如果可能），否则使用GET请求
-                # 注意：某些服务器可能不支持HEAD请求，所以直接使用GET
                 response = session.get(
                     url, 
                     timeout=(connect_timeout, read_timeout),  # (连接超时, 读取超时)
-                    stream=True,  # 先使用stream=True，根据Content-Length决定是否使用流式
+                    stream=True, 
                     headers=headers,
                     allow_redirects=True
                 )
                 response.raise_for_status()
             finally:
-                # 注意：这里不关闭session，因为可能还需要读取内容
-                pass
+                session.close()
             
             # 检查Content-Length
             content_length = response.headers.get("content-length")
-            file_size_mb = 0
             if content_length:
                 file_size = int(content_length)
                 file_size_mb = file_size / (1024 * 1024)
@@ -513,7 +507,6 @@ def download_audio_from_url(url: str, suffix: str = ".wav", timeout: int = 120) 
                 
                 # 检查文件大小
                 if file_size > MAX_AUDIO_FILE_SIZE:
-                    session.close()
                     raise HTTPException(
                         status_code=400,
                         detail=f"音频文件过大: {file_size_mb:.2f} MB (限制: {MAX_AUDIO_FILE_SIZE / 1024 / 1024:.2f} MB)"
@@ -522,55 +515,40 @@ def download_audio_from_url(url: str, suffix: str = ".wav", timeout: int = 120) 
             # 保存到临时文件
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
             
-            # 目标：1-2MB文件在2秒内完成，需要至少0.75-1 MB/s的速度
-            # 对于中小文件（<20MB），使用非流式下载（一次性下载），更快且更稳定
+            # 流式下载（根据文件大小动态调整chunk_size以提高下载速度）
             downloaded_size = 0
+            # 根据Content-Length动态调整chunk_size
+            # 对于所有文件，使用更大的chunk_size以提高下载速度
+            if content_length:
+                file_size_mb = int(content_length) / (1024 * 1024)
+                if file_size_mb > 20:
+                    chunk_size = 2 * 1024 * 1024  # 2MB chunks，超大文件
+                elif file_size_mb > 10:
+                    chunk_size = 1024 * 1024  # 1MB chunks，大文件
+                elif file_size_mb > 2:
+                    chunk_size = 1024 * 1024  # 1MB chunks，中等文件（2-10MB）
+                else:
+                    chunk_size = 512 * 1024  # 512KB chunks，小文件（<2MB，但仍使用较大chunk）
+            else:
+                chunk_size = 1024 * 1024  # 默认1MB，如果没有Content-Length
+            logger.info(f"使用chunk_size: {chunk_size / 1024:.0f} KB (文件大小: {file_size_mb:.2f} MB)" if content_length else f"使用chunk_size: {chunk_size / 1024:.0f} KB (文件大小未知)")
             start_time = time.time()
             
             try:
-                # 根据文件大小决定使用流式还是非流式下载
-                if content_length and file_size_mb < 20:
-                    # 中小文件使用非流式下载（一次性下载）
-                    logger.info(f"使用非流式下载（一次性下载，适合中小文件，文件大小: {file_size_mb:.2f} MB）")
-                    content = response.content  # 一次性获取所有内容
-                    downloaded_size = len(content)
-                    temp_file.write(content)
-                else:
-                    # 超大文件或未知大小，使用流式下载
-                    # 根据文件大小动态调整chunk_size
-                    if content_length and file_size_mb >= 20:
-                        chunk_size = 4 * 1024 * 1024  # 4MB chunks，超大文件
-                    else:
-                        chunk_size = 2 * 1024 * 1024  # 2MB chunks，未知大小时使用
-                    
-                    logger.info(f"使用流式下载，chunk_size: {chunk_size / 1024:.0f} KB (文件大小: {file_size_mb:.2f} MB)" if content_length else f"使用流式下载，chunk_size: {chunk_size / 1024:.0f} KB (文件大小未知)")
-                    
-                    for chunk in response.iter_content(chunk_size=chunk_size):
-                        if chunk:
-                            temp_file.write(chunk)
-                            downloaded_size += len(chunk)
-                            # 检查下载大小
-                            if downloaded_size > MAX_AUDIO_FILE_SIZE:
-                                temp_file.close()
-                                os.unlink(temp_file.name)
-                                session.close()
-                                raise HTTPException(
-                                    status_code=400,
-                                    detail=f"音频文件过大: {downloaded_size / (1024 * 1024):.2f} MB (限制: {MAX_AUDIO_FILE_SIZE / 1024 / 1024:.2f} MB)"
-                                )
-                
-                # 检查下载大小（非流式下载的情况）
-                if downloaded_size > MAX_AUDIO_FILE_SIZE:
-                    temp_file.close()
-                    os.unlink(temp_file.name)
-                    session.close()
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"音频文件过大: {downloaded_size / (1024 * 1024):.2f} MB (限制: {MAX_AUDIO_FILE_SIZE / 1024 / 1024:.2f} MB)"
-                    )
+                for chunk in response.iter_content(chunk_size=chunk_size):
+                    if chunk:
+                        temp_file.write(chunk)
+                        downloaded_size += len(chunk)
+                        # 检查下载大小
+                        if downloaded_size > MAX_AUDIO_FILE_SIZE:
+                            temp_file.close()
+                            os.unlink(temp_file.name)
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"音频文件过大: {downloaded_size / (1024 * 1024):.2f} MB (限制: {MAX_AUDIO_FILE_SIZE / 1024 / 1024:.2f} MB)"
+                            )
             finally:
                 temp_file.close()
-                session.close()
             
             download_time = time.time() - start_time
             download_speed = (downloaded_size / (1024 * 1024)) / download_time if download_time > 0 else 0
@@ -732,21 +710,11 @@ def download_text_from_url(url: Union[str, List[str]], timeout: int = 120) -> st
         }
         # 使用Session以复用连接，提高下载速度
         session = requests.Session()
-        adapter = requests.adapters.HTTPAdapter(
-            pool_connections=20,  # 增加连接池数量
-            pool_maxsize=50,  # 增加每个连接池的最大连接数
-            max_retries=0  # 禁用urllib3的重试，我们自己处理
-        )
-        session.mount('http://', adapter)
-        session.mount('https://', adapter)
-        
         try:
-            # 先使用stream=True，根据Content-Length决定是否使用流式
             response = session.get(url, timeout=timeout, stream=True, headers=headers)
             response.raise_for_status()
         finally:
-            # 注意：这里不关闭session，因为可能还需要读取内容
-            pass
+            session.close()
         
         # 检查Content-Type和Content-Length
         content_type = response.headers.get("content-type", "").lower()
@@ -755,35 +723,25 @@ def download_text_from_url(url: Union[str, List[str]], timeout: int = 120) -> st
         url_path = url.split('?')[0]  # 移除查询参数
         file_extension = url_path.lower().split('.')[-1] if '.' in url_path else ''
         
-        # 对于中小文件（<20MB），使用非流式下载（一次性下载），更快且更稳定
+        # 流式读取文件内容（根据文件大小动态调整chunk_size以提高下载速度）
         content_bytes = b''
-        file_size_mb = 0
+        # 根据Content-Length动态调整chunk_size
         if content_length:
             file_size_mb = int(content_length) / (1024 * 1024)
-        
-        download_start = time.time()
-        
-        # 根据文件大小决定使用流式还是非流式下载
-        if content_length and file_size_mb < 20:
-            # 中小文件使用非流式下载（一次性下载）
-            logger.info(f"使用非流式下载（一次性下载，适合中小文件，文件大小: {file_size_mb:.2f} MB）")
-            content_bytes = response.content  # 一次性获取所有内容
-        else:
-            # 超大文件或未知大小，使用流式下载
-            # 根据文件大小动态调整chunk_size
-            if content_length and file_size_mb >= 20:
-                chunk_size = 4 * 1024 * 1024  # 4MB chunks，超大文件
+            if file_size_mb > 20:
+                chunk_size = 2 * 1024 * 1024  # 2MB chunks，超大文件
+            elif file_size_mb > 10:
+                chunk_size = 1024 * 1024  # 1MB chunks，大文件
+            elif file_size_mb > 5:
+                chunk_size = 512 * 1024  # 512KB chunks，中等文件
             else:
-                chunk_size = 2 * 1024 * 1024  # 2MB chunks，未知大小时使用
-            
-            logger.info(f"使用流式下载，chunk_size: {chunk_size / 1024:.0f} KB (文件大小: {file_size_mb:.2f} MB)" if content_length else f"使用流式下载，chunk_size: {chunk_size / 1024:.0f} KB (文件大小未知)")
-            
-            for chunk in response.iter_content(chunk_size=chunk_size):
-                if chunk:
-                    content_bytes += chunk
-        
-        session.close()
-        
+                chunk_size = 256 * 1024  # 256KB chunks，小文件
+        else:
+            chunk_size = 512 * 1024  # 默认512KB，如果没有Content-Length
+        download_start = time.time()
+        for chunk in response.iter_content(chunk_size=chunk_size):
+            if chunk:
+                content_bytes += chunk
         download_time = time.time() - download_start
         download_speed = (len(content_bytes) / (1024 * 1024)) / download_time if download_time > 0 else 0
         if download_time > 3:  # 如果下载时间超过3秒，记录警告
