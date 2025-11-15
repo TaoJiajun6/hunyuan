@@ -54,7 +54,10 @@ _project_root = os.path.dirname(_current_file_dir)
 _default_model_dir = os.path.join(_project_root, "SoulX-Podcast", "pretrained_models", "SoulX-Podcast-1.7B")
 
 SOULX_PODCAST_MODEL_DIR = os.getenv("SOULX_PODCAST_MODEL_DIR", _default_model_dir)
-SOULX_PODCAST_LLM_ENGINE = os.getenv("SOULX_PODCAST_LLM_ENGINE", "hf")  # "hf" 或 "vllm"
+SOULX_PODCAST_LLM_ENGINE = os.getenv("SOULX_PODCAST_LLM_ENGINE", "hf")  # 仅支持 "hf" 引擎（vllm 支持已移除）
+# 如果环境变量设置为 "vllm"，代码会自动转换为 "hf"
+if SOULX_PODCAST_LLM_ENGINE == "vllm":
+    SOULX_PODCAST_LLM_ENGINE = "hf"
 SOULX_PODCAST_FP16_FLOW = os.getenv("SOULX_PODCAST_FP16_FLOW", "True").lower() == "true"
 
 # 默认参数
