@@ -173,12 +173,9 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
     last_exc = None
     file_size_mb = file_size / (1024 * 1024)
     
-    # 根据文件大小决定重试次数：小文件（<10MB）只重试1次，大文件重试2次
-    if file_size_mb < 10:
-        retries = 1  # 小文件只重试1次
-    else:
-        retries = 2  # 大文件重试2次
-    
+    # 移除重试次数限制，持续重试直到成功
+    # 对于慢速网络，上传可能需要很长时间，不应该设置重试次数限制
+    retries = float('inf')  # 无限重试，直到成功
     backoff_factor = 0.5
     
     # 移除超时限制，允许上传持续进行直到完成
@@ -186,9 +183,11 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
     connect_timeout = 30  # 连接超时30秒（仅用于建立连接）
     read_timeout = None  # 读取/写入超时设置为None，表示无超时限制
     
-    for attempt in range(1, retries + 1):
+    attempt = 0
+    while True:
+        attempt += 1
         try:
-            logger.info(f"上传尝试 {attempt}/{retries}: 连接超时={connect_timeout}秒, 读取超时=无限制 (文件大小: {file_size_mb:.2f} MB)")
+            logger.info(f"上传尝试 {attempt}: 连接超时={connect_timeout}秒, 读取超时=无限制 (文件大小: {file_size_mb:.2f} MB)")
             
             # 优化上传：使用Session和连接池（每次重试创建新的session）
             session = requests.Session()
@@ -286,22 +285,17 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
             # 检查是否是写入超时，如果是且还有重试机会，继续重试
             # 写入超时可能发生在数据传输过程中，但服务器可能已经接收了完整数据
             is_write_timeout = "write operation timed out" in str(e).lower() or "timed out" in str(e).lower()
-            logger.error(f"上传超时 (attempt {attempt}/{retries}): {str(e)}")
+            logger.error(f"上传超时 (attempt {attempt}): {str(e)}")
             logger.error(f"  文件大小: {file_size_mb:.2f} MB")
             logger.error(f"  超时设置: 连接={connect_timeout}秒, 读取={read_timeout}秒")
             if is_write_timeout:
                 logger.warning(f"  检测到写入超时，但数据可能已经成功上传到服务器")
-            if attempt < retries:
-                wait = backoff_factor * (2 ** (attempt - 1))
-                logger.warning(f"  {wait}s 后重试（下次将使用更长的超时时间）...")
-                time.sleep(wait)
-            else:
-                # 最后一次尝试也超时，但如果是写入超时，数据可能已经上传成功
-                # 由于无法验证，我们只能抛出错误，但提示用户可能实际上传已成功
-                if is_write_timeout:
-                    logger.warning(f"  写入超时，但数据可能已经成功上传。建议检查服务器上的文件是否存在。")
-                raise AGCUploadError(f"文件上传超时（已重试{retries}次）: {str(e)}")
-        except RequestException as e:
+            # 无限重试，每次重试前等待
+            wait = min(backoff_factor * (2 ** (attempt - 1)), 60)  # 最大等待60秒
+            logger.warning(f"  {wait:.1f}s 后重试（无重试次数限制，将持续重试直到成功）...")
+            time.sleep(wait)
+            continue  # 继续重试
+        except (requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
             last_exc = e
             # 检查是否有响应，如果有且状态码是成功的，则认为上传成功
             if hasattr(e, 'response') and e.response is not None:
@@ -309,23 +303,28 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
                     logger.warning(f"上传过程中出现异常，但响应状态码为 {e.response.status_code}，认为上传成功")
                     logger.info(f"  响应头: {dict(e.response.headers)}")
                     return e.response
-                logger.error(f"上传失败 (attempt {attempt}/{retries}): HTTP {e.response.status_code}")
+                logger.error(f"上传失败 (attempt {attempt}): HTTP {e.response.status_code}")
                 logger.error(f"  响应头: {dict(e.response.headers)}")
                 logger.error(f"  响应内容: {e.response.text[:500] if e.response.text else '(empty)'}")
             else:
-                # 对于连接错误（如写入超时），如果这是最后一次尝试，检查是否实际上传成功
-                # 由于无法直接检查，我们只能记录错误并重试
-                logger.error(f"上传失败 (attempt {attempt}/{retries}): {e}")
-                # 如果是写入超时但还有重试机会，继续重试
-                if "write operation timed out" in str(e).lower() and attempt < retries:
-                    logger.warning(f"  写入超时，但将继续重试（可能实际上传已成功）")
-            if attempt < retries:
-                wait = backoff_factor * (2 ** (attempt - 1))
-                logger.warning(f"  {wait}s 后重试...")
-                time.sleep(wait)
-            else:
-                raise AGCUploadError(f"文件上传失败（已重试{retries}次）: {str(e)}")
-    raise AGCUploadError(f"文件上传失败: {last_exc}")
+                # 对于连接错误（如写入超时），持续重试
+                error_str = str(e).lower()
+                logger.error(f"上传失败 (attempt {attempt}): {e}")
+                if "write operation timed out" in error_str or "connection aborted" in error_str:
+                    logger.warning(f"  检测到写入超时或连接中断，但数据可能已经成功上传，将继续重试")
+            # 无限重试，每次重试前等待
+            wait = min(backoff_factor * (2 ** (attempt - 1)), 60)  # 最大等待60秒
+            logger.warning(f"  {wait:.1f}s 后重试（无重试次数限制，将持续重试直到成功）...")
+            time.sleep(wait)
+            continue  # 继续重试
+        except Exception as e:
+            # 捕获其他未预期的异常，也进行重试
+            last_exc = e
+            logger.error(f"上传出现未预期错误 (attempt {attempt}): {e}")
+            wait = min(backoff_factor * (2 ** (attempt - 1)), 60)  # 最大等待60秒
+            logger.warning(f"  {wait:.1f}s 后重试（无重试次数限制，将持续重试直到成功）...")
+            time.sleep(wait)
+            continue  # 继续重试
 
 
 def upload_generated_podcast(
