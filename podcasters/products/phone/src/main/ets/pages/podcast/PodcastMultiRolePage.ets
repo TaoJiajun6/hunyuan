@@ -21,8 +21,8 @@ export function PodcastMultiRolePageBuilder() {
 @ComponentV2
 export struct PodcastMultiRolePage {
   @Local text: string = ''; // 保留用于兼容，但优先使用textFileUrl
-  @Local textFileUrl: string = ''; // 文本文件云存储URL
-  @Local textFileName: string = ''; // 文本文件名
+  @Local textFileUrls: string[] = []; // 文本文件云存储URL列表（支持多个文件）
+  @Local textFileNames: string[] = []; // 文本文件名列表
   @Local inputType: string = '文字'; // 输入类型：文字、文字+指令、公众号、公众号+指令、网页、网页+指令、文件、文件+指令、文字+英文指令
   @Local inputUrl: string = ''; // 输入URL（用于公众号、网页等类型）
   @Local instruction: string = ''; // 指令内容（可选）
@@ -120,7 +120,7 @@ export struct PodcastMultiRolePage {
   }
 
   /**
-   * 选择播客文本文件（支持.txt、.doc、.docx、.pdf）
+   * 选择播客文本文件（支持.txt、.doc、.docx、.pdf，支持多个文件）
    */
   async selectTextFile(): Promise<void> {
     try {
@@ -130,38 +130,64 @@ export struct PodcastMultiRolePage {
       // 检查当前输入类型，如果是文件类型
       const isFileType = ['文件', '文件+指令'].includes(this.inputType);
 
-      // 使用云存储上传（文件必须上传到云存储）
-      const textFileInfo = await FileUtils.pickTextFile(context, true);
-      if (textFileInfo && textFileInfo.cloudUrl) {
-        // 文件类型支持.txt、.doc、.docx、.pdf等格式，不需要特殊验证
-        const fileName = textFileInfo.fileName.toLowerCase();
-        const fileExtension = fileName.split('.').pop() || '';
+      // 使用云存储上传（文件必须上传到云存储），支持选择多个文件
+      const textFileInfos = await FileUtils.pickTextFiles(context, true);
+      if (textFileInfos && textFileInfos.length > 0) {
+        // 保存所有文件的云存储URL和文件名
+        const newUrls: string[] = [];
+        const newNames: string[] = [];
+        let hasTxtContent = false;
+        let combinedText = '';
 
-        // 保存云存储URL
-        this.textFileUrl = textFileInfo.cloudUrl;
-        this.textFileName = textFileInfo.fileName;
+        for (let i = 0; i < textFileInfos.length; i++) {
+          const textFileInfo = textFileInfos[i];
+          if (textFileInfo && textFileInfo.cloudUrl) {
+            newUrls.push(textFileInfo.cloudUrl);
+            newNames.push(textFileInfo.fileName);
 
-        // 如果文件是.txt格式且已读取内容，保存到text字段（用于兼容）
-        if (fileExtension === 'txt' && textFileInfo.content) {
-          this.text = textFileInfo.content;
-        } else {
-          // PDF和Word文件不需要保存内容到text字段
-          this.text = '';
+            // 如果文件是.txt格式且已读取内容，合并到text字段（用于兼容）
+            const fileName = textFileInfo.fileName.toLowerCase();
+            const fileExtension = fileName.split('.').pop() || '';
+            if (fileExtension === 'txt' && textFileInfo.content) {
+              hasTxtContent = true;
+              if (combinedText) {
+                combinedText += '\n\n';
+              }
+              combinedText += textFileInfo.content;
+            }
+          }
         }
 
-        // 根据文件类型显示不同的提示信息
-        const fileTypeName = fileExtension === 'pdf' ? 'PDF' :
-          fileExtension === 'docx' || fileExtension === 'doc' ? 'Word' :
-            '文本';
+        if (newUrls.length > 0) {
+          // 更新文件列表
+          this.textFileUrls = newUrls;
+          this.textFileNames = newNames;
 
-        promptAction.showToast({
-          message: `${fileTypeName}文件已选择并上传到云存储: ${textFileInfo.fileName}`,
-          duration: 2000
-        });
+          // 如果有.txt文件内容，保存到text字段（用于兼容）
+          if (hasTxtContent) {
+            this.text = combinedText;
+          } else {
+            // PDF和Word文件不需要保存内容到text字段
+            this.text = '';
+          }
+
+          // 显示成功提示
+          const fileCount = newUrls.length;
+          promptAction.showToast({
+            message: `已选择${fileCount}个文件并上传到云存储`,
+            duration: 2000
+          });
+        } else {
+          // 所有文件上传失败
+          promptAction.showToast({
+            message: '所有文件上传失败，请重试',
+            duration: 2000
+          });
+        }
       } else {
-        // 上传失败或未获取到URL
+        // 用户取消选择或上传失败
         promptAction.showToast({
-          message: '文件上传失败，请重试',
+          message: '文件选择已取消或上传失败',
           duration: 2000
         });
       }
@@ -177,13 +203,13 @@ export struct PodcastMultiRolePage {
    * 生成播客
    */
   async generatePodcast(): Promise<void> {
-    // 检查文本输入（text、textFileUrl或inputUrl至少有一个）
+    // 检查文本输入（text、textFileUrls或inputUrl至少有一个）
     const hasText = this.text.trim().length > 0;
-    const hasTextFile = this.textFileUrl.trim().length > 0;
+    const hasTextFile = this.textFileUrls.length > 0;
     const hasInputUrl = this.inputUrl.trim().length > 0;
 
     // 根据输入类型验证
-    const needsInputUrl = ['公众号', '公众号+指令', '网页'].includes(this.inputType);
+    const needsInputUrl = ['公众号', '公众号+指令', '网页', '网页+指令'].includes(this.inputType);
     const needsFile = ['文件', '文件+指令'].includes(this.inputType);
     const needsText = ['文字', '文字+指令', '文字+英文指令'].includes(this.inputType);
 
@@ -276,7 +302,7 @@ export struct PodcastMultiRolePage {
     try {
       const request: MultiRoleRequest = {
         text: hasText ? this.text : '', // 如果使用文件或URL，text可以为空
-        text_file_url: hasTextFile ? this.textFileUrl : undefined, // 文本文件云存储URL
+        text_file_url: hasTextFile ? (this.textFileUrls.length === 1 ? this.textFileUrls[0] : this.textFileUrls) : undefined, // 文本文件云存储URL（单个字符串或数组）
         input_type: this.inputType, // 输入类型
         input_url: hasInputUrl ? this.inputUrl : undefined, // 输入URL
         instruction: this.instruction.trim().length > 0 ? this.instruction : undefined, // 指令内容
@@ -523,8 +549,8 @@ export struct PodcastMultiRolePage {
                   }
                   // 如果不是文件类型，清空文件相关字段
                   if (!['文件', '文件+指令'].includes(value)) {
-                    this.textFileUrl = '';
-                    this.textFileName = '';
+                    this.textFileUrls = [];
+                    this.textFileNames = [];
                   }
                 })
                 .width('100%')
@@ -553,7 +579,7 @@ export struct PodcastMultiRolePage {
             }
 
             // 指令输入（当选择包含指令的类型时显示）
-            if (['文字+指令', '公众号+指令', '文件+指令', '文字+英文指令'].includes(this.inputType)) {
+            if (['文字+指令', '公众号+指令', '网页+指令', '文件+指令', '文字+英文指令'].includes(this.inputType)) {
               Column({ space: 12 }) {
                 Text('指令内容（可选）')
                   .fontSize($r('sys.float.Subtitle_L'))
@@ -622,44 +648,60 @@ export struct PodcastMultiRolePage {
             // 文件上传（仅在文件类型时显示）
             if (['文件', '文件+指令'].includes(this.inputType)) {
               Column({ space: 12 }) {
-                Text('播客文件（必需）')
+                Text('播客文件（必需，支持多个）')
                   .fontSize($r('sys.float.Subtitle_L'))
                   .fontColor($r('sys.color.font_primary'))
                   .fontWeight(FontWeight.Bold)
                   .alignSelf(ItemAlign.Start)
 
-                Row({ space: 12 }) {
-                  Column({ space: 4 }) {
-                    Text(this.textFileName || '未选择文件')
+                Column({ space: 8 }) {
+                  // 显示已选择的文件列表
+                  if (this.textFileNames.length > 0) {
+                    ForEach(this.textFileNames, (fileName: string, index: number) => {
+                      Row({ space: 12 }) {
+                        Text(`${index + 1}. ${fileName}`)
+                          .fontSize($r('sys.float.Body_M'))
+                          .fontColor($r('sys.color.font_primary'))
+                          .layoutWeight(1)
+                          .maxLines(1)
+                          .textOverflow({ overflow: TextOverflow.Ellipsis })
+                      }
+                      .width('100%')
+                      .padding(8)
+                      .borderRadius(6)
+                      .backgroundColor($r('sys.color.comp_background_secondary'))
+                    }, (fileName: string, index: number) => `${fileName}_${index}`)
+                  } else {
+                    Text('未选择文件')
                       .fontSize($r('sys.float.Body_M'))
-                      .fontColor(this.textFileUrl ? $r('sys.color.font_primary') : $r('sys.color.font_secondary'))
-                      .maxLines(1)
-
-                    Text('支持.txt、.doc、.docx、.pdf格式，最大50MB')
-                      .fontSize($r('sys.float.Body_S'))
                       .fontColor($r('sys.color.font_secondary'))
+                      .padding(8)
                   }
-                  .layoutWeight(1)
-                  .alignItems(HorizontalAlign.Start)
 
-                  Button(this.textFileUrl ? '已选择' : '选择文件')
+                  Text('支持.txt、.doc、.docx、.pdf格式，每个文件最大50MB，最多选择10个文件')
                     .fontSize($r('sys.float.Body_S'))
-                    .type(ButtonType.Normal)
-                    .borderRadius(10)
-                    .backgroundColor(this.textFileUrl ?
-                      $r('sys.color.icon_emphasize') :
-                      $r('sys.color.comp_background_tertiary'))
-                    .fontColor(this.textFileUrl ?
-                      $r('sys.color.font_on_primary') :
-                      $r('sys.color.font_primary'))
-                    .onClick(() => {
-                      this.selectTextFile();
-                    })
+                    .fontColor($r('sys.color.font_secondary'))
                 }
                 .width('100%')
                 .padding(12)
                 .borderRadius(8)
                 .backgroundColor($r('sys.color.comp_background_tertiary'))
+
+                Button(this.textFileNames.length > 0 ? `已选择${this.textFileNames.length}个文件` : '选择文件')
+                  .fontSize($r('sys.float.Body_M'))
+                  .type(ButtonType.Normal)
+                  .borderRadius(10)
+                  .width('100%')
+                  .height(40)
+                  .backgroundColor(this.textFileNames.length > 0 ?
+                    $r('sys.color.icon_emphasize') :
+                    $r('sys.color.comp_background_tertiary'))
+                  .fontColor(this.textFileNames.length > 0 ?
+                    $r('sys.color.font_on_primary') :
+                    $r('sys.color.font_primary'))
+                  .onClick(() => {
+                    this.selectTextFile();
+                  })
               }
               .width('100%')
               .alignItems(HorizontalAlign.Start)
@@ -735,7 +777,7 @@ export struct PodcastMultiRolePage {
             .width('100%')
             .height(40)
             .enabled(!this.isLoading &&
-              (this.text.trim().length > 0 || this.textFileUrl.length > 0 || this.inputUrl.trim().length > 0) &&
+              (this.text.trim().length > 0 || this.textFileUrls.length > 0 || this.inputUrl.trim().length > 0) &&
               Object.keys(this.roleVoiceUrls).length >= 2)
             .onClick(() => {
               this.generatePodcast();

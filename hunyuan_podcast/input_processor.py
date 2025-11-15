@@ -122,11 +122,28 @@ class InputProcessor:
         try:
             logger.info(f"正在提取网页内容: {url}")
             
+            # 检测特殊网站（需要JavaScript渲染的网站）
+            url_lower = url.lower()
+            special_sites = {
+                'weibo.com': '微博网站需要JavaScript渲染，无法直接提取内容。建议：1) 复制微博文本内容直接输入；2) 使用"文字+指令"类型；3) 或提供微博文章的完整URL（而非用户主页）',
+                'twitter.com': 'Twitter网站需要JavaScript渲染，无法直接提取内容。建议复制推文内容直接输入',
+                'facebook.com': 'Facebook网站需要JavaScript渲染，无法直接提取内容。建议复制内容直接输入',
+                'instagram.com': 'Instagram网站需要JavaScript渲染，无法直接提取内容。建议复制内容直接输入',
+            }
+            
+            site_warning = None
+            for site_key, warning_msg in special_sites.items():
+                if site_key in url_lower:
+                    site_warning = warning_msg
+                    logger.warning(f"检测到特殊网站: {site_key}, 警告: {warning_msg}")
+                    break
+            
             # 设置请求头，模拟浏览器访问
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                'Referer': 'https://www.google.com/'  # 添加Referer，某些网站需要
             }
             
             # 获取网页内容
@@ -134,6 +151,13 @@ class InputProcessor:
             response.raise_for_status()
             
             html = response.text
+            
+            # 检查是否是空页面或仅包含脚本
+            if len(html) < 500:
+                if site_warning:
+                    raise Exception(f"{site_warning}")
+                else:
+                    raise Exception(f"网页内容为空或过短，可能是需要JavaScript渲染的动态网站。建议：1) 复制网页文本内容直接输入；2) 使用"文字+指令"类型")
             
             # 移除脚本和样式
             html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
@@ -190,6 +214,13 @@ class InputProcessor:
             text = re.sub(r'\s+', ' ', text)
             text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)
             text = text.strip()
+            
+            # 如果提取的文本为空或过短，提供更友好的错误信息
+            if len(text) < 10:
+                if site_warning:
+                    raise Exception(f"{site_warning}")
+                else:
+                    raise Exception(f"无法从该网页提取有效文本内容（提取到{len(text)}字符）。可能原因：1) 网页需要JavaScript渲染；2) 网页有反爬虫保护；3) 网页结构特殊。建议：1) 复制网页文本内容直接输入；2) 使用"文字+指令"类型；3) 或提供网页文章的完整URL")
             
             logger.info(f"网页内容提取成功: {len(text)} 字符")
             return text
