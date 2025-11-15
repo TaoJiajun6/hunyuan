@@ -106,6 +106,13 @@ class TextProcessor:
             emotion_match = self.ROLE_WITH_EMOTION_PATTERN.match(line)
             if emotion_match:
                 role_name = emotion_match.group(1).strip()
+                
+                # 过滤掉无效的角色名
+                if not role_name or len(role_name) == 1 and (role_name.isdigit() or role_name.isalpha()):
+                    continue
+                if role_name.isdigit() or role_name.startswith('Content_') or not role_name.isprintable():
+                    continue
+                
                 emotion = emotion_match.group(2).strip()
                 content = emotion_match.group(3).strip()
                 
@@ -128,6 +135,13 @@ class TextProcessor:
             action_match = self.ROLE_WITH_ACTION_PATTERN.match(line)
             if action_match:
                 role_name = action_match.group(1).strip()
+                
+                # 过滤掉无效的角色名
+                if not role_name or len(role_name) == 1 and (role_name.isdigit() or role_name.isalpha()):
+                    continue
+                if role_name.isdigit() or role_name.startswith('Content_') or not role_name.isprintable():
+                    continue
+                
                 action = action_match.group(2).strip()
                 content = action_match.group(3).strip()
                 
@@ -159,6 +173,25 @@ class TextProcessor:
             last_end = 0
             for match in matches:
                 role_name = match.group(1).strip()
+                
+                # 过滤掉无效的角色名（纯数字、单个字符、PDF结构标记等）
+                if not role_name:
+                    continue
+                # 过滤掉单个字符（数字或字母，通常是页码或编号）
+                if len(role_name) == 1 and (role_name.isdigit() or role_name.isalpha()):
+                    continue
+                # 过滤掉纯数字（可能是页码）
+                if role_name.isdigit():
+                    continue
+                # 过滤掉PDF/Word文档结构标记
+                if role_name.startswith('Content_') or role_name.startswith('content_'):
+                    continue
+                if role_name in ['XML', 'xml', 'DOCX', 'docx', 'DOC', 'doc', 'PDF', 'pdf']:
+                    continue
+                # 过滤掉不可打印字符
+                if not role_name.isprintable() or '\x00' in role_name:
+                    continue
+                
                 match_start = match.start()
                 match_end = match.end()
                 
@@ -237,6 +270,23 @@ class TextProcessor:
                 continue
             if len(role) > 64:
                 # 过长的角色名通常不是有效的角色标识，跳过
+                continue
+
+            # 过滤掉纯数字或单个字符的角色（通常是PDF页码、章节编号等）
+            # 例如：[1], [2], [J], [A] 等
+            if len(role) == 1:
+                # 单个字符：如果是纯数字或单个字母，很可能是页码或编号，跳过
+                if role.isdigit() or role.isalpha():
+                    continue
+            
+            # 过滤掉纯数字的角色（例如：[123], [456] 等，可能是页码）
+            if role.isdigit():
+                continue
+            
+            # 过滤掉常见的PDF/Word文档结构标记
+            if role.startswith('Content_') or role.startswith('content_'):
+                continue
+            if role in ['XML', 'xml', 'DOCX', 'docx', 'DOC', 'doc', 'PDF', 'pdf']:
                 continue
 
             # 跳过音效和音乐标记
@@ -369,7 +419,8 @@ class TextProcessor:
    - **重要**：不要使用冒号，直接写对话内容
    - 情绪标注示例：兴奋地、疑惑地、严肃地、开玩笑地、激动地、冷静地、思考状、惊讶地、恍然大悟地等
    - 每行一个角色的发言，角色之间建议有空行间隔，让对话更清晰
-   - 角色名称必须使用：{role_list}
+   - **角色名称必须严格使用**：{role_list}（不能使用其他名称，如数字、字母等）
+   - **禁止使用**：不能使用纯数字（如[1]、[2]）、单个字母（如[J]、[A]）或其他非标准角色名
    - **角色间隔**：角色对话之间要有自然的间隔，每个角色发言后要有适当的停顿，让对话节奏更舒缓
 
 **6. 多音字使用规范**（重要）：
@@ -601,7 +652,8 @@ class TextProcessor:
 **基本格式**：
 - 主要格式：`[角色名]（情绪地）对话内容`（推荐）
 - 重要：不要使用冒号，直接写对话内容
-- 角色名称必须使用：{role_list}
+- **角色名称必须严格使用**：{role_list}
+- **禁止使用**：不能使用纯数字（如[1]、[2]）、单个字母（如[J]、[A]）或其他非标准角色名，只能使用{role_list}中指定的角色名
 
 **对话要求**：
 - 每个角色发言10-12次，总共约{num_characters * 13}段对话（控制在30-40轮以内，确保内容丰富）
@@ -787,7 +839,8 @@ class TextProcessor:
    - **重要**：不要使用冒号，直接写对话内容
    - 情绪标注示例：思考状、严肃地、疑惑地、激动地、冷静地等
    - 每行一个角色的发言，角色之间建议有空行间隔，让对话更清晰
-   - 角色名称必须使用：{role_list}
+   - **角色名称必须严格使用**：{role_list}（不能使用其他名称，如数字、字母等）
+   - **禁止使用**：不能使用纯数字（如[1]、[2]）、单个字母（如[J]、[A]）或其他非标准角色名
    - 每个角色发言6-8次即可，总共约{num_characters * 7}段对话（控制在30-40轮对话以内，确保播客时长约5-6分钟）
    - **角色间隔**：角色对话之间要有自然的间隔，每个角色发言后要有适当的停顿，让对话节奏更舒缓
 
