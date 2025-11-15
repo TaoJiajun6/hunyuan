@@ -1194,8 +1194,8 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 text_generation_start = time.time()
                 generated_text = api_client.generate_text(
                     prompt=prompt,
-                    temperature=0.6,  # 降低温度以加快生成速度
-                    max_tokens=4000  # 增加到4000以支持更长的对话（5-6分钟播客）
+                    temperature=0.7,  # 提高温度以增加对话的自然性和多样性
+                    max_tokens=6000  # 增加到6000以支持更长的对话（8-10分钟播客）
                 )
                 text_generation_time = time.time() - text_generation_start
                 retrieval_timings["对话文本生成"] = text_generation_time
