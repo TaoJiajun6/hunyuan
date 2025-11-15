@@ -51,6 +51,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# 强制使用 HF 引擎（移除 vllm 支持）
+_LLM_ENGINE = "hf" if SOULX_PODCAST_LLM_ENGINE == "vllm" else SOULX_PODCAST_LLM_ENGINE
+if _LLM_ENGINE != SOULX_PODCAST_LLM_ENGINE:
+    logger.info(f"VLLM support removed, using HF engine instead of {SOULX_PODCAST_LLM_ENGINE}")
+
 # ============ 进度管理 ============
 _PROGRESS_DIR = os.path.join(os.getcwd(), 'outputs', 'progress')
 os.makedirs(_PROGRESS_DIR, exist_ok=True)
@@ -143,10 +148,10 @@ def get_generator() -> PodcastGenerator:
     global generator
     if generator is None:
         logger.info("初始化PodcastGenerator...")
-        logger.info(f"模型配置: model_dir={SOULX_PODCAST_MODEL_DIR}, llm_engine={SOULX_PODCAST_LLM_ENGINE}, fp16_flow={SOULX_PODCAST_FP16_FLOW}, device={device}")
+        logger.info(f"模型配置: model_dir={SOULX_PODCAST_MODEL_DIR}, llm_engine={_LLM_ENGINE}, fp16_flow={SOULX_PODCAST_FP16_FLOW}, device={device}")
         generator = PodcastGenerator(
             tts_model_dir=SOULX_PODCAST_MODEL_DIR,
-            llm_engine=SOULX_PODCAST_LLM_ENGINE,
+            llm_engine=_LLM_ENGINE,
             fp16_flow=SOULX_PODCAST_FP16_FLOW,
             device=device
         )
@@ -280,7 +285,7 @@ class MultiRoleRequest(BaseModel):
     instruction: Optional[str] = Field(None, description="指令内容（可选，用于控制播客生成过程，如'生成5分钟播客'、'使用轻松风格'等）")
     role_voice_urls: Optional[Dict[str, str]] = Field(None, description="角色音色映射，云存储URL（如果使用云存储，键为角色名，值为云存储下载URL）")
     role_voices: Optional[Dict[str, str]] = Field(None, description="[已废弃] 角色音色映射，base64编码的音频文件（已废弃，请使用role_voice_urls）")
-    silence_interval: int = Field(500, description="角色切换静音间隔（毫秒），默认500ms以保持对话流畅自然", ge=100, le=800)
+    silence_interval: int = Field(800, description="角色切换静音间隔（毫秒），默认800ms以增加角色之间的间隔，让对话更清晰", ge=200, le=1500)
     podcast_name: Optional[str] = Field(None, description="播客名称（可选）")
     topic: Optional[str] = Field(None, description="本期主题（可选）")
     character_1_name: Optional[str] = Field(None, description="角色1名称（可选）")
@@ -321,7 +326,7 @@ class CharacterRequest(BaseModel):
     characters: List[CharacterInfo] = Field(..., description="角色列表", min_items=2, max_items=4)
     text: str = Field(..., description="文本素材（必需）")
     topic: Optional[str] = Field(None, description="播客主题（可选，主要用于背景音乐选择，如果不提供文本素材则作为对话主题）")
-    silence_interval: int = Field(300, description="角色切换静音间隔（毫秒），默认300ms以保持对话流畅自然", ge=100, le=800)
+    silence_interval: int = Field(800, description="角色切换静音间隔（毫秒），默认800ms以增加角色之间的间隔，让对话更清晰", ge=200, le=1500)
     category: Optional[str] = Field(None, description="播客分类（可选），用于背景音乐选择，如：商业、科技、财经、新闻、影视、音乐、文化艺术、历史、哲学思考、自我成长、职场、学习、教育育儿、情感恋爱、健康养生、旅游、美食、生活方式、娱乐、游戏电竞、体育、时尚美妆、汽车、法律、宠物等")
     background_volume: float = Field(0.3, description="背景音乐音量（0.0-1.0）", ge=0.0, le=1.0)
     job_id: Optional[str] = Field(None, description="可选任务ID，用于前端轮询进度")
@@ -334,7 +339,7 @@ class DeepPodcastRequest(BaseModel):
     role_voices: Optional[Dict[str, str]] = Field(None, description="[已废弃] 角色音色映射，base64编码的音频文件（已废弃，请使用role_voice_urls）")
     num_characters: int = Field(2, description="角色数量", ge=1, le=3)
     depth_level: str = Field("深度", description="深度级别", pattern="^(深度|中等|浅层)$")
-    silence_interval: int = Field(300, description="角色切换静音间隔（毫秒），默认300ms以保持对话流畅自然", ge=100, le=800)
+    silence_interval: int = Field(800, description="角色切换静音间隔（毫秒），默认800ms以增加角色之间的间隔，让对话更清晰", ge=200, le=1500)
     category: Optional[str] = Field(None, description="播客分类（可选），用于背景音乐选择，如：商业、科技、财经、新闻、影视、音乐、文化艺术、历史、哲学思考、自我成长、职场、学习、教育育儿、情感恋爱、健康养生、旅游、美食、生活方式、娱乐、游戏电竞、体育、时尚美妆、汽车、法律、宠物等")
     background_volume: float = Field(0.3, description="背景音乐音量（0.0-1.0）", ge=0.0, le=1.0)
     wait_for_upload: bool = Field(False, description="是否等待上传到云存储完成（可选，默认false）")
@@ -1283,16 +1288,11 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
             # 性能分析
             logger.info("=" * 60)
             logger.info("性能分析：")
-            logger.info(f"  - 使用引擎: {SOULX_PODCAST_LLM_ENGINE}")
+            logger.info(f"  - 使用引擎: {_LLM_ENGINE} (HF引擎)")
             logger.info(f"  - FP16 Flow: {SOULX_PODCAST_FP16_FLOW}")
             
-            # 估算耗时
-            if SOULX_PODCAST_LLM_ENGINE == "vllm":
-                # VLLM引擎：每段约1.5-3秒
-                estimated_time_per_segment = 2.0 if avg_chars_per_dialogue < 40 else 2.5
-            else:
-                # HF引擎：每段约2-5秒
-                estimated_time_per_segment = 3.0 if avg_chars_per_dialogue < 40 else 4.0
+            # 估算耗时（HF引擎：每段约2-5秒）
+            estimated_time_per_segment = 3.0 if avg_chars_per_dialogue < 40 else 4.0
             
             estimated_total_time = dialogue_count * estimated_time_per_segment
             logger.info(f"  - 预计每段耗时: {estimated_time_per_segment:.1f} 秒")
@@ -1326,22 +1326,13 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 logger.info(f"  - 每段平均字数: {avg_chars_per_dialogue:.1f} 字")
                 logger.info(f"  - 生成速度: {avg_chars_per_dialogue/avg_time_per_segment:.1f} 字/秒")
                 
-                # 性能评估
-                if SOULX_PODCAST_LLM_ENGINE == "vllm":
-                    if avg_time_per_segment < 2.0:
-                        logger.info("  ✅ 性能优秀！VLLM加速效果明显")
-                    elif avg_time_per_segment < 3.0:
-                        logger.info("  ✓ 性能良好")
-                    else:
-                        logger.info("  ⚠️ 性能一般，可能的原因：")
-                        logger.info("     - GPU性能不足")
-                        logger.info("     - 对话文本过长")
-                        logger.info("     - 建议检查VLLM配置")
+                # 性能评估（HF引擎）
+                if avg_time_per_segment < 3.0:
+                    logger.info("  ✓ 性能良好（HF引擎）")
                 else:
-                    if avg_time_per_segment < 3.0:
-                        logger.info("  ✓ 性能良好（HF引擎）")
-                    else:
-                        logger.info("  💡 建议使用VLLM引擎加速（设置 SOULX_PODCAST_LLM_ENGINE=vllm）")
+                    logger.info("  性能一般，可能的原因：")
+                    logger.info("     - GPU性能不足")
+                    logger.info("     - 对话文本过长")
             
             # 汇总所有耗时
             logger.info("=" * 60)

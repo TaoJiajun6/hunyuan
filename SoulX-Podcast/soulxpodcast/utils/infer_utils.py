@@ -20,16 +20,11 @@ def initiate_model(seed, model_path, llm_engine, fp16_flow):
         initial_values={"fp16_flow": fp16_flow},
         json_file=f"{model_path}/soulxpodcast_config.json"
     )
+    # 使用 HF 引擎
     if llm_engine == "vllm":
-        try:
-            import vllm
-            # 尝试导入关键模块以确认vllm完整安装
-            from vllm import LLM
-            from vllm import SamplingParams as VllmSamplingParams
-        except ImportError as e:
-            llm_engine = "hf"
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]
-            tqdm.write(f"[{timestamp}] - [WARNING]: No install VLLM, switch to hf engine. Error: {e}")
+        llm_engine = "hf"
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]
+        tqdm.write(f"[{timestamp}] - [INFO]: VLLM support removed, using HF engine.")
 
     config = Config(model=model_path, enforce_eager=True, llm_engine=llm_engine, hf_config=hf_config)
     model = SoulXPodcast(config)

@@ -429,10 +429,6 @@ class CloudStorageMusicClient:
         
         # 尝试第一种格式：GET {storage_url}{bucket}?prefix={path}&list=true
         list_url = f"{self.storage_url}{self.bucket}"
-        params = {}
-        if normalized_path:
-            params['prefix'] = normalized_path
-        params['list'] = 'true'
         
         # 构建请求头
         headers = {
@@ -442,85 +438,122 @@ class CloudStorageMusicClient:
             'Content-Type': 'application/json'
         }
         
-        print(f"正在请求文件列表: {list_url} (path: {normalized_path})")
-        print(f"  查询参数: {params}")
-        print(f"  请求头: productId={'已设置' if self.product_id else '未设置'}, client_id={'已设置' if self.client_id else '未设置'}")
+        # 处理分页：循环获取所有文件
+        all_files_list = []
+        next_marker = None
+        page_num = 1
         
-        # 发送GET请求
-        try:
-            response = requests.get(list_url, params=params, headers=headers, timeout=30)
-            print(f"  HTTP状态码: {response.status_code}")
-            print(f"  响应头 Content-Type: {response.headers.get('Content-Type', 'unknown')}")
-            print(f"  响应内容长度: {len(response.text)} 字符")
+        while True:
+            params = {}
+            if normalized_path:
+                params['prefix'] = normalized_path
+            params['list'] = 'true'
+            # 如果有下一页标记，添加marker参数
+            if next_marker:
+                params['marker'] = next_marker
             
-            # 检查响应状态
-            if response.status_code != 200:
-                print(f"  ⚠️ API请求失败，状态码: {response.status_code}")
-                print(f"  完整响应内容: {response.text[:1000]}")
-                response.raise_for_status()
+            print(f"正在请求文件列表 (第 {page_num} 页): {list_url} (path: {normalized_path})")
+            if next_marker:
+                print(f"  使用 marker: {next_marker[:50]}...")
+            print(f"  查询参数: {params}")
+            print(f"  请求头: productId={'已设置' if self.product_id else '未设置'}, client_id={'已设置' if self.client_id else '未设置'}")
             
-            # 打印响应内容预览（用于调试）
-            print(f"  响应内容预览: {response.text[:500]}")
-        except requests.exceptions.HTTPError as e:
-            print(f"  ✗ API请求HTTP错误: {str(e)}")
-            if hasattr(e, 'response') and e.response is not None:
-                print(f"  响应状态码: {e.response.status_code}")
-                print(f"  响应内容: {e.response.text[:1000]}")
-            # 如果API不支持，尝试使用备选方案：直接构建已知文件的URL
-            print(f"  ⚠️ API列表功能可能不可用，尝试使用备选方案...")
-            raise RuntimeError(f"API列表功能不可用: HTTP {e.response.status_code if hasattr(e, 'response') and e.response else 'unknown'}")
-        except requests.exceptions.RequestException as e:
-            print(f"  ✗ API请求异常: {str(e)}")
-            raise
-        
-        # 解析响应
-        # 注意：AGC API可能返回XML或JSON格式，需要根据实际响应格式解析
-        try:
-            result = response.json()
-            print(f"  ✓ 成功解析JSON响应")
-            print(f"  响应结构: {list(result.keys())}")
-        except json.JSONDecodeError:
-            print(f"  ⚠️ 响应不是JSON格式，尝试解析为XML...")
-            # 如果返回的是XML，尝试解析XML
+            # 发送GET请求
             try:
-                import xml.etree.ElementTree as ET
-                root = ET.fromstring(response.text)
-                # 解析XML格式的响应（根据实际API响应格式调整）
-                files = []
-                for item in root.findall('.//Contents') or root.findall('.//File'):
-                    key_elem = item.find('Key') or item.find('key')
-                    if key_elem is not None:
-                        file_path = key_elem.text
-                        if file_path and file_path.startswith(normalized_path):
-                            files.append(file_path)
-                result = {'files': files, 'directories': []}
-                print(f"  ✓ 成功解析XML响应，找到 {len(files)} 个文件")
-            except Exception as e:
-                print(f"  ✗ 解析响应失败: {str(e)}")
-                print(f"  完整响应内容: {response.text}")
+                response = requests.get(list_url, params=params, headers=headers, timeout=30)
+                print(f"  HTTP状态码: {response.status_code}")
+                print(f"  响应头 Content-Type: {response.headers.get('Content-Type', 'unknown')}")
+                print(f"  响应内容长度: {len(response.text)} 字符")
+                
+                # 检查响应状态
+                if response.status_code != 200:
+                    print(f"  ⚠️ API请求失败，状态码: {response.status_code}")
+                    print(f"  完整响应内容: {response.text[:1000]}")
+                    response.raise_for_status()
+                
+                # 打印响应内容预览（用于调试，仅第一页）
+                if page_num == 1:
+                    print(f"  响应内容预览: {response.text[:500]}")
+            except requests.exceptions.HTTPError as e:
+                print(f"  ✗ API请求HTTP错误: {str(e)}")
+                if hasattr(e, 'response') and e.response is not None:
+                    print(f"  响应状态码: {e.response.status_code}")
+                    print(f"  响应内容: {e.response.text[:1000]}")
+                # 如果API不支持，尝试使用备选方案：直接构建已知文件的URL
+                print(f"  ⚠️ API列表功能可能不可用，尝试使用备选方案...")
+                raise RuntimeError(f"API列表功能不可用: HTTP {e.response.status_code if hasattr(e, 'response') and e.response else 'unknown'}")
+            except requests.exceptions.RequestException as e:
+                print(f"  ✗ API请求异常: {str(e)}")
                 raise
+            
+            # 解析响应
+            # 注意：AGC API可能返回XML或JSON格式，需要根据实际响应格式解析
+            try:
+                result = response.json()
+                if page_num == 1:
+                    print(f"  ✓ 成功解析JSON响应")
+                    print(f"  响应结构: {list(result.keys())}")
+            except json.JSONDecodeError:
+                print(f"  ⚠️ 响应不是JSON格式，尝试解析为XML...")
+                # 如果返回的是XML，尝试解析XML
+                try:
+                    import xml.etree.ElementTree as ET
+                    root = ET.fromstring(response.text)
+                    # 解析XML格式的响应（根据实际API响应格式调整）
+                    files = []
+                    for item in root.findall('.//Contents') or root.findall('.//File'):
+                        key_elem = item.find('Key') or item.find('key')
+                        if key_elem is not None:
+                            file_path = key_elem.text
+                            if file_path and file_path.startswith(normalized_path):
+                                files.append(file_path)
+                    result = {'files': files, 'directories': []}
+                    print(f"  ✓ 成功解析XML响应，找到 {len(files)} 个文件")
+                except Exception as e:
+                    print(f"  ✗ 解析响应失败: {str(e)}")
+                    print(f"  完整响应内容: {response.text}")
+                    raise
+            
+            # 处理文件列表
+            # 注意：HarmonyOS SDK返回的格式是 {files: [], directories: []}
+            # 但REST API可能返回不同的格式，需要适配
+            files_list = result.get('files', [])
+            
+            # 如果files_list为空，尝试其他可能的字段名
+            if not files_list:
+                # 尝试其他可能的字段名
+                for key in ['items', 'objects', 'contents', 'fileList', 'keys']:
+                    if key in result:
+                        files_list = result[key]
+                        if page_num == 1:
+                            print(f"  使用字段 '{key}' 作为文件列表")
+                        break
+            
+            page_file_count = len(files_list) if isinstance(files_list, list) else 0
+            print(f"  第 {page_num} 页文件数量: {page_file_count}")
+            all_files_list.extend(files_list if isinstance(files_list, list) else [])
+            
+            # 检查是否有下一页
+            is_truncated = result.get('isTruncated', False)
+            next_marker = result.get('nextMarker') or result.get('marker')
+            
+            if not is_truncated or not next_marker:
+                # 没有更多页面，退出循环
+                print(f"  ✓ 已获取所有文件，共 {len(all_files_list)} 个文件")
+                break
+            
+            # 继续获取下一页
+            page_num += 1
+            print(f"  → 还有更多文件，继续获取第 {page_num} 页...")
         
-        # 处理文件列表
+        # 处理所有文件列表
         music_files = []
         
         # 支持的音频格式
         audio_extensions = ['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac']
         
-        # 处理文件列表
-        # 注意：HarmonyOS SDK返回的格式是 {files: [], directories: []}
-        # 但REST API可能返回不同的格式，需要适配
-        files_list = result.get('files', [])
-        
-        # 如果files_list为空，尝试其他可能的字段名
-        if not files_list:
-            # 尝试其他可能的字段名
-            for key in ['items', 'objects', 'contents', 'fileList', 'keys']:
-                if key in result:
-                    files_list = result[key]
-                    print(f"  使用字段 '{key}' 作为文件列表")
-                    break
-        
-        print(f"  原始文件列表数量: {len(files_list) if isinstance(files_list, list) else 0}")
+        files_list = all_files_list
+        print(f"  原始文件列表总数: {len(files_list)}")
         
         if isinstance(files_list, list):
             for file_item in files_list:
@@ -543,17 +576,12 @@ class CloudStorageMusicClient:
                 # 规范化路径（移除开头的/）
                 file_path = file_path.lstrip('/')
                 
-                # 如果 file_path 不包含 normalized_path 前缀，可能是相对路径，需要补充
-                # 例如：normalized_path = "music/technology/", file_path = "filename.mp3"
-                # 应该转换为：file_path = "music/technology/filename.mp3"
+                # 检查是否在music目录下
                 if normalized_path:
+                    # normalized_path 已经是 music/ 格式（没有开头的/）
                     if not file_path.startswith(normalized_path):
-                        # 如果路径是相对于 normalized_path 的，补充完整路径
-                        if not file_path.startswith('music/'):
-                            # 确保路径以 music/ 开头
-                            file_path = f"{normalized_path.rstrip('/')}/{file_path.lstrip('/')}"
-                        else:
-                            # 如果已经以 music/ 开头但不匹配 normalized_path，跳过
+                        # 如果文件路径是 music/filename.mp3 格式，需要检查
+                        if not file_path.startswith(normalized_path.lstrip('/')):
                             continue
                 
                 # 检查是否是音频文件
@@ -612,14 +640,6 @@ class CloudStorageMusicClient:
                         print(f"  正在获取子目录: {subdir_path}")
                         sub_files = sub_client._list_files_via_api()
                         print(f"  ✓ 从子目录 {subdir_path} 获取到 {len(sub_files)} 个音乐文件")
-                        # 确保子目录文件的 cloud_path 包含完整路径
-                        for sub_file in sub_files:
-                            # 如果 cloud_path 不包含完整路径，补充完整路径
-                            cloud_path = sub_file.get('cloud_path', '')
-                            if cloud_path and not cloud_path.startswith('music/'):
-                                # 如果路径是相对于子目录的，补充完整路径
-                                if not cloud_path.startswith(subdir_path.rstrip('/')):
-                                    sub_file['cloud_path'] = f"{subdir_path.rstrip('/')}/{cloud_path.lstrip('/')}"
                         music_files.extend(sub_files)
                     except Exception as e:
                         print(f"  ✗ 获取子目录 {subdir_path} 失败: {str(e)}")

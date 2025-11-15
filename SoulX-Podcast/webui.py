@@ -610,16 +610,11 @@ if __name__ == "__main__":
             json_file=f"{args.model_path}/soulxpodcast_config.json")
     
     llm_engine = args.llm_engine
+    # 使用 HF 引擎
     if llm_engine == "vllm":
-        try:
-            import vllm
-            # 尝试导入关键模块以确认vllm完整安装
-            from vllm import LLM
-            from vllm import SamplingParams as VllmSamplingParams
-        except ImportError as e:
-            llm_engine = "hf"
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]
-            tqdm.write(f"[{timestamp}] - [WARNING]: No install VLLM, switch to hf engine. Error: {e}")
+        llm_engine = "hf"
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]
+        tqdm.write(f"[{timestamp}] - [INFO]: VLLM support removed, using HF engine.")
     config = Config(model=args.model_path, enforce_eager=True, llm_engine=llm_engine,
                     hf_config=hf_config)
 

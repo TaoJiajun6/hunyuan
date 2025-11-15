@@ -404,7 +404,7 @@ export struct PodcastMultiRolePage {
       // 设置标题
       songItem.title = audioFile.fileName.replace(/\.[^/.]+$/, '');
       songItem.singer = '多角色互动播客';
-      
+
       // 保存对话内容到 SongItem
       if (this.savedScript && this.savedScript.trim().length > 0) {
         songItem.script = this.savedScript;
