@@ -190,10 +190,40 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
             logger.info(f"上传尝试 {attempt}: 连接超时={connect_timeout}秒, 读取超时=无限制 (文件大小: {file_size_mb:.2f} MB)")
             
             # 优化上传：使用Session和连接池（每次重试创建新的session）
+            # 在socket层面禁用超时，确保写入操作不会中断
+            import socket
+            from urllib3.util.connection import create_connection
+            
+            # 保存原始的create_connection函数
+            _original_create_connection = create_connection
+            
+            def create_connection_without_timeout(address, *args, **kwargs):
+                """创建没有超时的socket连接，并优化TCP参数以提高上传速度"""
+                sock = _original_create_connection(address, *args, **kwargs)
+                try:
+                    # 禁用socket超时
+                    sock.settimeout(None)
+                    # 优化TCP参数以提高上传速度
+                    # TCP_NODELAY: 禁用Nagle算法，减少延迟，提高小数据包传输速度
+                    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                    # 增大发送缓冲区，提高大文件上传速度
+                    # 默认通常是64KB-256KB，我们设置为1MB
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1024 * 1024)
+                    # 增大接收缓冲区
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)
+                except Exception as e:
+                    logger.debug(f"设置socket参数失败（不影响功能）: {e}")
+                return sock
+            
+            # 临时替换urllib3的create_connection函数
+            import urllib3.util.connection
+            urllib3.util.connection.create_connection = create_connection_without_timeout
+            
             session = requests.Session()
+            # 优化连接池设置以提高性能
             adapter = requests.adapters.HTTPAdapter(
-                pool_connections=10,
-                pool_maxsize=20,
+                pool_connections=20,  # 增加连接池大小
+                pool_maxsize=50,  # 增加最大连接数
                 max_retries=0  # 禁用urllib3的重试，我们自己处理
             )
             session.mount('http://', adapter)
@@ -243,13 +273,20 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
                             if self._file:
                                 self._file.close()
                 
-                # 根据文件大小选择chunk_size
-                if file_size_mb > 20:
-                    chunk_size = 1024 * 1024  # 1MB chunks，超大文件
+                # 优化chunk_size以提高上传速度
+                # 在保证不超时的前提下，使用更大的chunk可以减少网络往返次数，提高速度
+                # 由于已经禁用了socket超时，可以使用更大的chunk
+                # 针对1MB以上的文件（常见情况），使用更大的chunk_size以提高速度
+                if file_size_mb > 50:
+                    chunk_size = 4 * 1024 * 1024  # 4MB chunks，超大文件（最大化速度）
+                elif file_size_mb > 20:
+                    chunk_size = 2 * 1024 * 1024  # 2MB chunks，大文件
                 elif file_size_mb > 5:
-                    chunk_size = 512 * 1024  # 512KB chunks，中等文件
+                    chunk_size = 1024 * 1024  # 1MB chunks，中等文件
+                elif file_size_mb > 1:
+                    chunk_size = 512 * 1024  # 512KB chunks，1MB以上的文件
                 else:
-                    chunk_size = 256 * 1024  # 256KB chunks，小文件
+                    chunk_size = 256 * 1024  # 256KB chunks，小于1MB的小文件
                 
                 logger.info(f"流式上传模式（文件大小: {file_size_mb:.2f} MB, chunk_size: {chunk_size / 1024:.0f} KB）")
                 
@@ -264,6 +301,8 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
                 )
             finally:
                 session.close()
+                # 恢复原始的create_connection函数（在session关闭后）
+                urllib3.util.connection.create_connection = _original_create_connection
             
             upload_time = time.time() - upload_start
             upload_speed = (file_size / (1024 * 1024)) / upload_time if upload_time > 0 else 0

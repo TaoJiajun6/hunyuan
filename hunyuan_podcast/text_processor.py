@@ -14,6 +14,15 @@ class TextProcessor:
     # 支持中文、英文、数字、下划线等字符
     ROLE_PATTERN = re.compile(r'\[([^\]]+)\]')
     
+    # 数字转中文的映射
+    DIGIT_TO_CHINESE = {
+        '0': '零', '1': '一', '2': '二', '3': '三', '4': '四',
+        '5': '五', '6': '六', '7': '七', '8': '八', '9': '九'
+    }
+    
+    # 单位映射
+    UNITS = ['', '十', '百', '千', '万', '十万', '百万', '千万', '亿']
+    
     # 带情绪标注的角色标记：匹配 [角色名]（情绪地）：内容 或 [角色名]（情绪地）内容
     # 也匹配动作描述：[角色名]（思考状）：内容 或 [角色名]（点头）：内容
     ROLE_WITH_EMOTION_PATTERN = re.compile(r'\[([^\]]+)\]\s*（([^）]+)地）\s*[:：]?\s*(.*)')
@@ -25,18 +34,327 @@ class TextProcessor:
         """初始化文本处理器"""
         pass
     
+    def number_to_chinese(self, num_str: str) -> str:
+        """
+        将数字字符串转换为中文读音，确保数字读完整、正确
+        
+        Args:
+            num_str: 数字字符串，如 "123", "2024", "3.14" 等
+        
+        Returns:
+            中文读音，如 "一百二十三", "二零二四", "三点一四" 等
+        """
+        if not num_str:
+            return num_str
+        
+        # 处理小数
+        if '.' in num_str:
+            parts = num_str.split('.')
+            integer_part = self._number_to_chinese_integer(parts[0])
+            decimal_part = ''.join([self.DIGIT_TO_CHINESE.get(d, d) for d in parts[1]])
+            return f"{integer_part}点{decimal_part}"
+        
+        # 处理整数
+        return self._number_to_chinese_integer(num_str)
+    
+    def _number_to_chinese_integer(self, num_str: str) -> str:
+        """将整数转换为中文读音"""
+        if not num_str or not num_str.lstrip('-').isdigit():
+            return num_str
+        
+        is_negative = num_str.startswith('-')
+        num_str = num_str.lstrip('-')
+        num = int(num_str)
+        
+        # 0-9 直接转换
+        if num < 10:
+            result = self.DIGIT_TO_CHINESE[str(num)]
+            return '负' + result if is_negative else result
+        
+        # 10-99
+        if num < 100:
+            tens = num // 10
+            ones = num % 10
+            if tens == 1:
+                result = '十'
+            else:
+                result = self.DIGIT_TO_CHINESE[str(tens)] + '十'
+            if ones > 0:
+                result += self.DIGIT_TO_CHINESE[str(ones)]
+            return ('负' + result) if is_negative else result
+        
+        # 100-999
+        if num < 1000:
+            hundreds = num // 100
+            remainder = num % 100
+            result = self.DIGIT_TO_CHINESE[str(hundreds)] + '百'
+            if remainder > 0:
+                if remainder < 10:
+                    result += '零' + self.DIGIT_TO_CHINESE[str(remainder)]
+                else:
+                    result += self._number_to_chinese_integer(str(remainder))
+            return ('负' + result) if is_negative else result
+        
+        # 1000-9999
+        if num < 10000:
+            thousands = num // 1000
+            remainder = num % 1000
+            result = self.DIGIT_TO_CHINESE[str(thousands)] + '千'
+            if remainder > 0:
+                if remainder < 100:
+                    result += '零' + self._number_to_chinese_integer(str(remainder))
+                else:
+                    result += self._number_to_chinese_integer(str(remainder))
+            return ('负' + result) if is_negative else result
+        
+        # 10000及以上，使用万为单位
+        if num < 100000000:  # 小于1亿
+            wan = num // 10000
+            remainder = num % 10000
+            result = self._number_to_chinese_integer(str(wan)) + '万'
+            if remainder > 0:
+                if remainder < 1000:
+                    result += '零' + self._number_to_chinese_integer(str(remainder))
+                else:
+                    result += self._number_to_chinese_integer(str(remainder))
+            return ('负' + result) if is_negative else result
+        
+        # 1亿及以上
+        yi = num // 100000000
+        remainder = num % 100000000
+        result = self._number_to_chinese_integer(str(yi)) + '亿'
+        if remainder > 0:
+            if remainder < 10000000:
+                result += '零' + self._number_to_chinese_integer(str(remainder))
+            else:
+                result += self._number_to_chinese_integer(str(remainder))
+        return ('负' + result) if is_negative else result
+    
+    def convert_date_to_chinese(self, date_str: str) -> str:
+        """
+        将日期字符串转换为中文读音
+        
+        Args:
+            date_str: 日期字符串，如 "2024-11-15", "2024/11/15", "2024年11月15日" 等
+        
+        Returns:
+            中文读音，如 "二零二四年十一月十五日"
+        """
+        if not date_str:
+            return date_str
+        
+        # 处理标准日期格式：YYYY-MM-DD 或 YYYY/MM/DD
+        date_pattern = r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})'
+        match = re.match(date_pattern, date_str)
+        if match:
+            year, month, day = match.groups()
+            year_chinese = ''.join([self.DIGIT_TO_CHINESE.get(d, d) for d in year])
+            month_chinese = self.number_to_chinese(month)
+            day_chinese = self.number_to_chinese(day)
+            return f"{year_chinese}年{month_chinese}月{day_chinese}日"
+        
+        # 处理中文日期格式：2024年11月15日
+        date_pattern_cn = r'(\d{4})年(\d{1,2})月(\d{1,2})日'
+        match = re.match(date_pattern_cn, date_str)
+        if match:
+            year, month, day = match.groups()
+            year_chinese = ''.join([self.DIGIT_TO_CHINESE.get(d, d) for d in year])
+            month_chinese = self.number_to_chinese(month)
+            day_chinese = self.number_to_chinese(day)
+            return f"{year_chinese}年{month_chinese}月{day_chinese}日"
+        
+        return date_str
+    
+    def convert_price_to_chinese(self, price_str: str) -> str:
+        """
+        将价格字符串转换为中文读音
+        
+        Args:
+            price_str: 价格字符串，如 "100元", "¥100", "$100", "100.50元" 等
+        
+        Returns:
+            中文读音，如 "一百元", "一百点五零元" 等
+        """
+        if not price_str:
+            return price_str
+        
+        # 提取数字部分
+        # 匹配：¥100、$100、100元、100.50元、100块等
+        price_match = re.match(r'[¥$]?(\d+\.?\d*)[元块]?', price_str)
+        if price_match:
+            num_str = price_match.group(1)
+            chinese_num = self.number_to_chinese(num_str)
+            # 判断货币单位
+            if '¥' in price_str or '元' in price_str or '块' in price_str:
+                return f"{chinese_num}元"
+            elif '$' in price_str:
+                return f"{chinese_num}美元"
+            else:
+                return f"{chinese_num}元"
+        
+        return price_str
+    
+    def convert_tech_terms_to_chinese(self, text: str) -> str:
+        """
+        将技术术语中的数字转换为中文读音
+        如：USB2.0 -> USB二点零, USB3.0 -> USB三点零, HDMI2.1 -> HDMI二点一, WiFi6 -> WiFi六, 5G -> 五G
+        
+        Args:
+            text: 原始文本
+        
+        Returns:
+            转换后的文本，技术术语中的数字已转换为中文读音
+        """
+        if not text:
+            return text
+        
+        # 匹配技术术语格式：字母+数字+点+数字（如 USB2.0, HDMI2.1）
+        def replace_tech_term_with_dot(match):
+            letters = match.group(1)  # 字母部分（如 USB, HDMI）
+            num1 = match.group(2)  # 第一个数字（如 2, 3）
+            num2 = match.group(3)  # 第二个数字（小数点后，如 0, 1）
+            
+            num1_chinese = self.number_to_chinese(num1)
+            # 小数点后的数字逐位转换
+            num2_chinese = ''.join([self.DIGIT_TO_CHINESE.get(d, d) for d in num2])
+            
+            return f"{letters}{num1_chinese}点{num2_chinese}"
+        
+        # 匹配：字母+数字+点+数字（如 USB2.0, HDMI2.1, USB3.0）
+        text = re.sub(r'([A-Za-z]+)(\d+)\.(\d+)', replace_tech_term_with_dot, text)
+        
+        # 匹配：字母+数字（如 WiFi6, 5G, 4K, WiFi7）
+        # 只匹配常见的技术术语格式，避免误匹配
+        def replace_tech_term_letters_num(match):
+            full_match = match.group(0)
+            # 分离字母和数字部分
+            letters_match = re.match(r'([A-Za-z]+)(\d+)', full_match)
+            if letters_match:
+                letters = letters_match.group(1)
+                num = letters_match.group(2)
+                num_chinese = self.number_to_chinese(num)
+                return f"{letters}{num_chinese}"
+            return full_match
+        
+        def replace_tech_term_num_letter(match):
+            full_match = match.group(0)
+            # 分离数字和字母部分
+            num_letter_match = re.match(r'(\d+)([A-Z])', full_match)
+            if num_letter_match:
+                num = num_letter_match.group(1)
+                letter = num_letter_match.group(2)
+                num_chinese = self.number_to_chinese(num)
+                return f"{num_chinese}{letter}"
+            return full_match
+        
+        # 匹配：字母+数字（不跟点或数字），如 WiFi6, HDMI2
+        # 限制：字母部分至少2个字符，确保是技术术语
+        text = re.sub(r'([A-Za-z]{2,}\d+)(?![\.\d])', replace_tech_term_letters_num, text)
+        # 匹配：数字+字母（如 5G, 4K）
+        text = re.sub(r'(\d+[A-Z])(?![\.\d])', replace_tech_term_num_letter, text)
+        
+        return text
+    
+    def convert_numbers_to_chinese(self, text: str) -> str:
+        """
+        将文本中的数字转换为中文读音，包括日期、价格、百分比、技术术语等
+        
+        Args:
+            text: 原始文本
+        
+        Returns:
+            转换后的文本，数字已转换为中文读音
+        """
+        if not text:
+            return text
+        
+        # 0. 先处理技术术语（如 USB2.0, USB3.0, WiFi6, 5G 等）
+        text = self.convert_tech_terms_to_chinese(text)
+        
+        # 1. 处理日期格式（避免被普通数字匹配）
+        # 匹配：2024-11-15、2024/11/15、2024年11月15日
+        def replace_date(match):
+            date_str = match.group(0)
+            return self.convert_date_to_chinese(date_str)
+        
+        # 匹配标准日期格式
+        text = re.sub(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}', replace_date, text)
+        # 匹配中文日期格式（如果已经是中文格式，确保数字部分转换）
+        text = re.sub(r'(\d{4})年(\d{1,2})月(\d{1,2})日', 
+                     lambda m: f"{''.join([self.DIGIT_TO_CHINESE.get(d, d) for d in m.group(1)])}年{self.number_to_chinese(m.group(2))}月{self.number_to_chinese(m.group(3))}日", 
+                     text)
+        
+        # 2. 处理价格格式（在日期之后，避免冲突）
+        # 匹配：¥100、$100、100元、100.50元、100块、100.99元等
+        def replace_price(match):
+            price_str = match.group(0)
+            return self.convert_price_to_chinese(price_str)
+        
+        # 匹配价格：支持 ¥、$ 符号在前，或 元、块 在后
+        text = re.sub(r'[¥$]\d+\.?\d*', replace_price, text)  # ¥100, $100
+        text = re.sub(r'\d+\.?\d*[元块]', replace_price, text)  # 100元, 100.50块
+        
+        # 3. 处理百分比：如 50% -> 百分之五十
+        def replace_percent(match):
+            num_str = match.group(1)
+            chinese_num = self.number_to_chinese(num_str)
+            return f"百分之{chinese_num}"
+        
+        text = re.sub(r'(\d+\.?\d*)%', replace_percent, text)
+        
+        # 4. 处理普通数字（整数和小数，包括负数）
+        # 但排除已经在日期、价格、百分比中的数字
+        def replace_number(match):
+            num_str = match.group(0)
+            start_pos = match.start()
+            end_pos = match.end()
+            
+            # 跳过角色标记中的数字（如 [角色1]）
+            if start_pos > 0 and text[start_pos - 1] == '[':
+                return num_str
+            if end_pos < len(text) and text[end_pos] == ']':
+                return num_str
+            
+            # 检查是否已经在日期、价格、百分比、技术术语中（通过检查前后字符）
+            # 如果前后有年、月、日、元、块、%、字母等，说明已经被处理过，跳过
+            if start_pos > 0:
+                prev_char = text[start_pos - 1]
+                # 如果前一个字符是字母，可能是技术术语（如 USB2.0），跳过
+                if prev_char.isalpha():
+                    return num_str
+                if prev_char in '年月日¥$元块%':
+                    return num_str
+            if end_pos < len(text):
+                next_char = text[end_pos]
+                # 如果下一个字符是字母或点，可能是技术术语，跳过
+                if next_char.isalpha() or next_char == '.':
+                    return num_str
+                if next_char in '年月日¥$元块%':
+                    return num_str
+            
+            return self.number_to_chinese(num_str)
+        
+        # 匹配整数和小数（包括负数），但排除已经在其他格式中的数字
+        text = re.sub(r'-?\d+\.?\d*', replace_number, text)
+        
+        return text
+    
     def clean_dialogue_content(self, content: str) -> str:
         """
         清理对话内容，移除可能误包含的情绪描述词和动作描述
+        并将数字转换为中文读音，确保数字读完整、正确
         
         Args:
             content: 原始对话内容
         
         Returns:
-            清理后的对话内容
+            清理后的对话内容，数字已转换为中文读音
         """
         if not content:
             return content
+        
+        # 先将数字转换为中文读音
+        content = self.convert_numbers_to_chinese(content)
         
         # 移除内容中的音效标注
         # 音效标注格式：[音效：xxx]
@@ -844,6 +1162,22 @@ class TextProcessor:
         
         req = depth_requirements.get(depth_level, depth_requirements["中等"])
         
+        # 处理 dialogue_count 中的表达式，先计算值再格式化
+        dialogue_count_text = req["dialogue_count"]
+        # 替换表达式 {num_characters * 11} 等为实际计算值
+        import re
+        def replace_expression(match):
+            expr = match.group(1)  # 获取表达式部分，如 "num_characters * 11"
+            try:
+                # 在安全的环境中计算表达式
+                result = eval(expr, {"num_characters": num_characters})
+                return str(result)
+            except:
+                return match.group(0)  # 如果计算失败，返回原字符串
+        
+        # 匹配 {num_characters * 11} 这样的表达式
+        dialogue_count_text = re.sub(r'\{([^}]+)\}', replace_expression, dialogue_count_text)
+        
         prompt = f"""【系统指令：深度内容架构师】
 
 你是一档知名深度访谈播客的主编和首席研究员。请围绕用户指定的主题，生成一份有深度、有见地、能引发听众长期思考的播客脚本。
@@ -902,7 +1236,7 @@ class TextProcessor:
    - 每行一个角色的发言，角色之间建议有空行间隔，让对话更清晰
    - **角色名称必须严格使用**：{role_list}（不能使用其他名称，如数字、字母等）
    - **禁止使用**：不能使用纯数字（如[1]、[2]）、单个字母（如[J]、[A]）或其他非标准角色名
-   - {req["dialogue_count"].format(num_characters=num_characters)}，确保播客时长约{req["duration"]}
+   - {dialogue_count_text}，确保播客时长约{req["duration"]}
    - {req["content_length"]}
    - **角色间隔**：角色对话之间要有自然的间隔，每个角色发言后要有适当的停顿，让对话节奏更舒缓
 
