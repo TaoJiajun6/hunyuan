@@ -158,7 +158,30 @@ export struct MusicInfo {
     }
     .margin({ top: $r('app.float.music_info_margin_top') })
 
-    Blank()
+    // 显示对话内容（如果有）
+    if (this.musicModel.currentSong?.script && this.musicModel.currentSong.script.trim().length > 0) {
+      Scroll() {
+        Text(this.musicModel.currentSong.script)
+          .fontSize($r('app.float.font_fourteen'))
+          .fontColor(Color.White)
+          .opacity(0.86)
+          .lineHeight(24)
+          .textAlign(TextAlign.Start)
+          .padding({
+            left: 16,
+            right: 16,
+            top: 16,
+            bottom: 16
+          })
+      }
+      .layoutWeight(1)
+      .width('100%')
+      .margin({ top: 16 })
+      .borderRadius(12)
+      .backgroundColor('#11ffffff')
+    } else {
+      Blank()
+    }
   }
 
   @Builder

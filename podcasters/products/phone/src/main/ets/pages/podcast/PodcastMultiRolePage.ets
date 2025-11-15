@@ -404,6 +404,12 @@ export struct PodcastMultiRolePage {
       // 设置标题
       songItem.title = audioFile.fileName.replace(/\.[^/.]+$/, '');
       songItem.singer = '多角色互动播客';
+      
+      // 保存对话内容到 SongItem
+      if (this.savedScript && this.savedScript.trim().length > 0) {
+        songItem.script = this.savedScript;
+        Logger.info('PodcastMultiRolePage', `已保存对话内容到 SongItem，长度: ${this.savedScript.length} 字符`);
+      }
 
       // 播放音频并显示播放页面
       MediaService.getInstance().playSong(songItem, true);
