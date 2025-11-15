@@ -414,22 +414,31 @@ export struct PodcastCharacterPage {
    * 生成播客
    */
   async generatePodcast(): Promise<void> {
-    // 检查所有角色是否都有音色URL（必须使用云存储）
-    const hasAllVoices = this.characters.every(char => char.voice_url);
-    if (!hasAllVoices) {
+    // 检查文本素材输入
+    const hasText = this.text.trim().length > 0;
+    if (!hasText) {
       promptAction.showToast({
-        message: '请为所有角色选择音色文件',
+        message: '请输入文本素材',
         duration: 2000
       });
       return;
     }
 
-    // 检查文本素材输入
-    const hasText = this.text.trim().length > 0;
-
-    if (!hasText) {
+    // 检查所有角色是否都有名称
+    const hasAllNames = this.characters.every(char => char.name && char.name.trim().length > 0);
+    if (!hasAllNames) {
       promptAction.showToast({
-        message: '请输入文本素材',
+        message: '请为所有角色填写名称',
+        duration: 2000
+      });
+      return;
+    }
+
+    // 检查所有角色是否都有音色URL（必须使用云存储）
+    const hasAllVoices = this.characters.every(char => char.voice_url);
+    if (!hasAllVoices) {
+      promptAction.showToast({
+        message: '请为所有角色选择音色文件',
         duration: 2000
       });
       return;
@@ -814,7 +823,7 @@ export struct PodcastCharacterPage {
             .height(40)
             .enabled(!this.isLoading &&
               this.text.trim().length > 0 &&
-              this.characters.every(char => char.voice_url))
+              this.characters.every(char => char.name && char.name.trim().length > 0 && char.voice_url))
             .onClick(() => {
               this.generatePodcast();
             })

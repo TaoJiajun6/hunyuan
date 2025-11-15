@@ -119,7 +119,7 @@ def get_agc_token(domain: str, client_id: str, client_secret: str, timeout: int 
 
 
 def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_path: str,
-                       client_id: str, product_id: str, token: str, timeout: int = 120) -> requests.Response:
+                       client_id: str, product_id: str, token: str, timeout: int = 300) -> requests.Response:
     """将本地文件通过 PUT 上传到 AGC 存储
 
     Args:
@@ -152,7 +152,9 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
         'client_id': client_id,
         'Authorization': f'Bearer {token}',
         'X-Agc-File-Size': str(file_size),
-        'Content-Type': content_type
+        'Content-Type': content_type,
+        'Connection': 'keep-alive',  # 保持连接，提高上传速度
+        'Cache-Control': 'no-cache'  # 禁用缓存
     }
     # 注意：Java参考代码中没有X-Agc-Content-Type，只有Content-Type
 
@@ -164,9 +166,26 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
     last_exc = None
     retries = 3
     backoff_factor = 0.5
+    current_timeout = timeout  # 当前使用的超时时间，重试时会增加
+    
+    # 根据文件大小动态调整超时时间（在循环外计算，避免重复计算）
+    file_size_mb = file_size / (1024 * 1024)
+    # 对于大文件（几MB到几十MB），假设最小上传速度为0.2 MB/s（比0.1 MB/s更合理）
+    # 这样可以减少不必要的超时时间，同时仍为慢速网络预留足够时间
+    min_upload_speed_mbps = 0.2  # 最小上传速度（MB/s），适合大文件
+    # 计算所需时间：文件大小(MB) / 最小速度(MB/s) + 缓冲时间
+    calculated_timeout = int((file_size_mb / min_upload_speed_mbps) + 120)  # 至少120秒缓冲
+    # 使用传入的timeout和计算出的timeout中的较大值，但不超过1800秒（30分钟）
+    base_read_timeout = max(timeout, min(calculated_timeout, 1800))
+    connect_timeout = 15  # 连接超时15秒
     
     for attempt in range(1, retries + 1):
         try:
+            # 每次重试时增加超时时间
+            read_timeout = int(base_read_timeout * (1 + (attempt - 1) * 0.5))  # 每次重试增加50%
+            
+            logger.info(f"上传尝试 {attempt}/{retries}: 连接超时={connect_timeout}秒, 读取超时={read_timeout}秒 (文件大小: {file_size_mb:.2f} MB)")
+            
             # 优化上传：使用Session和连接池（每次重试创建新的session）
             session = requests.Session()
             adapter = requests.adapters.HTTPAdapter(
@@ -178,22 +197,44 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
             session.mount('https://', adapter)
             
             try:
-                # 优化超时设置：连接超时10秒，读取超时根据文件大小动态调整
-                connect_timeout = 10
-                read_timeout = timeout
+                # 根据文件大小动态调整chunk_size：大文件使用更大的chunk以提高上传速度
+                # 对于几MB到几十MB的文件，使用更大的chunk_size可以显著提高上传速度
+                if file_size_mb > 20:
+                    chunk_size = 2 * 1024 * 1024  # 2MB chunks，超大文件（>20MB）
+                elif file_size_mb > 10:
+                    chunk_size = 1024 * 1024  # 1MB chunks，大文件（10-20MB）
+                elif file_size_mb > 5:
+                    chunk_size = 512 * 1024  # 512KB chunks，中等文件（5-10MB）
+                else:
+                    chunk_size = 256 * 1024  # 256KB chunks，小文件（<5MB）
                 
-                # 流式上传（使用更大的chunk_size以提高上传速度）
-                chunk_size = 256 * 1024  # 256KB chunks，提高上传速度
+                logger.info(f"使用chunk_size: {chunk_size / 1024:.0f} KB (文件大小: {file_size_mb:.2f} MB)")
                 upload_start = time.time()
                 
                 def file_stream():
                     """生成器函数，用于流式读取文件"""
-                    with open(file_path, 'rb') as f:
-                        while True:
-                            chunk = f.read(chunk_size)
-                            if not chunk:
-                                break
-                            yield chunk
+                    try:
+                        with open(file_path, 'rb') as f:
+                            bytes_sent = 0
+                            last_log_time = upload_start
+                            while True:
+                                chunk = f.read(chunk_size)
+                                if not chunk:
+                                    break
+                                bytes_sent += len(chunk)
+                                # 每2秒记录一次进度（避免日志过多，同时提供实时反馈）
+                                current_time = time.time()
+                                if current_time - last_log_time >= 2.0:
+                                    elapsed = current_time - upload_start
+                                    if elapsed > 0:
+                                        speed = (bytes_sent / (1024 * 1024)) / elapsed
+                                        progress = (bytes_sent / file_size) * 100
+                                        logger.info(f"上传进度: {progress:.1f}% ({bytes_sent / (1024 * 1024):.2f}/{file_size_mb:.2f} MB), 速度: {speed:.2f} MB/s")
+                                    last_log_time = current_time
+                                yield chunk
+                    except Exception as e:
+                        logger.error(f"读取文件流失败: {str(e)}")
+                        raise
                 
                 resp = session.put(
                     url, 
@@ -215,17 +256,31 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
             resp.raise_for_status()
             logger.info(f"上传成功！")
             return resp
+        except requests.exceptions.Timeout as e:
+            last_exc = e
+            logger.error(f"上传超时 (attempt {attempt}/{retries}): {str(e)}")
+            logger.error(f"  文件大小: {file_size_mb:.2f} MB")
+            logger.error(f"  超时设置: 连接={connect_timeout}秒, 读取={read_timeout}秒")
+            if attempt < retries:
+                wait = backoff_factor * (2 ** (attempt - 1))
+                logger.warning(f"  {wait}s 后重试（下次将使用更长的超时时间）...")
+                time.sleep(wait)
+            else:
+                raise AGCUploadError(f"文件上传超时（已重试{retries}次）: {str(e)}")
         except RequestException as e:
             last_exc = e
             if hasattr(e, 'response') and e.response is not None:
-                logger.error(f"上传失败 (attempt {attempt}): HTTP {e.response.status_code}")
+                logger.error(f"上传失败 (attempt {attempt}/{retries}): HTTP {e.response.status_code}")
                 logger.error(f"  响应头: {dict(e.response.headers)}")
                 logger.error(f"  响应内容: {e.response.text[:500] if e.response.text else '(empty)'}")
             else:
-                logger.error(f"上传失败 (attempt {attempt}): {e}")
-            wait = backoff_factor * (2 ** (attempt - 1))
-            logger.warning(f"  {wait}s 后重试...")
-            time.sleep(wait)
+                logger.error(f"上传失败 (attempt {attempt}/{retries}): {e}")
+            if attempt < retries:
+                wait = backoff_factor * (2 ** (attempt - 1))
+                logger.warning(f"  {wait}s 后重试...")
+                time.sleep(wait)
+            else:
+                raise AGCUploadError(f"文件上传失败（已重试{retries}次）: {str(e)}")
     raise AGCUploadError(f"文件上传失败: {last_exc}")
 
 

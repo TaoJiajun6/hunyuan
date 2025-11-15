@@ -514,9 +514,21 @@ def download_audio_from_url(url: str, suffix: str = ".wav", timeout: int = 120) 
             # 保存到临时文件
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
             
-            # 流式下载（使用更大的chunk_size以提高下载速度）
+            # 流式下载（根据文件大小动态调整chunk_size以提高下载速度）
             downloaded_size = 0
-            chunk_size = 256 * 1024  # 增大到256KB chunks，提高下载速度
+            # 根据Content-Length动态调整chunk_size
+            if content_length:
+                file_size_mb = int(content_length) / (1024 * 1024)
+                if file_size_mb > 20:
+                    chunk_size = 2 * 1024 * 1024  # 2MB chunks，超大文件
+                elif file_size_mb > 10:
+                    chunk_size = 1024 * 1024  # 1MB chunks，大文件
+                elif file_size_mb > 5:
+                    chunk_size = 512 * 1024  # 512KB chunks，中等文件
+                else:
+                    chunk_size = 256 * 1024  # 256KB chunks，小文件
+            else:
+                chunk_size = 512 * 1024  # 默认512KB，如果没有Content-Length
             start_time = time.time()
             
             try:
@@ -701,22 +713,38 @@ def download_text_from_url(url: Union[str, List[str]], timeout: int = 120) -> st
         finally:
             session.close()
         
-        # 检查Content-Type
+        # 检查Content-Type和Content-Length
         content_type = response.headers.get("content-type", "").lower()
+        content_length = response.headers.get("content-length")
         # 从URL中提取文件扩展名（支持查询参数的情况）
         url_path = url.split('?')[0]  # 移除查询参数
         file_extension = url_path.lower().split('.')[-1] if '.' in url_path else ''
         
-        # 流式读取文件内容（使用更大的chunk_size以提高下载速度）
+        # 流式读取文件内容（根据文件大小动态调整chunk_size以提高下载速度）
         content_bytes = b''
-        chunk_size = 64 * 1024  # 64KB chunks，提高下载速度
+        # 根据Content-Length动态调整chunk_size
+        if content_length:
+            file_size_mb = int(content_length) / (1024 * 1024)
+            if file_size_mb > 20:
+                chunk_size = 2 * 1024 * 1024  # 2MB chunks，超大文件
+            elif file_size_mb > 10:
+                chunk_size = 1024 * 1024  # 1MB chunks，大文件
+            elif file_size_mb > 5:
+                chunk_size = 512 * 1024  # 512KB chunks，中等文件
+            else:
+                chunk_size = 256 * 1024  # 256KB chunks，小文件
+        else:
+            chunk_size = 512 * 1024  # 默认512KB，如果没有Content-Length
         download_start = time.time()
         for chunk in response.iter_content(chunk_size=chunk_size):
             if chunk:
                 content_bytes += chunk
         download_time = time.time() - download_start
+        download_speed = (len(content_bytes) / (1024 * 1024)) / download_time if download_time > 0 else 0
         if download_time > 3:  # 如果下载时间超过3秒，记录警告
-            logger.warning(f"文本文件下载较慢: {download_time:.2f}秒，文件大小: {len(content_bytes) / (1024 * 1024):.2f} MB")
+            logger.warning(f"文本文件下载较慢: {download_time:.2f}秒，文件大小: {len(content_bytes) / (1024 * 1024):.2f} MB，速度: {download_speed:.2f} MB/s")
+        else:
+            logger.info(f"文本文件下载完成: {download_time:.2f}秒，速度: {download_speed:.2f} MB/s")
         
         # 如果无法从URL确定文件类型，尝试从Content-Type判断
         if not file_extension:
@@ -962,26 +990,30 @@ def encode_file_to_base64(file_path: str) -> str:
         raise HTTPException(status_code=500, detail=f"文件编码失败: {str(e)}")
 
 
-def calculate_upload_timeout(file_path: str, base_timeout: int = 120) -> int:
+def calculate_upload_timeout(file_path: str, base_timeout: int = 300) -> int:
     """根据文件大小动态计算上传超时时间
     
     Args:
         file_path: 文件路径
-        base_timeout: 基础超时时间（秒），默认120秒
+        base_timeout: 基础超时时间（秒），默认300秒（5分钟）
         
     Returns:
-        计算后的超时时间（秒），最小60秒，最大600秒
+        计算后的超时时间（秒），最小120秒，最大1800秒（30分钟）
     """
     try:
         if os.path.exists(file_path):
             file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
-            # 每MB需要约3秒，加上基础时间
-            # 对于大文件（>10MB），增加额外时间
-            calculated_timeout = int(base_timeout + file_size_mb * 3)
+            # 假设最小上传速度为0.1 MB/s（慢速网络）
+            # 计算所需时间：文件大小(MB) / 最小速度(MB/s) + 缓冲时间
+            min_upload_speed_mbps = 0.1
+            calculated_timeout = int((file_size_mb / min_upload_speed_mbps) + 120)  # 至少120秒缓冲
+            # 对于大文件（>10MB），额外增加时间
             if file_size_mb > 10:
-                calculated_timeout += int((file_size_mb - 10) * 2)  # 大文件额外时间
-            # 限制在60-600秒之间
-            return max(60, min(600, calculated_timeout))
+                calculated_timeout += int((file_size_mb - 10) * 5)  # 大文件额外时间
+            # 使用base_timeout和calculated_timeout中的较大值
+            final_timeout = max(base_timeout, calculated_timeout)
+            # 限制在120-1800秒之间（2分钟到30分钟）
+            return max(120, min(1800, final_timeout))
     except Exception as e:
         logger.warning(f"计算上传超时时间失败: {e}，使用默认值 {base_timeout}")
     return base_timeout

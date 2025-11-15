@@ -237,13 +237,15 @@ class MultiRoleRequestBody {
  */
 class CharacterRequestBody {
   characters: CharacterInfo[];
+  text: string; // 文本素材（必需）
   topic?: string;
   silence_interval: number;
 
-  constructor(characters: CharacterInfo[], topic: string | undefined, silence_interval: number) {
+  constructor(characters: CharacterInfo[], text: string, topic: string | undefined, silence_interval: number) {
     // 后端强制要求使用voice_url（云存储URL）
     // characters中的voice_url字段会被后端直接使用
     this.characters = characters;
+    this.text = text; // 文本素材（必需）
     this.topic = topic;
     this.silence_interval = silence_interval;
   }
@@ -749,6 +751,16 @@ export class PodcastService {
           return;
         }
 
+        // 验证文本素材（必需）
+        if (!request.text || request.text.trim().length === 0) {
+          resolve({
+            success: false,
+            message: '文本素材不能为空',
+            error: '文本素材缺失',
+          });
+          return;
+        }
+
         // 验证角色信息（强制使用云存储URL）
         for (const char of request.characters) {
           if (!char.name) {
@@ -771,6 +783,7 @@ export class PodcastService {
 
         const requestBody = new CharacterRequestBody(
           request.characters,
+          request.text, // 文本素材（必需）
           request.topic,
           request.silence_interval || 300
         );
