@@ -287,57 +287,40 @@ class PodcastGenerator:
                 
                 if not background_audios:
                     print("⚠️ 所有背景音乐文件加载失败，将不使用背景音乐")
-                    final_audio = main_audio
+                    background_music_list = []
+                
+                # 根据模式处理
+                if len(background_audios) == 1:
+                    background_audio = background_audios[0]
                 else:
-                    # 根据模式处理
-                    if len(background_audios) == 1:
-                        background_audio = background_audios[0]
-                    elif len(background_audios) > 1:
-                        if background_mode == "random":
-                            import random
-                            background_audio = random.choice(background_audios)
-                        elif background_mode == "concat":
-                            background_audio = concatenate_audios(background_audios, silence_intervals=[200] * (len(background_audios) - 1), sr=AUDIO_SAMPLING_RATE)
-                        elif background_mode == "mix":
-                            # 混合所有背景音乐
-                            from .utils import load_multiple_audios
-                            background_paths = background_music_list
-                            try:
-                                background_audio = load_multiple_audios(background_paths, target_sr=AUDIO_SAMPLING_RATE, mode="mix")
-                            except (ValueError, Exception) as e:
-                                print(f"⚠️ 混合背景音乐失败: {e}")
-                                print("⚠️ 将不使用背景音乐")
-                                background_audio = None
-                        else:
-                            # 默认模式（single等）：使用第一个音频
-                            if background_audios:
-                                background_audio = background_audios[0]
-                            else:
-                                print("⚠️ 背景音频列表为空，无法使用默认模式")
-                                background_audio = None
+                    if background_mode == "random":
+                        import random
+                        background_audio = random.choice(background_audios)
+                    elif background_mode == "concat":
+                        background_audio = concatenate_audios(background_audios, silence_intervals=[200] * (len(background_audios) - 1), sr=AUDIO_SAMPLING_RATE)
+                    elif background_mode == "mix":
+                        # 混合所有背景音乐
+                        from .utils import load_multiple_audios
+                        background_paths = background_music_list
+                        background_audio = load_multiple_audios(background_paths, target_sr=AUDIO_SAMPLING_RATE, mode="mix")
                     else:
-                        # background_audios 为空（不应该到达这里，但为了安全起见）
-                        print("⚠️ 背景音频列表为空，将不使用背景音乐")
-                        final_audio = main_audio
-                        background_audio = None
-                    
-                    # 只有在成功获取背景音频时才进行混合
-                    if background_audio is not None:
-                        print(f"正在混合背景音乐（ducking效果: 启用，音量: {background_volume}）...")
-                        print(f"播放策略: intro 5秒 -> 对话（ducking）-> outro 5秒")
-                        
-                        main_audio = mix_audio_with_background(
-                            main_audio,
-                            background_audio,
-                            background_volume=background_volume,
-                            background_mode=background_mode,
-                            enable_ducking=True,  # 启用ducking效果
-                            intro_duration_ms=5000,  # 开场音乐5秒
-                            outro_duration_ms=5000,  # 结束音乐5秒
-                            remove_background_silence=True  # 去除背景音乐中的静音段
-                        )
-                        print("✓ 背景音乐混合完成")
-                        final_audio = main_audio
+                        background_audio = background_audios[0]
+                
+                print(f"正在混合背景音乐（ducking效果: 启用，音量: {background_volume}）...")
+                print(f"播放策略: intro 5秒 -> 对话（ducking）-> outro 5秒")
+                
+                main_audio = mix_audio_with_background(
+                    main_audio,
+                    background_audio,
+                    background_volume=background_volume,
+                    background_mode=background_mode,
+                    enable_ducking=True,  # 启用ducking效果
+                    intro_duration_ms=5000,  # 开场音乐5秒
+                    outro_duration_ms=5000,  # 结束音乐5秒
+                    remove_background_silence=True  # 去除背景音乐中的静音段
+                )
+                print("✓ 背景音乐混合完成")
+                final_audio = main_audio
             else:
                 print("⚠️ 背景音乐列表为空，将不使用背景音乐")
                 final_audio = main_audio
