@@ -664,7 +664,7 @@ export class FileUtils {
       
       // 设置文件类型过滤器（支持文本文件、Word文件和PDF文件）
       documentSelectOptions.fileSuffixFilters = ['.txt', '.doc', '.docx', '.pdf'];
-      documentSelectOptions.maxSelectNumber = 1;
+      documentSelectOptions.maxSelectNumber = 10; // 支持最多选择10个文件
       
       const documentSelectResult = await documentViewPicker.select(documentSelectOptions);
       
@@ -846,6 +846,187 @@ export class FileUtils {
           message: `${fileExtension.toUpperCase()}文件需要上传到云存储，请启用云存储上传`,
           duration: 2000
         });
+        return null;
+      }
+    } catch (error) {
+      const err = error as BusinessError;
+      const errorMessage = err.message || String(error);
+      Logger.error(TAG, `选择文本文件失败: ${errorMessage}`);
+      promptAction.showToast({
+        message: `选择文件失败: ${errorMessage}`,
+        duration: 2000
+      });
+      return null;
+    }
+  }
+
+  /**
+   * 选择多个文本文件并上传到云存储
+   * 支持.txt、Word文件（.doc, .docx）和PDF文件（.pdf）
+   * @param context UIAbility上下文，如果未提供则使用GlobalContext获取
+   * @param uploadToCloud 是否上传到云存储，默认true
+   * @returns 文本文件信息数组
+   */
+  static async pickTextFiles(
+    context?: common.UIAbilityContext,
+    uploadToCloud: boolean = true
+  ): Promise<TextFileInfo[] | null> {
+    try {
+      // 获取上下文
+      let uiContext: common.UIAbilityContext | null = null;
+      if (context) {
+        uiContext = context;
+      } else {
+        uiContext = GlobalContext.getContext();
+        if (!uiContext) {
+          throw new Error('无法获取上下文，请传入context参数或确保GlobalContext已初始化');
+        }
+      }
+
+      // 使用DocumentViewPicker选择文件
+      const documentViewPicker = new picker.DocumentViewPicker(uiContext);
+      const documentSelectOptions = new picker.DocumentSelectOptions();
+      
+      // 设置文件类型过滤器（支持文本文件、Word文件和PDF文件）
+      documentSelectOptions.fileSuffixFilters = ['.txt', '.doc', '.docx', '.pdf'];
+      documentSelectOptions.maxSelectNumber = 10; // 支持最多选择10个文件
+      
+      const documentSelectResult = await documentViewPicker.select(documentSelectOptions);
+      
+      if (!documentSelectResult || documentSelectResult.length === 0) {
+        Logger.info(TAG, '用户取消选择文件');
+        return null;
+      }
+
+      Logger.info(TAG, `用户选择了 ${documentSelectResult.length} 个文件`);
+
+      // 处理所有选择的文件
+      const fileInfos: TextFileInfo[] = [];
+      
+      for (let i = 0; i < documentSelectResult.length; i++) {
+        const fileUri = documentSelectResult[i];
+        Logger.info(TAG, `处理第 ${i+1}/${documentSelectResult.length} 个文件: ${fileUri}`);
+
+        try {
+          // 获取文件信息
+          let tempFile: fs.File | null = null;
+          let fileSize = 0;
+          try {
+            tempFile = fs.openSync(fileUri, fs.OpenMode.READ_ONLY);
+            const fileStat = fs.statSync(tempFile.fd);
+            fileSize = fileStat.size;
+            fs.closeSync(tempFile);
+            tempFile = null;
+          } catch (error) {
+            if (tempFile) {
+              fs.closeSync(tempFile);
+            }
+            const err = error as BusinessError;
+            Logger.error(TAG, `获取文件信息失败: code=${err.code}, message=${err.message}`);
+            continue; // 跳过这个文件，继续处理下一个
+          }
+
+          const fileSizeMB = fileSize / (1024 * 1024);
+
+          // 检查文件大小（限制50MB）
+          if (fileSize > 50 * 1024 * 1024) {
+            Logger.warn(TAG, `文件过大，跳过: ${fileSizeMB.toFixed(2)}MB (限制: 50MB)`);
+            continue; // 跳过这个文件
+          }
+
+          // 提取文件名
+          let fileName = fileUri.split('/').pop() || `text_${Date.now()}_${i}.txt`;
+          try {
+            fileName = decodeURIComponent(fileName);
+          } catch {
+            // 如果解码失败，使用原始文件名
+          }
+
+          // 检测文件类型
+          const fileExtension = fileName.toLowerCase().split('.').pop() || '';
+          const supportedExtensions = ['txt', 'doc', 'docx', 'pdf'];
+          if (!supportedExtensions.includes(fileExtension)) {
+            Logger.warn(TAG, `不支持的文件格式，跳过: .${fileExtension}`);
+            continue; // 跳过这个文件
+          }
+
+          // PDF和Word文件必须上传到云存储
+          const requiresCloudUpload = fileExtension === 'pdf' || fileExtension === 'doc' || fileExtension === 'docx';
+          
+          if (requiresCloudUpload && !uploadToCloud) {
+            Logger.warn(TAG, `${fileExtension.toUpperCase()}文件必须上传到云存储，跳过`);
+            continue; // 跳过这个文件
+          }
+
+          if (uploadToCloud || requiresCloudUpload) {
+            const cloudInfo = await FileUtils.uploadFileToCloud(uiContext, fileUri, fileName);
+            if (cloudInfo) {
+              const fileInfo: TextFileInfo = {
+                uri: fileUri,
+                fileName: fileName,
+                fileSize: fileSize,
+                cloudPath: cloudInfo.cloudPath,
+                cloudUrl: cloudInfo.cloudUrl
+              };
+              fileInfos.push(fileInfo);
+              Logger.info(TAG, `文件 ${i+1} 上传成功: ${fileName} (${fileSizeMB.toFixed(2)}MB)`);
+            } else {
+              Logger.error(TAG, `文件 ${i+1} 上传失败: ${fileName}`);
+              // 继续处理其他文件，不中断
+            }
+          } else if (fileExtension === 'txt') {
+            // 文本文件可以本地读取
+            let file: fs.File | null = null;
+            try {
+              file = fs.openSync(fileUri, fs.OpenMode.READ_ONLY);
+              const buffer = new ArrayBuffer(fileSize);
+              fs.readSync(file.fd, buffer);
+              fs.closeSync(file);
+              file = null;
+
+              const uint8Array = new Uint8Array(buffer);
+              let content = '';
+              try {
+                content = new util.TextDecoder('utf-8').decodeWithStream(uint8Array);
+              } catch (decodeError) {
+                try {
+                  content = new util.TextDecoder('gbk').decodeWithStream(uint8Array);
+                } catch {
+                  const charArray: string[] = [];
+                  for (let j = 0; j < uint8Array.length; j++) {
+                    charArray.push(String.fromCharCode(uint8Array[j]));
+                  }
+                  content = charArray.join('');
+                }
+              }
+
+              const fileInfo: TextFileInfo = {
+                uri: fileUri,
+                fileName: fileName,
+                fileSize: fileSize,
+                content: content
+              };
+              fileInfos.push(fileInfo);
+              Logger.info(TAG, `文件 ${i+1} 读取成功: ${fileName} (${fileSizeMB.toFixed(2)}MB)`);
+            } finally {
+              if (file) {
+                fs.closeSync(file);
+              }
+            }
+          }
+        } catch (error) {
+          const err = error as BusinessError;
+          Logger.error(TAG, `处理文件 ${i+1} 失败: ${err.message || String(error)}`);
+          // 继续处理其他文件
+          continue;
+        }
+      }
+
+      if (fileInfos.length > 0) {
+        Logger.info(TAG, `成功处理 ${fileInfos.length}/${documentSelectResult.length} 个文件`);
+        return fileInfos;
+      } else {
+        Logger.warn(TAG, '没有成功处理任何文件');
         return null;
       }
     } catch (error) {
