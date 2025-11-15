@@ -20,6 +20,35 @@ except ImportError:
 from soulxpodcast.config import Config, SamplingParams
 from soulxpodcast.models.modules.sampler import _ras_sample_hf_engine
 
+
+def _get_supported_dtype():
+    """
+    根据GPU计算能力自动选择支持的dtype。
+    bfloat16 需要计算能力 >= 8.0 (Ampere+)
+    float16 支持计算能力 >= 7.0 (Volta+)
+    """
+    if not torch.cuda.is_available():
+        # CPU 使用 float32
+        return "float32"
+    
+    try:
+        # 获取当前GPU的计算能力
+        compute_capability = torch.cuda.get_device_capability(0)
+        major, minor = compute_capability
+        
+        # 计算能力 >= 8.0 (Ampere+) 支持 bfloat16
+        if major >= 8:
+            return "bfloat16"
+        # 计算能力 >= 7.0 (Volta+) 支持 float16
+        elif major >= 7:
+            return "float16"
+        else:
+            # 老GPU使用 float32
+            return "float32"
+    except Exception:
+        # 如果检测失败，默认使用 float16（更安全）
+        return "float16"
+
 class HFLLMEngine:
 
     def __init__(self, model, **kwargs):
@@ -30,7 +59,23 @@ class HFLLMEngine:
         self.tokenizer = AutoTokenizer.from_pretrained(model, use_fast=True)
         config.eos = config.hf_config.eos_token_id # speech eos token;
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
-        self.model = AutoModelForCausalLM.from_pretrained(model, torch_dtype=torch.bfloat16, device_map=self.device)
+        
+        # 根据GPU计算能力自动选择dtype
+        dtype_str = _get_supported_dtype()
+        if dtype_str == "bfloat16":
+            torch_dtype = torch.bfloat16
+        elif dtype_str == "float16":
+            torch_dtype = torch.float16
+        else:
+            torch_dtype = torch.float32
+        
+        # 输出GPU信息和选择的dtype
+        if torch.cuda.is_available():
+            compute_cap = torch.cuda.get_device_capability(0)
+            gpu_name = torch.cuda.get_device_name(0)
+            print(f"[INFO] GPU: {gpu_name}, 计算能力: {compute_cap[0]}.{compute_cap[1]}, 自动选择 dtype: {dtype_str}")
+        
+        self.model = AutoModelForCausalLM.from_pretrained(model, torch_dtype=torch_dtype, device_map=self.device)
         self.config = config
         self.pad_token_id = self.tokenizer.pad_token_id
 
@@ -89,7 +134,23 @@ class VLLMEngine:
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
         os.environ["VLLM_USE_V1"] = "0"
         if SUPPORT_VLLM:
-            self.model = LLM(model=model, enforce_eager=True, dtype="bfloat16", max_model_len=8192, enable_prefix_caching=True,)
+            # 根据GPU计算能力自动选择dtype
+            dtype_str = _get_supported_dtype()
+            # vllm 使用的 dtype 字符串格式
+            if dtype_str == "float16":
+                vllm_dtype = "half"  # vllm 使用 "half" 表示 float16
+            elif dtype_str == "bfloat16":
+                vllm_dtype = "bfloat16"
+            else:
+                vllm_dtype = "float"  # float32
+            
+            # 输出GPU信息和选择的dtype
+            if torch.cuda.is_available():
+                compute_cap = torch.cuda.get_device_capability(0)
+                gpu_name = torch.cuda.get_device_name(0)
+                print(f"[INFO] VLLM Engine - GPU: {gpu_name}, 计算能力: {compute_cap[0]}.{compute_cap[1]}, 自动选择 dtype: {vllm_dtype}")
+            
+            self.model = LLM(model=model, enforce_eager=True, dtype=vllm_dtype, max_model_len=8192, enable_prefix_caching=True,)
         else:
             raise ImportError("Not Support VLLM now!!!")
         self.config = config
