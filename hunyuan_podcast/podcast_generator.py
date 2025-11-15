@@ -158,14 +158,40 @@ class PodcastGenerator:
 
         # 过滤掉那些没有提供音色文件的角色，避免因为误识别的角色（例如来自错误解析的Content_Types）导致整个生成失败
         provided_roles = set(self.role_voices.keys())
-        filtered_dialogues = [d for d in dialogues if d[0] in provided_roles]
-        missing_roles = sorted({d[0] for d in dialogues} - provided_roles)
-        if missing_roles:
-            logger.warning(f"以下角色未提供音色文件，将被跳过: {missing_roles}")
+        detected_roles = {d[0] for d in dialogues}
+        missing_roles = sorted(detected_roles - provided_roles)
+        
+        # 如果检测到的角色不在提供的角色列表中，尝试进行智能映射
+        if missing_roles and len(missing_roles) == len(provided_roles):
+            # 如果缺失的角色数量与提供的角色数量相同，尝试按顺序映射
+            # 例如：检测到["林剑", "何立峰"]，提供["角色A", "角色B"]，则映射为：林剑->角色A, 何立峰->角色B
+            provided_roles_list = sorted(list(provided_roles))
+            missing_roles_list = sorted(missing_roles)
+            role_mapping = dict(zip(missing_roles_list, provided_roles_list))
+            
+            logger.warning(f"检测到角色名不匹配，尝试进行智能映射：{role_mapping}")
+            logger.warning(f"原因：生成的对话使用了文本素材中的人名（{missing_roles_list}）作为角色名，而不是指定的角色名（{provided_roles_list}）")
+            
+            # 应用映射
+            mapped_dialogues = [(role_mapping.get(role, role), content) for role, content in dialogues]
+            dialogues = mapped_dialogues
+            filtered_dialogues = dialogues
+        else:
+            filtered_dialogues = [d for d in dialogues if d[0] in provided_roles]
+            if missing_roles:
+                logger.warning(f"以下角色未提供音色文件，将被跳过: {missing_roles}")
 
         # 如果所有对话都被过滤掉，抛出错误
         if not filtered_dialogues:
-            raise ValueError(f"未能找到任何已提供音色的角色对话。检测到的角色: {[d[0] for d in dialogues]}，已提供的角色: {list(provided_roles)}")
+            error_msg = f"未能找到任何已提供音色的角色对话。\n"
+            error_msg += f"检测到的角色: {sorted(detected_roles)}\n"
+            error_msg += f"已提供的角色: {sorted(provided_roles)}\n\n"
+            error_msg += f"问题分析：生成的对话文本中使用了文本素材中的人名（如{missing_roles[:3]}等）作为角色名，\n"
+            error_msg += f"而不是使用指定的角色名（{sorted(provided_roles)}）。\n\n"
+            error_msg += f"解决方案：\n"
+            error_msg += f"1. 检查提示词是否正确指定了角色名\n"
+            error_msg += f"2. 如果问题持续，可能需要重新生成对话文本"
+            raise ValueError(error_msg)
 
         # 替换为过滤后的对话列表继续生成
         dialogues = filtered_dialogues

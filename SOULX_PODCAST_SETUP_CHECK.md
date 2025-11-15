@@ -151,3 +151,4 @@ python -c "import s3tokenizer; print('s3tokenizer:', '✅' if True else '❌')"
 4. **内存不足**：减少批次大小或使用更小的模型
 
 
+

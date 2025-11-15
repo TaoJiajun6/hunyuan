@@ -1,0 +1,20 @@
+{
+  "name": "agc-cloudstorage-service",
+  "version": "1.0.0",
+  "description": "华为AGC云存储服务 - 用于上传和下载音色文件、播客文件",
+  "main": "cloudstorage_service.js",
+  "scripts": {
+    "test": "node cloudstorage_service.js",
+    "upload": "node cloudstorage_service.js upload",
+    "download": "node cloudstorage_service.js download",
+    "list": "node cloudstorage_service.js list",
+    "delete": "node cloudstorage_service.js delete"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@agconnect/common-server": "^1.0.0",
+    "@agconnect/cloudstorage-server": "^1.0.0",
+    "glob": "^10.3.10"
+  }
+}
