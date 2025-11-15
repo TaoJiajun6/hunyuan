@@ -294,18 +294,7 @@ class TextProcessor:
         text = re.sub(r'[¥$]\d+\.?\d*', replace_price, text)  # ¥100, $100
         text = re.sub(r'\d+\.?\d*[元块]', replace_price, text)  # 100元, 100.50块
         
-        # 3. 先处理百分比范围：如 10%-20% -> 百分之十到百分之二十
-        def replace_percent_range(match):
-            num1_str = match.group(1)
-            num2_str = match.group(2)
-            chinese_num1 = self.number_to_chinese(num1_str)
-            chinese_num2 = self.number_to_chinese(num2_str)
-            return f"百分之{chinese_num1}到百分之{chinese_num2}"
-        
-        # 匹配百分比范围：10%-20%、10% - 20%、10%到20%、10%至20%
-        text = re.sub(r'(\d+\.?\d*)%\s*[-到至]\s*(\d+\.?\d*)%', replace_percent_range, text)
-        
-        # 4. 处理单个百分比：如 50% -> 百分之五十
+        # 3. 处理百分比：如 50% -> 百分之五十
         def replace_percent(match):
             num_str = match.group(1)
             chinese_num = self.number_to_chinese(num_str)
@@ -313,7 +302,7 @@ class TextProcessor:
         
         text = re.sub(r'(\d+\.?\d*)%', replace_percent, text)
         
-        # 5. 处理普通数字（整数和小数，包括负数）
+        # 4. 处理普通数字（整数和小数，包括负数）
         # 但排除已经在日期、价格、百分比中的数字
         def replace_number(match):
             num_str = match.group(0)
@@ -390,11 +379,6 @@ class TextProcessor:
         
         # 移除开头的"我"、"他"、"她"等代词后跟情绪词的模式
         content = re.sub(r'^[我他她它]\s*[兴奋疑惑严肃激动冷静思考]+[地]?\s*[，,：:]?\s*', '', content)
-        
-        # 移除省略号（...），因为TTS会读出"点"的声音，而省略号只是表示停顿
-        # 匹配连续的三个或更多点号（包括中文省略号）
-        content = re.sub(r'\.{2,}', '', content)  # 移除连续的2个或更多点号
-        content = re.sub(r'…+', '', content)  # 移除中文省略号（一个或多个）
         
         # 清理可能出现的多余空格
         content = re.sub(r'\s+', ' ', content)
@@ -819,7 +803,6 @@ class TextProcessor:
    - 每行一个角色的发言，角色之间建议有空行间隔，让对话更清晰
    - **角色名称必须严格使用**：{role_list}（不能使用其他名称，如数字、字母等）
    - **禁止使用**：不能使用纯数字（如[1]、[2]）、单个字母（如[J]、[A]）或其他非标准角色名
-   - **⚠️ 重要：禁止使用文本素材中的人名作为角色名**：即使文本素材中出现了人名（如"张三"、"李四"、"林剑"、"何立峰"等），也必须使用上面指定的角色名称（{role_list}），绝对不能将文本素材中的人名作为角色标记使用。角色名必须严格从以下列表中选择：{role_list}
    - **角色间隔**：角色对话之间要有自然的间隔，每个角色发言后要有适当的停顿，让对话节奏更舒缓
 
 **6. 对话要求**：

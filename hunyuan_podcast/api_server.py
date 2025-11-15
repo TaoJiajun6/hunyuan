@@ -52,10 +52,10 @@ try:
         setup_logging(log_file="api_server.log")
 except ImportError:
     # 如果log_config模块不存在，使用基本配置
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1876,18 +1876,18 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                     try:
                         # 统一使用后台上传，避免阻塞和超时问题
                         # 参考之前提交的实现：立即返回base64音频，上传在后台进行
-                        background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
-                                                  agc_product_id, agc_domain, agc_client_id, agc_client_secret)
+                                    background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
+                                                              agc_product_id, agc_domain, agc_client_id, agc_client_secret)
                         logger.info("已在后台启动 AGC 上传任务（不阻塞主流程）")
-                        agc_result = {
-                            'status': 'started',
-                            'bucket': agc_bucket,
-                            'object': object_name,
-                            'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
-                        }
-                        # 更新进度，包含音频URL（即使后台上传，也先返回URL以便前端从云存储下载）
-                        audio_url = agc_result.get('url') if isinstance(agc_result, dict) else None
-                        _update_progress(request.job_id, "uploading", 95, "生成完成，已开始后台上传到云存储", done=True, audio_url=audio_url)
+                            agc_result = {
+                                'status': 'started',
+                                'bucket': agc_bucket,
+                                'object': object_name,
+                                'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
+                            }
+                            # 更新进度，包含音频URL（即使后台上传，也先返回URL以便前端从云存储下载）
+                            audio_url = agc_result.get('url') if isinstance(agc_result, dict) else None
+                            _update_progress(request.job_id, "uploading", 95, "生成完成，已开始后台上传到云存储", done=True, audio_url=audio_url)
                     except Exception as e:
                         logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
                 else:
@@ -2189,15 +2189,15 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
                     try:
                         # 统一使用后台上传，避免阻塞和超时问题
                         # 参考之前提交的实现：立即返回base64音频，上传在后台进行
-                        background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
-                                                  agc_product_id, agc_domain, agc_client_id, agc_client_secret)
+                                    background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
+                                                              agc_product_id, agc_domain, agc_client_id, agc_client_secret)
                         logger.info("已在后台启动 AGC 上传任务（不阻塞主流程）")
-                        agc_result = {
-                            'status': 'started',
-                            'bucket': agc_bucket,
-                            'object': object_name,
-                            'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
-                        }
+                            agc_result = {
+                                'status': 'started',
+                                'bucket': agc_bucket,
+                                'object': object_name,
+                                'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
+                            }
                         # 更新进度，包含音频URL（即使后台上传，也先返回URL以便前端从云存储下载）
                         audio_url = agc_result.get('url') if isinstance(agc_result, dict) else None
                         _update_progress(request.job_id, "uploading", 95, "生成完成，已开始后台上传到云存储", done=True, audio_url=audio_url)
@@ -2481,15 +2481,15 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
                     try:
                         # 统一使用后台上传，避免阻塞和超时问题
                         # 参考之前提交的实现：立即返回base64音频，上传在后台进行
-                        background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
-                                                  agc_product_id, agc_domain, agc_client_id, agc_client_secret)
+                                    background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
+                                                              agc_product_id, agc_domain, agc_client_id, agc_client_secret)
                         logger.info("已在后台启动 AGC 上传任务（不阻塞主流程）")
-                        agc_result = {
-                            'status': 'started',
-                            'bucket': agc_bucket,
-                            'object': object_name,
-                            'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
-                        }
+                            agc_result = {
+                                'status': 'started',
+                                'bucket': agc_bucket,
+                                'object': object_name,
+                                'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
+                            }
                         # 更新进度，包含音频URL（即使后台上传，也先返回URL以便前端从云存储下载）
                         audio_url = agc_result.get('url') if isinstance(agc_result, dict) else None
                         _update_progress(request.job_id, "uploading", 95, "生成完成，已开始后台上传到云存储", done=True, audio_url=audio_url)
