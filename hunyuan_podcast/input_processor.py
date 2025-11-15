@@ -125,7 +125,7 @@ class InputProcessor:
             # 检测特殊网站（需要JavaScript渲染的网站）
             url_lower = url.lower()
             special_sites = {
-                'weibo.com': '微博网站需要JavaScript渲染，无法直接提取内容。建议：1) 复制微博文本内容直接输入；2) 使用"文字+指令"类型；3) 或提供微博文章的完整URL（而非用户主页）',
+                'weibo.com': '微博网站需要JavaScript渲染，无法直接提取内容。建议：1) 复制微博文本内容直接输入；2) 使用\'文字+指令\'类型；3) 或提供微博文章的完整URL（而非用户主页）',
                 'twitter.com': 'Twitter网站需要JavaScript渲染，无法直接提取内容。建议复制推文内容直接输入',
                 'facebook.com': 'Facebook网站需要JavaScript渲染，无法直接提取内容。建议复制内容直接输入',
                 'instagram.com': 'Instagram网站需要JavaScript渲染，无法直接提取内容。建议复制内容直接输入',
@@ -157,7 +157,7 @@ class InputProcessor:
                 if site_warning:
                     raise Exception(f"{site_warning}")
                 else:
-                    raise Exception(f"网页内容为空或过短，可能是需要JavaScript渲染的动态网站。建议：1) 复制网页文本内容直接输入；2) 使用"文字+指令"类型")
+                    raise Exception(f"网页内容为空或过短，可能是需要JavaScript渲染的动态网站。建议：1) 复制网页文本内容直接输入；2) 使用'文字+指令'类型")
             
             # 移除脚本和样式
             html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
@@ -220,7 +220,7 @@ class InputProcessor:
                 if site_warning:
                     raise Exception(f"{site_warning}")
                 else:
-                    raise Exception(f"无法从该网页提取有效文本内容（提取到{len(text)}字符）。可能原因：1) 网页需要JavaScript渲染；2) 网页有反爬虫保护；3) 网页结构特殊。建议：1) 复制网页文本内容直接输入；2) 使用"文字+指令"类型；3) 或提供网页文章的完整URL")
+                    raise Exception(f"无法从该网页提取有效文本内容（提取到{len(text)}字符）。可能原因：1) 网页需要JavaScript渲染；2) 网页有反爬虫保护；3) 网页结构特殊。建议：1) 复制网页文本内容直接输入；2) 使用'文字+指令'类型；3) 或提供网页文章的完整URL")
             
             logger.info(f"网页内容提取成功: {len(text)} 字符")
             return text
