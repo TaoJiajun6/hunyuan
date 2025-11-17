@@ -928,20 +928,21 @@ class TextProcessor:
         
         # 提取角色虚拟名字（用于自我介绍）
         role_virtual_names = []
+        has_all_names = True  # 标记是否所有角色都有名字
+        
         if character_descriptions:
             for i, role_key in enumerate(role_names):
                 # 从角色描述中提取名字，优先使用角色描述中的name字段
+                virtual_name = None
+                
                 if role_key in character_descriptions:
                     role_desc = character_descriptions[role_key]
                     if isinstance(role_desc, dict):
                         virtual_name = role_desc.get("name", "")
                         if virtual_name and virtual_name.strip():
-                            role_virtual_names.append(virtual_name.strip())
+                            virtual_name = virtual_name.strip()
                         else:
-                            # 如果没有提供名字，生成一个默认虚拟名字
-                            role_virtual_names.append(f"主持人{chr(65+i)}")
-                    else:
-                        role_virtual_names.append(f"主持人{chr(65+i)}")
+                            virtual_name = None
                 else:
                     # 如果角色描述中没有对应的键，尝试按顺序获取
                     desc_list = list(character_descriptions.values())
@@ -950,16 +951,19 @@ class TextProcessor:
                         if isinstance(role_desc, dict):
                             virtual_name = role_desc.get("name", "")
                             if virtual_name and virtual_name.strip():
-                                role_virtual_names.append(virtual_name.strip())
+                                virtual_name = virtual_name.strip()
                             else:
-                                role_virtual_names.append(f"主持人{chr(65+i)}")
-                        else:
-                            role_virtual_names.append(f"主持人{chr(65+i)}")
-                    else:
-                        role_virtual_names.append(f"主持人{chr(65+i)}")
+                                virtual_name = None
+                
+                if virtual_name:
+                    role_virtual_names.append(virtual_name)
+                else:
+                    role_virtual_names.append(None)  # 标记需要自动生成
+                    has_all_names = False
         else:
-            # 如果没有角色描述，生成默认虚拟名字
-            role_virtual_names = [f"主持人{chr(65+i)}" for i in range(num_characters)]
+            # 如果没有角色描述，所有名字都需要自动生成
+            role_virtual_names = [None] * num_characters
+            has_all_names = False
         
         # 构建播客基本信息部分
         podcast_info = ""
@@ -1089,11 +1093,12 @@ class TextProcessor:
 
 ### 1. 播客结构
 **开场自我介绍必须使用虚拟名字**：
-{chr(10).join([f"- {role_names[i]} → {role_virtual_names[i]}" for i in range(num_characters)])}
+{chr(10).join([f"- {role_names[i]} → {role_virtual_names[i] if role_virtual_names[i] else '[请根据角色设定自动生成合适的虚拟名字]'}" for i in range(num_characters)])}
+
+{f"**⚠️ 重要**：以上标记为'[请根据角色设定自动生成合适的虚拟名字]'的角色，你必须根据该角色的性格、身份、说话风格等特点，自动生成一个合适的、具体的虚拟名字（如：小明、李华、张伟、王芳等常见中文名字，或根据角色特点生成更贴合的名字）。不能使用'主持人A'、'主持人B'这种编号式的名字，必须使用具体的、真实的名字。" if not has_all_names else ""}
 
 **标准结构**：
 
-【生成要求】
 [开场] 自我介绍（使用虚拟名字）+ 主题引入
 [主体] 基于文本素材的深入讨论（3-4分钟）
 [结尾] 总结 + 结束语
@@ -1118,14 +1123,15 @@ class TextProcessor:
 **音效标注**（可选）：`<|laughter|>`、`<|sigh|>`、`<|applause|>`
 
 ## 输出示例
-[角色A]嘿，听众朋友们，欢迎回来！我是{role_virtual_names[0]}。
-[角色B]我是{role_virtual_names[1]}。今天我们要聊一个很有意思的话题...
+[角色A]嘿，听众朋友们，欢迎回来！我是{role_virtual_names[0] if role_virtual_names[0] else '[虚拟名字]'}。
+{chr(10) + f"[角色B]我是{role_virtual_names[1] if role_virtual_names[1] else '[虚拟名字]'}。今天我们要聊一个很有意思的话题..." if num_characters >= 2 else ""}
 [角色A]好家伙，上来就挑战高难度！我觉得吧...
-[角色B]嗯...这个问题确实很有深度，从技术角度看...
+{chr(10) + "[角色B]嗯...这个问题确实很有深度，从技术角度看..." if num_characters >= 2 else ""}
 
 ## 最后提醒
 1. 对话标记**必须使用**：{role_list}
-3. 开场自我介绍使用虚拟名字
+2. 开场自我介绍时，必须使用具体的虚拟名字（如：小明、李华、张伟等），不能使用"主持人A"、"主持人B"这种编号式的名字
+{f"3. 对于没有提供名字的角色，请根据角色设定自动生成合适的虚拟名字" if not has_all_names else "3. 使用提供的虚拟名字进行自我介绍"}
 4. 直接输出对话内容，不添加任何说明
 
 现在请开始生成播客脚本。"""
