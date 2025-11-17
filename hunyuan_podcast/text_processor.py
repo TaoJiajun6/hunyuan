@@ -800,6 +800,11 @@ class TextProcessor:
         if instruction:
             instruction_rule_text = "** 用户指令执行规则**：\n- 必须严格按照用户指令执行，特别是关于内容要求、时长要求、风格要求等\n- 如果指令中指定了时长（如\"1分钟\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容\n- 如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行\n- 用户指令的优先级高于默认设置，必须优先满足指令要求\n\n"
         
+        # 构建用户指令详细文本（避免在 f-string 表达式中使用反斜杠）
+        instruction_detail_text = ""
+        if instruction:
+            instruction_detail_text = f"\n【用户指令】\n\n{instruction}\n\n** 重要**：必须严格按照上述用户指令执行，特别是关于内容要求、时长要求、风格要求等。如果指令中指定了时长（如\"1分钟\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容。如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行。"
+        
         prompt = f"""【系统指令：高度拟人化角色互动对话生成】
 
 你是一个专业的对话编剧和配音指导。你的任务是根据用户提供的精确角色人设和文本素材，生成一段高度拟人化、真实自然的N角色互动对话。
@@ -810,12 +815,7 @@ class TextProcessor:
 {character_text}
 
 {material_text}
-{f'''\n【用户指令】
-
-{instruction}
-
-** 重要**：必须严格按照上述用户指令执行，特别是关于内容要求、时长要求、风格要求等。如果指令中指定了时长（如"1分钟"、"5分钟"等），必须严格按照该时长生成相应长度的对话内容。如果指令中指定了内容要求（如"简短"、"详细"等），必须严格按照要求执行。
-''' if instruction else ""}
+{instruction_detail_text}
 【核心要求：高度拟人化对话】
 
 **1. 真实对话感（最重要）**
@@ -1011,6 +1011,11 @@ class TextProcessor:
         default_podcast_info = "播客名称：[由文本内容推断]\n本期主题：[由文本内容推断]\n"
         final_podcast_info = podcast_info if podcast_info else default_podcast_info
         
+        # 构建用户指令规则文本（避免在 f-string 表达式中使用反斜杠）
+        instruction_rule_text_short = ""
+        if instruction:
+            instruction_rule_text_short = "### 用户指令执行规则\n- 必须严格按照用户指令执行，特别是关于时长、内容和风格要求\n- 用户指令优先级高于默认设置\n"
+        
         # 构建场景类型字符串
         scene_types_str = ', '.join(scene_types) if scene_types else "自然互动交流"
         
@@ -1071,7 +1076,7 @@ class TextProcessor:
 - **绝对禁止使用**：文本素材中的任何人名、角色名或实体名称
 - 文本素材中的名称仅用于理解内容，对话时必须映射到标准角色名
 
-{f"### 用户指令执行规则\n- 必须严格按照用户指令执行，特别是关于时长、内容和风格要求\n- 用户指令优先级高于默认设置\n" if instruction else ""}
+{instruction_rule_text_short if instruction else ""}
 
 ## 输入信息
 - **播客信息**：{final_podcast_info}
@@ -1254,11 +1259,21 @@ class TextProcessor:
         # 匹配 {num_characters * 11} 这样的表达式
         dialogue_count_text = re.sub(r'\{([^}]+)\}', replace_expression, dialogue_count_text)
         
+        # 构建用户指令规则文本（避免在 f-string 表达式中使用反斜杠）
+        instruction_rule_text_deep = ""
+        if instruction:
+            instruction_rule_text_deep = "**⚠️ 用户指令执行规则**：\n- 必须严格按照用户指令执行，特别是关于内容要求、时长要求、风格要求等\n- 如果指令中指定了时长（如\"1分钟\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容\n- 如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行\n- 用户指令的优先级高于默认设置，必须优先满足指令要求\n\n"
+        
+        # 构建用户指令详细文本（避免在 f-string 表达式中使用反斜杠）
+        instruction_detail_text_deep = ""
+        if instruction:
+            instruction_detail_text_deep = f"\n【用户指令】\n\n{instruction}\n\n**⚠️ 重要**：必须严格按照上述用户指令执行，特别是关于内容要求、时长要求、风格要求等。如果指令中指定了时长（如\"1分钟\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容。如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行。"
+        
         prompt = f"""【系统指令：深度内容架构师】
 
 你是一档知名深度访谈播客的主编和首席研究员。请围绕用户指定的主题，生成一份有深度、有见地、能引发听众长期思考的播客脚本。
 
-{f"**⚠️ 用户指令执行规则**：\n- 必须严格按照用户指令执行，特别是关于内容要求、时长要求、风格要求等\n- 如果指令中指定了时长（如\"1分钟\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容\n- 如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行\n- 用户指令的优先级高于默认设置，必须优先满足指令要求\n\n" if instruction else ""}
+{instruction_rule_text_deep}
 【核心原则】
 - **就事论事**：必须严格围绕用户指定的主题展开讨论，不要偏离主题或引入无关内容
 - **有依据有见地**：所有观点和论述都要有事实依据、理论支撑或案例佐证，不能空泛议论
@@ -1268,12 +1283,7 @@ class TextProcessor:
 
 【主题】
 {topic}
-{f'''\n【用户指令】
-
-{instruction}
-
-**⚠️ 重要**：必须严格按照上述用户指令执行，特别是关于内容要求、时长要求、风格要求等。如果指令中指定了时长（如"1分钟"、"5分钟"等），必须严格按照该时长生成相应长度的对话内容。如果指令中指定了内容要求（如"简短"、"详细"等），必须严格按照要求执行。
-''' if instruction else ""}
+{instruction_detail_text_deep}
 【内容深度要求】
 
 请生成的脚本严格围绕上述主题，包含以下层次，以引导听众进行深度思考：
