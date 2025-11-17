@@ -294,13 +294,19 @@ class TextProcessor:
         text = re.sub(r'[¥$]\d+\.?\d*', replace_price, text)  # ¥100, $100
         text = re.sub(r'\d+\.?\d*[元块]', replace_price, text)  # 100元, 100.50块
         
-        # 3. 处理百分比：如 50% -> 百分之五十
+        # 3. 处理百分比：如 50% -> 百分之五十，87% -> 百分之八十七
+        # 使用更精确的正则表达式，确保匹配到百分比符号前的数字
         def replace_percent(match):
             num_str = match.group(1)
+            # 确保数字字符串不为空
+            if not num_str:
+                return match.group(0)  # 如果匹配失败，返回原字符串
             chinese_num = self.number_to_chinese(num_str)
             return f"百分之{chinese_num}"
         
-        text = re.sub(r'(\d+\.?\d*)%', replace_percent, text)
+        # 使用更精确的正则表达式，确保匹配数字和百分号
+        # 匹配模式：数字（可能包含小数点）+ 百分号，前后可以有空格
+        text = re.sub(r'(\d+\.?\d*)\s*%', replace_percent, text)
         
         # 4. 处理普通数字（整数和小数，包括负数）
         # 但排除已经在日期、价格、百分比中的数字
