@@ -795,27 +795,22 @@ class TextProcessor:
         else:
             material_text = "\n【播客内容】\n请根据角色人设自由生成一段高度拟人化的播客对话。"
         
-        # 构建用户指令规则文本（避免在 f-string 表达式中使用反斜杠）
-        instruction_rule_text = ""
-        if instruction:
-            instruction_rule_text = "** 用户指令执行规则**：\n- 必须严格按照用户指令执行，特别是关于内容要求、时长要求、风格要求等\n- 如果指令中指定了时长（如\"1分钟\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容\n- 如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行\n- 用户指令的优先级高于默认设置，必须优先满足指令要求\n\n"
-        
-        # 构建用户指令详细文本（避免在 f-string 表达式中使用反斜杠）
-        instruction_detail_text = ""
-        if instruction:
-            instruction_detail_text = f"\n【用户指令】\n\n{instruction}\n\n** 重要**：必须严格按照上述用户指令执行，特别是关于内容要求、时长要求、风格要求等。如果指令中指定了时长（如\"1分钟\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容。如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行。"
-        
         prompt = f"""【系统指令：高度拟人化角色互动对话生成】
 
 你是一个专业的对话编剧和配音指导。你的任务是根据用户提供的精确角色人设和文本素材，生成一段高度拟人化、真实自然的N角色互动对话。
 
-{instruction_rule_text}
+{f"**⚠️ 用户指令执行规则**：\n- 必须严格按照用户指令执行，特别是关于内容要求、时长要求、风格要求等\n- 如果指令中指定了时长（如\"1分钟\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容\n- 如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行\n- 用户指令的优先级高于默认设置，必须优先满足指令要求\n\n" if instruction else ""}
 【用户自定义角色人设】
 
 {character_text}
 
 {material_text}
-{instruction_detail_text}
+{f'''\n【用户指令】
+
+{instruction}
+
+**⚠️ 重要**：必须严格按照上述用户指令执行，特别是关于内容要求、时长要求、风格要求等。如果指令中指定了时长（如"1分钟"、"5分钟"等），必须严格按照该时长生成相应长度的对话内容。如果指令中指定了内容要求（如"简短"、"详细"等），必须严格按照要求执行。
+''' if instruction else ""}
 【核心要求：高度拟人化对话】
 
 **1. 真实对话感（最重要）**
@@ -926,23 +921,26 @@ class TextProcessor:
         role_names = ["角色A", "角色B", "角色C"][:num_characters]
         role_list = "、".join(role_names)
         
-        # 提取角色虚拟名字（用于自我介绍）
+        # 提取角色名字，如果没有提供则让混元大模型生成随机名字
         role_virtual_names = []
-        has_all_names = True  # 标记是否所有角色都有名字
+        need_generate_names = False
         
         if character_descriptions:
             for i, role_key in enumerate(role_names):
                 # 从角色描述中提取名字，优先使用角色描述中的name字段
-                virtual_name = None
-                
                 if role_key in character_descriptions:
                     role_desc = character_descriptions[role_key]
                     if isinstance(role_desc, dict):
                         virtual_name = role_desc.get("name", "")
                         if virtual_name and virtual_name.strip():
-                            virtual_name = virtual_name.strip()
+                            role_virtual_names.append(virtual_name.strip())
                         else:
-                            virtual_name = None
+                            # 如果没有提供名字，标记需要生成
+                            need_generate_names = True
+                            role_virtual_names.append(None)  # 占位符，稍后生成
+                    else:
+                        need_generate_names = True
+                        role_virtual_names.append(None)
                 else:
                     # 如果角色描述中没有对应的键，尝试按顺序获取
                     desc_list = list(character_descriptions.values())
@@ -951,19 +949,79 @@ class TextProcessor:
                         if isinstance(role_desc, dict):
                             virtual_name = role_desc.get("name", "")
                             if virtual_name and virtual_name.strip():
-                                virtual_name = virtual_name.strip()
+                                role_virtual_names.append(virtual_name.strip())
                             else:
-                                virtual_name = None
-                
-                if virtual_name:
-                    role_virtual_names.append(virtual_name)
-                else:
-                    role_virtual_names.append(None)  # 标记需要自动生成
-                    has_all_names = False
+                                need_generate_names = True
+                                role_virtual_names.append(None)
+                        else:
+                            need_generate_names = True
+                            role_virtual_names.append(None)
+                    else:
+                        need_generate_names = True
+                        role_virtual_names.append(None)
         else:
-            # 如果没有角色描述，所有名字都需要自动生成
+            # 如果没有角色描述，需要生成随机名字
+            need_generate_names = True
             role_virtual_names = [None] * num_characters
-            has_all_names = False
+        
+        # 如果需要生成名字，调用混元大模型生成随机名字
+        if need_generate_names:
+            try:
+                from .api_client import get_client
+                api_client = get_client()
+                
+                # 构建生成名字的提示词
+                name_prompt = f"""请为{num_characters}个播客角色生成随机的中文名字。要求：
+1. 每个名字2-4个汉字
+2. 名字要自然、真实，适合播客主持人或嘉宾
+3. 名字要有一定的区分度，避免过于相似
+4. 只返回名字，每行一个，不要添加任何说明文字
+5. 格式示例：
+小明
+李华
+王芳
+
+请直接返回{num_characters}个名字，每行一个："""
+                
+                # 调用混元大模型生成名字
+                generated_names_text = api_client.generate_text(
+                    prompt=name_prompt,
+                    temperature=0.9,  # 使用较高的温度以增加随机性
+                    max_tokens=100
+                )
+                
+                # 解析生成的名字
+                generated_names = []
+                for line in generated_names_text.strip().split('\n'):
+                    name = line.strip()
+                    # 过滤掉空行和说明文字
+                    if name and len(name) >= 2 and len(name) <= 4:
+                        # 检查是否包含中文字符
+                        if any('\u4e00' <= char <= '\u9fff' for char in name):
+                            generated_names.append(name)
+                
+                # 如果生成的名字数量不够，用默认名字补充
+                while len(generated_names) < num_characters:
+                    generated_names.append(f"主持人{chr(65 + len(generated_names))}")
+                
+                # 只取需要的数量
+                generated_names = generated_names[:num_characters]
+                
+                # 填充到role_virtual_names中
+                name_idx = 0
+                for i in range(len(role_virtual_names)):
+                    if role_virtual_names[i] is None:
+                        role_virtual_names[i] = generated_names[name_idx]
+                        name_idx += 1
+                
+            except Exception as e:
+                # 如果生成失败，使用默认名字
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"生成随机名字失败: {e}，使用默认名字")
+                for i in range(len(role_virtual_names)):
+                    if role_virtual_names[i] is None:
+                        role_virtual_names[i] = f"主持人{chr(65+i)}"
         
         # 构建播客基本信息部分
         podcast_info = ""
@@ -1015,11 +1073,6 @@ class TextProcessor:
         default_podcast_info = "播客名称：[由文本内容推断]\n本期主题：[由文本内容推断]\n"
         final_podcast_info = podcast_info if podcast_info else default_podcast_info
         
-        # 构建用户指令规则文本（避免在 f-string 表达式中使用反斜杠）
-        instruction_rule_text_short = ""
-        if instruction:
-            instruction_rule_text_short = "### 用户指令执行规则\n- 必须严格按照用户指令执行，特别是关于时长、内容和风格要求\n- 用户指令优先级高于默认设置\n"
-        
         # 构建场景类型字符串
         scene_types_str = ', '.join(scene_types) if scene_types else "自然互动交流"
         
@@ -1065,76 +1118,119 @@ class TextProcessor:
         
         # 构建完整的提示词（优化后的清晰结构）
         prompt = f"""【核心任务】
-# 播客脚本生成指令
+你是一位专业的播客编剧和对话导演。请将提供的文本素材转化为一段结构完整、互动自然、内容丰富、符合真人交流方式的多角色播客对话脚本。对话要像真实朋友之间的聊天一样自然、真实、有深度。
 
-## 核心身份
-你是一位专业的播客编剧和对话导演。
+【 关键要求 - 必须严格遵守】
+**角色名称使用规则**：
+- 对话标记中必须使用标准角色名：{role_list}
+- **绝对禁止**使用文本素材中出现的任何人名、角色名、实体名称或其他非标准角色名
+- 无论文本素材中出现了什么人名、角色名、实体名称，都必须映射到标准角色名（{role_list}）进行对话标记
+- 文本素材中的人名、角色名仅用于理解内容，不能直接用作对话标记
+- 违反此规则会导致生成失败，请务必严格遵守
 
-## 核心任务
-将提供的文本素材转化为一段结构完整、互动自然的多角色播客对话脚本。
+{f"**用户指令执行规则**：\n- 必须严格按照用户指令执行，特别是关于内容要求、时长要求、风格要求等\n- 如果指令中指定了时长（如\"1分钟\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容\n- 如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行\n- 用户指令的优先级高于默认设置，必须优先满足指令要求\n" if instruction else ""}
 
-## 关键规则
+【输入信息】
 
-### 角色命名规则（必须严格遵守）
-- **对话标记必须使用**：{role_list}
-- **绝对禁止使用**：文本素材中的任何人名、角色名或实体名称
-- 文本素材中的名称仅用于理解内容，对话时必须映射到标准角色名
+1. 播客基本信息
+{final_podcast_info}
 
-{instruction_rule_text_short if instruction else ""}
+2. 角色设定
+{character_info}
 
-## 输入信息
-- **播客信息**：{final_podcast_info}
-- **角色设定**：{character_info}
-- **文本素材**：{text_preview}
-- **互动场景**：{scene_types_str}
-{f"- **用户指令**：{instruction}" if instruction else ""}
+3. 文本素材
+{text_preview}
 
-## 生成要求
+4. 互动场景类型
+{scene_types_str}
+{category_section}
+{f'''5. 用户指令
 
-### 1. 播客结构
-**开场自我介绍必须使用虚拟名字**：
-{chr(10).join([f"- {role_names[i]} → {role_virtual_names[i] if role_virtual_names[i] else '[请根据角色设定自动生成合适的虚拟名字]'}" for i in range(num_characters)])}
+{instruction}
 
-{f"**⚠️ 重要**：以上标记为'[请根据角色设定自动生成合适的虚拟名字]'的角色，你必须根据该角色的性格、身份、说话风格等特点，自动生成一个合适的、具体的虚拟名字（如：小明、李华、张伟、王芳等常见中文名字，或根据角色特点生成更贴合的名字）。不能使用'主持人A'、'主持人B'这种编号式的名字，必须使用具体的、真实的名字。" if not has_all_names else ""}
+** 重要**：必须严格按照上述用户指令执行，特别是关于内容要求、时长要求、风格要求等。如果指令中指定了时长（如"1分钟"、"5分钟"等），必须严格按照该时长生成相应长度的对话内容。如果指令中指定了内容要求（如"简短"、"详细"等），必须严格按照要求执行。
+''' if instruction else ""}
+【生成要求】
 
-**标准结构**：
+一、播客结构模板
 
-[开场] 自我介绍（使用虚拟名字）+ 主题引入
-[主体] 基于文本素材的深入讨论（3-4分钟）
-[结尾] 总结 + 结束语
+**重要**：在开场自我介绍时，必须使用角色的虚拟名字（不是角色标记名）。每个角色的虚拟名字如下：
+{chr(10).join([f"- {role_names[i]}的虚拟名字：{role_virtual_names[i]}" for i in range(num_characters)])}
 
+开场示例：
+[角色A]大家好，欢迎收听《{podcast_name if podcast_name else "本期播客"}》！我是{role_virtual_names[0]}。
+{chr(10) + f"[角色B]我是{role_virtual_names[1]}。今天我们要聊一个很有意思的话题：{topic if topic else '[本期主题]'}。" if num_characters >= 2 else ""}
+[角色A]没错！说到这个话题，我最近发现...[自然引入主题]
 
-### 2. 对话质量
-- **真实感**：口语化表达、自然停顿、感叹词、即兴反应
-- **互动性**：打断、接话、抢话、观点碰撞
-- **角色一致**：台词符合角色性格和说话风格
-- **内容丰富**：具体细节、案例分析、个人经历、专业见解
+[讨论主体 - 基于文本素材展开，包含多个角度、深入分析、案例分享、观点碰撞，时长约3-4分钟]
 
-### 3. 格式规范
-**基本格式**：`[角色名]（情绪地）对话内容`
-**禁止使用**：冒号、文本素材中的名称、非标准角色名
+{chr(10) + f"[角色C]好了，今天关于{topic if topic else '[本期主题]'}的讨论就到这里。" if num_characters >= 3 else ""}
+[角色A]感谢大家的收听！如果有什么想法，欢迎在评论区留言。
+{chr(10) + "[角色B]我们下期再见！" if num_characters >= 2 else ""}
 
-**技术参数**：
-- 每个角色发言10-12次
-- 总对话30-40轮
-- 时长5-7分钟
-- 总字数2500-3500字
+**关键要求**：
+- 在开场自我介绍时，必须使用上述虚拟名字（{role_virtual_names[0]}{f"、{role_virtual_names[1]}" if num_characters >= 2 else ""}{f"、{role_virtual_names[2]}" if num_characters >= 3 else ""}）
+- 不能使用占位符如"[角色A名字]"或"[角色B名字]"，必须直接使用实际的虚拟名字
+- 对话标记仍然使用标准角色名（{role_list}），但自我介绍时要说虚拟名字
 
-**音效标注**（可选）：`<|laughter|>`、`<|sigh|>`、`<|applause|>`
+二、对话质量要求
 
-## 输出示例
-[角色A]嘿，听众朋友们，欢迎回来！我是{role_virtual_names[0] if role_virtual_names[0] else '[虚拟名字]'}。
-{chr(10) + f"[角色B]我是{role_virtual_names[1] if role_virtual_names[1] else '[虚拟名字]'}。今天我们要聊一个很有意思的话题..." if num_characters >= 2 else ""}
-[角色A]好家伙，上来就挑战高难度！我觉得吧...
-{chr(10) + "[角色B]嗯...这个问题确实很有深度，从技术角度看..." if num_characters >= 2 else ""}
+- **真实对话感**：使用口语化表达、自然停顿（用"..."表示）、感叹词、语气词、即兴反应，模拟真人对话的自然节奏和语调变化
+- **自然对话流**：使用打断、接话、抢话、补充说明，让对话像真实交流一样流畅自然
+- **角色一致性**：每句台词必须符合角色的性格和说话风格，保持角色特征鲜明
+- **话题过渡**：话题转换要自然平滑，通过提问、回应、引申等方式自然过渡，避免生硬切换
+- **对话深度**：每段对话要深入展开，包含具体细节、案例分析、个人经历、专业见解、不同观点碰撞
+- **互动频率**：角色之间要有频繁且自然的互动，包括提问、回应、补充、质疑、赞同、反驳、举例等
+- **内容充实**：确保对话内容丰富，不要过于简短，每段对话都要有实质性内容，避免空洞的客套话
 
-## 最后提醒
-1. 对话标记**必须使用**：{role_list}
-2. 开场自我介绍时，必须使用具体的虚拟名字（如：小明、李华、张伟等），不能使用"主持人A"、"主持人B"这种编号式的名字
-{f"3. 对于没有提供名字的角色，请根据角色设定自动生成合适的虚拟名字" if not has_all_names else "3. 使用提供的虚拟名字进行自我介绍"}
-4. 直接输出对话内容，不添加任何说明
+{scene_requirements}
 
-现在请开始生成播客脚本。"""
+三、格式规范
+
+**基本格式**：
+- 主要格式：`[角色名]（情绪地）对话内容`（推荐）
+- 重要：不要使用冒号，直接写对话内容
+- **角色名称必须严格使用**：{role_list}
+- **禁止使用**：
+  - 不能使用纯数字（如[1]、[2]）、单个字母（如[J]、[A]）或其他非标准角色名
+  - **绝对不能使用文本素材中的任何人名、角色名、实体名称**，无论文本素材中出现了什么名称，都必须使用标准角色名
+  - 文本素材中的人名、角色名、实体名称仅用于理解内容背景，不能直接用作对话标记
+  - 只能使用{role_list}中指定的角色名
+- **关键要求**：无论文本素材中出现了什么人名、角色名、实体名称，对话标记都必须使用{role_list}，这是硬性要求，违反会导致生成失败
+
+**对话要求**：
+- 每个角色发言10-12次，总共约{num_characters * 13}段对话（控制在30-40轮以内，确保内容丰富）
+- 每段对话50-80字，包含具体观点、例子、解释、讨论、反驳或补充
+- 播客时长约5-7分钟
+- 对话总字数建议2500-3500字（纯对话内容，确保内容充实）
+- **真实对话感**：使用口语化表达、自然停顿、思考过程、即兴反应，避免过于正式或书面化的语言
+
+**音效标注**（可选）：
+- 格式：`<|laughter|>`、`<|sigh|>`、`<|applause|>`
+- 示例：`[角色A]哈哈，这个例子太有意思了！<|laughter|>`
+
+四、输出示例
+
+**注意**：以下示例中的"角色A"、"角色B"是标准角色名，必须严格按照此格式使用，不能替换为文本素材中的人名。
+
+```
+[角色A]嘿，听众朋友们，欢迎回到我们的频道！今天咱们可有个大话题要聊。
+
+[角色B]没错，是关于AI能否真正理解人类的幽默。你说，它能听懂咱们的梗吗？
+
+[角色A]好家伙，上来就挑战高难度！我觉得吧，它现在可能还在学习为什么"香蕉滑倒了"是个笑话。
+
+[角色B]嗯...这个问题确实很有意思。从技术角度看，AI理解幽默的关键在于...
+```
+
+【最后提醒】
+在生成对话时，请务必：
+1. 使用标准角色名（{role_list}）作为所有对话标记
+2. 绝对不要使用文本素材中出现的任何人名、角色名、实体名称或其他非标准名称
+3. 文本素材中的人名、角色名、实体名称仅用于理解内容，必须映射到标准角色名（{role_list}）进行对话标记
+4. 无论文本素材中出现什么名称，对话标记都必须使用{role_list}，这是硬性要求，违反会导致生成失败
+
+现在请开始生成，直接输出对话内容，不要添加任何其他说明、注释或解释。"""
         return prompt
     
     def _generate_example_format(self, role_names: List[str], num_characters: int, with_emotion: bool = False) -> str:
@@ -1265,21 +1361,11 @@ class TextProcessor:
         # 匹配 {num_characters * 11} 这样的表达式
         dialogue_count_text = re.sub(r'\{([^}]+)\}', replace_expression, dialogue_count_text)
         
-        # 构建用户指令规则文本（避免在 f-string 表达式中使用反斜杠）
-        instruction_rule_text_deep = ""
-        if instruction:
-            instruction_rule_text_deep = "**⚠️ 用户指令执行规则**：\n- 必须严格按照用户指令执行，特别是关于内容要求、时长要求、风格要求等\n- 如果指令中指定了时长（如\"1分钟\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容\n- 如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行\n- 用户指令的优先级高于默认设置，必须优先满足指令要求\n\n"
-        
-        # 构建用户指令详细文本（避免在 f-string 表达式中使用反斜杠）
-        instruction_detail_text_deep = ""
-        if instruction:
-            instruction_detail_text_deep = f"\n【用户指令】\n\n{instruction}\n\n**⚠️ 重要**：必须严格按照上述用户指令执行，特别是关于内容要求、时长要求、风格要求等。如果指令中指定了时长（如\"1分钟\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容。如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行。"
-        
         prompt = f"""【系统指令：深度内容架构师】
 
 你是一档知名深度访谈播客的主编和首席研究员。请围绕用户指定的主题，生成一份有深度、有见地、能引发听众长期思考的播客脚本。
 
-{instruction_rule_text_deep}
+{f"**⚠️ 用户指令执行规则**：\n- 必须严格按照用户指令执行，特别是关于内容要求、时长要求、风格要求等\n- 如果指令中指定了时长（如\"1分钟\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容\n- 如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行\n- 用户指令的优先级高于默认设置，必须优先满足指令要求\n\n" if instruction else ""}
 【核心原则】
 - **就事论事**：必须严格围绕用户指定的主题展开讨论，不要偏离主题或引入无关内容
 - **有依据有见地**：所有观点和论述都要有事实依据、理论支撑或案例佐证，不能空泛议论
@@ -1289,7 +1375,12 @@ class TextProcessor:
 
 【主题】
 {topic}
-{instruction_detail_text_deep}
+{f'''\n【用户指令】
+
+{instruction}
+
+**⚠️ 重要**：必须严格按照上述用户指令执行，特别是关于内容要求、时长要求、风格要求等。如果指令中指定了时长（如"1分钟"、"5分钟"等），必须严格按照该时长生成相应长度的对话内容。如果指令中指定了内容要求（如"简短"、"详细"等），必须严格按照要求执行。
+''' if instruction else ""}
 【内容深度要求】
 
 请生成的脚本严格围绕上述主题，包含以下层次，以引导听众进行深度思考：
