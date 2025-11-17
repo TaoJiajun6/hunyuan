@@ -653,49 +653,7 @@ class TextProcessor:
                 if sentence.strip():
                     dialogues.append((current_role, sentence.strip()))
         
-        # 后处理：确保角色交替出现，将连续相同角色的对话分配给前一个不同角色
-        if not dialogues:
-            return dialogues
-        
-        # 获取所有角色列表（用于角色分配）
-        all_roles = list(set([role for role, _ in dialogues]))
-        if len(all_roles) < 2:
-            # 如果只有一个角色，无法交替，直接返回
-            return dialogues
-        
-        # 处理连续相同角色的对话，将其分配给前一个不同角色
-        fixed_dialogues = []
-        prev_role = None
-        
-        for role, content in dialogues:
-            if role == prev_role:
-                # 如果角色相同，需要分配给前一个不同的角色
-                # 找到前一个不同的角色
-                if len(fixed_dialogues) > 0:
-                    # 从后往前找，找到第一个不同的角色
-                    alternate_role = None
-                    for i in range(len(fixed_dialogues) - 1, -1, -1):
-                        if fixed_dialogues[i][0] != role:
-                            alternate_role = fixed_dialogues[i][0]
-                            break
-                    
-                    # 如果找到了前一个不同角色，使用它；否则使用角色列表中的另一个角色
-                    if alternate_role is None:
-                        # 如果找不到前一个不同角色（比如第一个就是重复的），使用角色列表中的另一个角色
-                        alternate_role = [r for r in all_roles if r != role][0]
-                    
-                    fixed_dialogues.append((alternate_role, content))
-                    prev_role = alternate_role
-                else:
-                    # 如果这是第一个对话且角色重复（不应该发生，但保险起见）
-                    fixed_dialogues.append((role, content))
-                    prev_role = role
-            else:
-                # 角色不同，直接添加
-                fixed_dialogues.append((role, content))
-                prev_role = role
-        
-        return fixed_dialogues
+        return dialogues
     
     def extract_roles(self, text: str) -> List[str]:
         """
@@ -837,24 +795,22 @@ class TextProcessor:
         else:
             material_text = "\n【播客内容】\n请根据角色人设自由生成一段高度拟人化的播客对话。"
         
-        # 预先构建包含换行符的字符串，避免在 f-string 表达式中使用反斜杠
-        instruction_rule_text = ""
-        if instruction:
-            instruction_rule_text = "** 用户指令执行规则**：\n- 必须严格按照用户指令执行，特别是关于内容要求、时长要求、风格要求等\n- 如果指令中指定了时长（如\"1分钟\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容\n- 如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行\n- 用户指令的优先级高于默认设置，必须优先满足指令要求\n\n"
-        
-        instruction_section = ""
-        if instruction:
-            instruction_section = f"\n【用户指令】\n\n{instruction}\n\n**⚠️ 重要**：必须严格按照上述用户指令执行，特别是关于内容要求、时长要求、风格要求等。如果指令中指定了时长（如\"1分钟\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容。如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行。\n"
-        
         prompt = f"""【系统指令：高度拟人化角色互动对话生成】
 
 你是一个专业的对话编剧和配音指导。你的任务是根据用户提供的精确角色人设和文本素材，生成一段高度拟人化、真实自然的N角色互动对话。
 
-{instruction_rule_text}【用户自定义角色人设】
+{f"**⚠️ 用户指令执行规则**：\n- 必须严格按照用户指令执行，特别是关于内容要求、时长要求、风格要求等\n- 如果指令中指定了时长（如\"1分钟\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容\n- 如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行\n- 用户指令的优先级高于默认设置，必须优先满足指令要求\n\n" if instruction else ""}
+【用户自定义角色人设】
 
 {character_text}
 
-{material_text}{instruction_section}
+{material_text}
+{f'''\n【用户指令】
+
+{instruction}
+
+**⚠️ 重要**：必须严格按照上述用户指令执行，特别是关于内容要求、时长要求、风格要求等。如果指令中指定了时长（如"1分钟"、"5分钟"等），必须严格按照该时长生成相应长度的对话内容。如果指令中指定了内容要求（如"简短"、"详细"等），必须严格按照要求执行。
+''' if instruction else ""}
 【核心要求：高度拟人化对话】
 
 **1. 真实对话感（最重要）**
@@ -1058,15 +1014,6 @@ class TextProcessor:
             # 构建分类部分（避免在f-string表达式中使用反斜杠）
             category_section = f"5. 播客分类\n\n{category}\n{category_guidance_text}\n"
         
-        # 预先构建包含换行符的字符串，避免在 f-string 表达式中使用反斜杠
-        instruction_rule_text = ""
-        if instruction:
-            instruction_rule_text = "**用户指令执行规则**：\n- 必须严格按照用户指令执行，特别是关于内容要求、时长要求、风格要求等\n- 如果指令中指定了时长（如\"1分钟\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容\n- 如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行\n- 用户指令的优先级高于默认设置，必须优先满足指令要求\n"
-        
-        instruction_section = ""
-        if instruction:
-            instruction_section = f"5. 用户指令\n\n{instruction}\n\n**⚠️ 重要**：必须严格按照上述用户指令执行，特别是关于内容要求、时长要求、风格要求等。如果指令中指定了时长（如\"1分钟\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容。如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行。\n"
-        
         # 构建完整的提示词（优化后的清晰结构）
         prompt = f"""【核心任务】
 你是一位专业的播客编剧和对话导演。请将提供的文本素材转化为一段结构完整、互动自然、内容丰富、符合真人交流方式的多角色播客对话脚本。对话要像真实朋友之间的聊天一样自然、真实、有深度。
@@ -1079,7 +1026,9 @@ class TextProcessor:
 - 文本素材中的人名、角色名仅用于理解内容，不能直接用作对话标记
 - 违反此规则会导致生成失败，请务必严格遵守
 
-{instruction_rule_text}【输入信息】
+{f"**用户指令执行规则**：\n- 必须严格按照用户指令执行，特别是关于内容要求、时长要求、风格要求等\n- 如果指令中指定了时长（如\"1分钟\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容\n- 如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行\n- 用户指令的优先级高于默认设置，必须优先满足指令要求\n" if instruction else ""}
+
+【输入信息】
 
 1. 播客基本信息
 {final_podcast_info}
@@ -1092,7 +1041,13 @@ class TextProcessor:
 
 4. 互动场景类型
 {scene_types_str}
-{category_section}{instruction_section}
+{category_section}
+{f'''5. 用户指令
+
+{instruction}
+
+** 重要**：必须严格按照上述用户指令执行，特别是关于内容要求、时长要求、风格要求等。如果指令中指定了时长（如"1分钟"、"5分钟"等），必须严格按照该时长生成相应长度的对话内容。如果指令中指定了内容要求（如"简短"、"详细"等），必须严格按照要求执行。
+''' if instruction else ""}
 【生成要求】
 
 一、播客结构模板
@@ -1295,20 +1250,12 @@ class TextProcessor:
         # 匹配 {num_characters * 11} 这样的表达式
         dialogue_count_text = re.sub(r'\{([^}]+)\}', replace_expression, dialogue_count_text)
         
-        # 预先构建包含换行符的字符串，避免在 f-string 表达式中使用反斜杠
-        instruction_rule_text = ""
-        if instruction:
-            instruction_rule_text = "**⚠️ 用户指令执行规则**：\n- 必须严格按照用户指令执行，特别是关于内容要求、时长要求、风格要求等\n- 如果指令中指定了时长（如\"1分钟\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容\n- 如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行\n- 用户指令的优先级高于默认设置，必须优先满足指令要求\n\n"
-        
-        instruction_section = ""
-        if instruction:
-            instruction_section = f"\n【用户指令】\n\n{instruction}\n\n**⚠️ 重要**：必须严格按照上述用户指令执行，特别是关于内容要求、时长要求、风格要求等。如果指令中指定了时长（如\"1分钟\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容。如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行。\n"
-        
         prompt = f"""【系统指令：深度内容架构师】
 
 你是一档知名深度访谈播客的主编和首席研究员。请围绕用户指定的主题，生成一份有深度、有见地、能引发听众长期思考的播客脚本。
 
-{instruction_rule_text}【核心原则】
+{f"**⚠️ 用户指令执行规则**：\n- 必须严格按照用户指令执行，特别是关于内容要求、时长要求、风格要求等\n- 如果指令中指定了时长（如\"1分钟\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容\n- 如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行\n- 用户指令的优先级高于默认设置，必须优先满足指令要求\n\n" if instruction else ""}
+【核心原则】
 - **就事论事**：必须严格围绕用户指定的主题展开讨论，不要偏离主题或引入无关内容
 - **有依据有见地**：所有观点和论述都要有事实依据、理论支撑或案例佐证，不能空泛议论
 - **内容准确合理**：确保基本信息准确，逻辑合理，避免错误信息
@@ -1316,7 +1263,13 @@ class TextProcessor:
 - **引发深度思考**：内容要有深度、有价值，能够帮助听众跨越认知和领域门槛，引发深度思考
 
 【主题】
-{topic}{instruction_section}
+{topic}
+{f'''\n【用户指令】
+
+{instruction}
+
+**⚠️ 重要**：必须严格按照上述用户指令执行，特别是关于内容要求、时长要求、风格要求等。如果指令中指定了时长（如"1分钟"、"5分钟"等），必须严格按照该时长生成相应长度的对话内容。如果指令中指定了内容要求（如"简短"、"详细"等），必须严格按照要求执行。
+''' if instruction else ""}
 【内容深度要求】
 
 请生成的脚本严格围绕上述主题，包含以下层次，以引导听众进行深度思考：
