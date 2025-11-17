@@ -41,7 +41,7 @@ try:
         setup_logging(log_file="upload_client.log")
 except ImportError:
     # 如果log_config模块不存在，使用基本配置
-logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger(__name__)
 
@@ -251,7 +251,7 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
                     
                     def __iter__(self):
                         """迭代器，分块读取文件"""
-                    try:
+                        try:
                             self._file = open(self.file_path, 'rb')
                             while True:
                                 chunk = self._file.read(self.chunk_size)
@@ -314,8 +314,8 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
             
             # 如果状态码是成功的（2xx），即使之前有超时警告也认为成功
             if 200 <= resp.status_code < 300:
-            logger.info(f"上传成功！")
-            return resp
+                logger.info(f"上传成功！")
+                return resp
             else:
                 resp.raise_for_status()
                 return resp
@@ -332,7 +332,7 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
             # 无限重试，每次重试前等待
             wait = min(backoff_factor * (2 ** (attempt - 1)), 60)  # 最大等待60秒
             logger.warning(f"  {wait:.1f}s 后重试（无重试次数限制，将持续重试直到成功）...")
-                time.sleep(wait)
+            time.sleep(wait)
             continue  # 继续重试
         except (requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
             last_exc = e
@@ -362,7 +362,7 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
             logger.error(f"上传出现未预期错误 (attempt {attempt}): {e}")
             wait = min(backoff_factor * (2 ** (attempt - 1)), 60)  # 最大等待60秒
             logger.warning(f"  {wait:.1f}s 后重试（无重试次数限制，将持续重试直到成功）...")
-                time.sleep(wait)
+            time.sleep(wait)
             continue  # 继续重试
 
 
