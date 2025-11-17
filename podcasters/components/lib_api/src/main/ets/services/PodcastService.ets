@@ -83,7 +83,7 @@ export interface MultiRoleRequest {
   character_3_personality?: string; // 角色3性格特点（可选）
   character_3_speaking_style?: string; // 角色3说话风格（可选）
   scene_types?: string[]; // 互动场景类型列表（可选）
-  category?: string; // 播客分类（可选），如：商业、科技、财经、新闻、影视、音乐、文化艺术、历史、哲学思考、自我成长、职场、学习、教育育儿、情感恋爱、健康养生、旅游、美食、生活方式、娱乐、游戏电竞、体育、时尚美妆、汽车、法律、宠物等
+  category?: string; // 播客分类（可选），如：社会文化与历史、音乐、影视、书、喜剧/脱口秀、艺术、宗教与灵修、科学与科技、时尚与美妆、健康、健身与养身、育儿与家庭、情感、生活、体育运动、休闲娱乐与爱好、商业与财经、新闻、职场万象、自我成长与自愈、学术研究等
   job_id?: string; // 可选任务ID，用于轮询进度
 }
 

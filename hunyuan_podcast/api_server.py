@@ -319,7 +319,11 @@ class PodcastTaskManager:
         # 生成对话文本
         processor = TextProcessor()
         api_client = get_client()
-        prompt = processor.build_character_prompt(character_descriptions, request_data.get("topic"))
+        prompt = processor.build_character_prompt(
+            character_descriptions, 
+            request_data.get("topic"),
+            instruction=request_data.get("instruction")
+        )
         
         generated_text = await asyncio.get_event_loop().run_in_executor(
             None, api_client.generate_text,
@@ -398,7 +402,8 @@ class PodcastTaskManager:
         prompt = processor.build_deep_podcast_prompt(
             request_data.get("topic", ""),
             request_data.get("depth_level", "深度"),
-            num_characters
+            num_characters,
+            instruction=request_data.get("instruction")
         )
         
         generated_text = await asyncio.get_event_loop().run_in_executor(
@@ -729,7 +734,7 @@ class MultiRoleRequest(BaseModel):
     character_3_personality: Optional[str] = Field(None, description="角色3性格特点（可选）")
     character_3_speaking_style: Optional[str] = Field(None, description="角色3说话风格（可选）")
     scene_types: Optional[List[str]] = Field(None, description="互动场景类型列表（可选）")
-    category: Optional[str] = Field(None, description="播客分类（可选），如：商业、科技、财经、新闻、影视、音乐、文化艺术、历史、哲学思考、自我成长、职场、学习、教育育儿、情感恋爱、健康养生、旅游、美食、生活方式、娱乐、游戏电竞、体育、时尚美妆、汽车、法律、宠物等")
+    category: Optional[str] = Field(None, description="播客分类（可选），如：社会文化与历史、音乐、影视、书、喜剧/脱口秀、艺术、宗教与灵修、科学与科技、时尚与美妆、健康、健身与养身、育儿与家庭、情感、生活、体育运动、休闲娱乐与爱好、商业与财经、新闻、职场万象、自我成长与自愈、学术研究等")
     intro_music: Optional[str] = Field(None, description="[已废弃] 开场音乐，base64编码的音频文件（已废弃）")
     outro_music: Optional[str] = Field(None, description="[已废弃] 结尾音乐，base64编码的音频文件（已废弃）")
     background_music: Optional[str] = Field(None, description="[已废弃] 背景音乐，base64编码的音频文件（已废弃）")
@@ -757,8 +762,9 @@ class CharacterRequest(BaseModel):
     characters: List[CharacterInfo] = Field(..., description="角色列表", min_items=2, max_items=4)
     text: str = Field(..., description="文本素材（必需）")
     topic: Optional[str] = Field(None, description="播客主题（可选，主要用于背景音乐选择，如果不提供文本素材则作为对话主题）")
+    instruction: Optional[str] = Field(None, description="指令内容（可选，用于控制播客生成过程，如'生成1分钟播客'、'使用轻松风格'等）")
     silence_interval: int = Field(800, description="角色切换静音间隔（毫秒），默认800ms以增加角色之间的间隔，让对话更清晰", ge=200, le=1500)
-    category: Optional[str] = Field(None, description="播客分类（可选），用于背景音乐选择，如：商业、科技、财经、新闻、影视、音乐、文化艺术、历史、哲学思考、自我成长、职场、学习、教育育儿、情感恋爱、健康养生、旅游、美食、生活方式、娱乐、游戏电竞、体育、时尚美妆、汽车、法律、宠物等")
+    category: Optional[str] = Field(None, description="播客分类（可选），用于背景音乐选择，如：社会文化与历史、音乐、影视、书、喜剧/脱口秀、艺术、宗教与灵修、科学与科技、时尚与美妆、健康、健身与养身、育儿与家庭、情感、生活、体育运动、休闲娱乐与爱好、商业与财经、新闻、职场万象、自我成长与自愈、学术研究等")
     background_volume: float = Field(0.3, description="背景音乐音量（0.0-1.0）", ge=0.0, le=1.0)
     job_id: Optional[str] = Field(None, description="可选任务ID，用于前端轮询进度")
 
@@ -770,8 +776,9 @@ class DeepPodcastRequest(BaseModel):
     role_voices: Optional[Dict[str, str]] = Field(None, description="[已废弃] 角色音色映射，base64编码的音频文件（已废弃，请使用role_voice_urls）")
     num_characters: int = Field(2, description="角色数量", ge=1, le=3)
     depth_level: str = Field("深度", description="深度级别", pattern="^(深度|中等|浅层)$")
+    instruction: Optional[str] = Field(None, description="指令内容（可选，用于控制播客生成过程，如'生成1分钟播客'、'使用轻松风格'等）")
     silence_interval: int = Field(800, description="角色切换静音间隔（毫秒），默认800ms以增加角色之间的间隔，让对话更清晰", ge=200, le=1500)
-    category: Optional[str] = Field(None, description="播客分类（可选），用于背景音乐选择，如：商业、科技、财经、新闻、影视、音乐、文化艺术、历史、哲学思考、自我成长、职场、学习、教育育儿、情感恋爱、健康养生、旅游、美食、生活方式、娱乐、游戏电竞、体育、时尚美妆、汽车、法律、宠物等")
+    category: Optional[str] = Field(None, description="播客分类（可选），用于背景音乐选择，如：社会文化与历史、音乐、影视、书、喜剧/脱口秀、艺术、宗教与灵修、科学与科技、时尚与美妆、健康、健身与养身、育儿与家庭、情感、生活、体育运动、休闲娱乐与爱好、商业与财经、新闻、职场万象、自我成长与自愈、学术研究等")
     background_volume: float = Field(0.3, description="背景音乐音量（0.0-1.0）", ge=0.0, le=1.0)
     wait_for_upload: bool = Field(False, description="是否等待上传到云存储完成（可选，默认false）")
     upload_timeout: int = Field(120, description="等待上传完成的超时时间（秒），如果为0则根据文件大小自动计算", ge=0, le=600)
@@ -1682,7 +1689,8 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                     topic=request.topic if request.topic else None,
                     character_descriptions=character_descriptions if character_descriptions else None,
                     scene_types=request.scene_types if request.scene_types else None,
-                    category=request.category if request.category else None
+                    category=request.category if request.category else None,
+                    instruction=extracted_instruction if extracted_instruction else None
                 )
                 
                 text_generation_start = time.time()
@@ -2010,7 +2018,8 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
             prompt = processor.build_character_prompt(
                 character_descriptions,
                 text_material=text_material,
-                topic=request.topic if not text_material else None  # 如果有文本素材，不使用主题
+                topic=request.topic if not text_material else None,  # 如果有文本素材，不使用主题
+                instruction=request.instruction
             )
             
             text_generation_start = time.time()
@@ -2303,7 +2312,8 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
             prompt = processor.build_deep_podcast_prompt(
                 request.topic,
                 request.depth_level,
-                request.num_characters
+                request.num_characters,
+                instruction=request.instruction
             )
             
             text_generation_start = time.time()

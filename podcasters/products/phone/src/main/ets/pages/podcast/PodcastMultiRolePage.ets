@@ -47,33 +47,28 @@ export struct PodcastMultiRolePage {
     { value: '文件+指令' },
     { value: '文字+英文指令' }
   ];
-  // 播客分类选项列表（已合并重复分类）
+  // 播客分类选项列表
   private readonly categoryOptions: SelectOption[] = [
-    { value: '商业' }, // 包含创业创新
-    { value: '科技' }, // 包含科学科普
-    { value: '财经' },
-    { value: '新闻' },
-    { value: '影视' },
+    { value: '社会文化与历史' },
     { value: '音乐' },
-    { value: '文化艺术' }, // 包含读书阅读
-    { value: '历史' },
-    { value: '哲学思考' },
-    { value: '自我成长' }, // 包含自我成长与自愈、心理学
-    { value: '职场' }, // 包含职场万象、职场人际关系、求职就业
-    { value: '学习' }, // 包含学习类、考题
-    { value: '教育育儿' },
-    { value: '情感恋爱' },
-    { value: '健康养生' }, // 包含运动健身
-    { value: '旅游' },
-    { value: '美食' },
-    { value: '生活方式' },
-    { value: '娱乐' }, // 包含娱乐八卦、喜剧
-    { value: '游戏电竞' },
-    { value: '体育' },
-    { value: '时尚美妆' },
-    { value: '汽车' },
-    { value: '法律' },
-    { value: '宠物' }
+    { value: '影视' },
+    { value: '书' },
+    { value: '喜剧/脱口秀' },
+    { value: '艺术' },
+    { value: '宗教与灵修' },
+    { value: '科学与科技' },
+    { value: '时尚与美妆' },
+    { value: '健康、健身与养身' },
+    { value: '育儿与家庭' },
+    { value: '情感' },
+    { value: '生活' },
+    { value: '体育运动' },
+    { value: '休闲娱乐与爱好' },
+    { value: '商业与财经' },
+    { value: '新闻' },
+    { value: '职场万象' },
+    { value: '自我成长与自愈' },
+    { value: '学术研究' }
   ];
 
   /**

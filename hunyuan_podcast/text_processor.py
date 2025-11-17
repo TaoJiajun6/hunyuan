@@ -47,12 +47,20 @@ class TextProcessor:
         if not num_str:
             return num_str
         
-        # 处理小数
+        # 处理小数：确保小数点被正确读作"点"，且连贯不停顿
         if '.' in num_str:
             parts = num_str.split('.')
-            integer_part = self._number_to_chinese_integer(parts[0])
-            decimal_part = ''.join([self.DIGIT_TO_CHINESE.get(d, d) for d in parts[1]])
-            return f"{integer_part}点{decimal_part}"
+            if len(parts) == 2:
+                integer_part = self._number_to_chinese_integer(parts[0]) if parts[0] else '零'
+                # 小数部分逐位转换为中文数字
+                decimal_part = ''.join([self.DIGIT_TO_CHINESE.get(d, d) for d in parts[1] if d.isdigit()])
+                # 使用零宽连接符（U+200D）确保"点"字前后连贯，TTS不会停顿
+                # 格式：整数部分 + 零宽连接符 + "点" + 零宽连接符 + 小数部分
+                zwj = '\u200D'  # Zero Width Joiner
+                if decimal_part:
+                    return f"{integer_part}{zwj}点{zwj}{decimal_part}"
+                else:
+                    return f"{integer_part}{zwj}点"
         
         # 处理整数
         return self._number_to_chinese_integer(num_str)
@@ -217,8 +225,9 @@ class TextProcessor:
             num1_chinese = self.number_to_chinese(num1)
             # 小数点后的数字逐位转换
             num2_chinese = ''.join([self.DIGIT_TO_CHINESE.get(d, d) for d in num2])
-            
-            return f"{letters}{num1_chinese}点{num2_chinese}"
+            # 使用零宽连接符确保"点"字连贯不停顿
+            zwj = '\u200D'  # Zero Width Joiner
+            return f"{letters}{num1_chinese}{zwj}点{zwj}{num2_chinese}"
         
         # 匹配：字母+数字+点+数字（如 USB2.0, HDMI2.1, USB3.0）
         text = re.sub(r'([A-Za-z]+)(\d+)\.(\d+)', replace_tech_term_with_dot, text)
@@ -294,6 +303,18 @@ class TextProcessor:
         text = re.sub(r'[¥$]\d+\.?\d*', replace_price, text)  # ¥100, $100
         text = re.sub(r'\d+\.?\d*[元块]', replace_price, text)  # 100元, 100.50块
         
+        # 2.5. 处理带单位的金额（如 116.3亿元、50.5万元、10.2千元、5.8百元等）
+        def replace_amount_with_unit(match):
+            num_str = match.group(1)
+            unit = match.group(2)  # 亿元、万元、千元、百元
+            chinese_num = self.number_to_chinese(num_str)
+            return f"{chinese_num}{unit}"
+        
+        # 匹配：数字 + 单位（优先匹配亿元、万元、千元、百元，避免与单独的"元"冲突）
+        # 注意：这个处理在价格处理之后，所以单独的"元"已经被处理过了
+        # 使用非贪婪匹配，优先匹配更长的单位（如"亿元"优先于"元"）
+        text = re.sub(r'(\d+\.?\d*)(亿元|万元|千元|百元)', replace_amount_with_unit, text)
+        
         # 3. 处理百分比：如 50% -> 百分之五十，87% -> 百分之八十七
         # 使用更精确的正则表达式，确保匹配到百分比符号前的数字
         def replace_percent(match):
@@ -337,6 +358,9 @@ class TextProcessor:
                     return num_str
                 if next_char in '年月日¥$元块%':
                     return num_str
+                # 如果下一个字符是"万"、"千"、"百"，后面可能跟着"元"，说明已经被处理过，跳过
+                if next_char in '万千百' and end_pos + 1 < len(text) and text[end_pos + 1] == '元':
+                    return num_str
             
             return self.number_to_chinese(num_str)
         
@@ -361,6 +385,10 @@ class TextProcessor:
         
         # 先将数字转换为中文读音
         content = self.convert_numbers_to_chinese(content)
+        
+        # 移除省略号（...），因为会导致TTS输出错误
+        # 将连续的多个点（2个或以上）替换为空字符串
+        content = re.sub(r'\.{2,}', '', content)
         
         # 移除内容中的音效标注
         # 音效标注格式：[音效：xxx]
@@ -625,7 +653,49 @@ class TextProcessor:
                 if sentence.strip():
                     dialogues.append((current_role, sentence.strip()))
         
-        return dialogues
+        # 后处理：确保角色交替出现，将连续相同角色的对话分配给前一个不同角色
+        if not dialogues:
+            return dialogues
+        
+        # 获取所有角色列表（用于角色分配）
+        all_roles = list(set([role for role, _ in dialogues]))
+        if len(all_roles) < 2:
+            # 如果只有一个角色，无法交替，直接返回
+            return dialogues
+        
+        # 处理连续相同角色的对话，将其分配给前一个不同角色
+        fixed_dialogues = []
+        prev_role = None
+        
+        for role, content in dialogues:
+            if role == prev_role:
+                # 如果角色相同，需要分配给前一个不同的角色
+                # 找到前一个不同的角色
+                if len(fixed_dialogues) > 0:
+                    # 从后往前找，找到第一个不同的角色
+                    alternate_role = None
+                    for i in range(len(fixed_dialogues) - 1, -1, -1):
+                        if fixed_dialogues[i][0] != role:
+                            alternate_role = fixed_dialogues[i][0]
+                            break
+                    
+                    # 如果找到了前一个不同角色，使用它；否则使用角色列表中的另一个角色
+                    if alternate_role is None:
+                        # 如果找不到前一个不同角色（比如第一个就是重复的），使用角色列表中的另一个角色
+                        alternate_role = [r for r in all_roles if r != role][0]
+                    
+                    fixed_dialogues.append((alternate_role, content))
+                    prev_role = alternate_role
+                else:
+                    # 如果这是第一个对话且角色重复（不应该发生，但保险起见）
+                    fixed_dialogues.append((role, content))
+                    prev_role = role
+            else:
+                # 角色不同，直接添加
+                fixed_dialogues.append((role, content))
+                prev_role = role
+        
+        return fixed_dialogues
     
     def extract_roles(self, text: str) -> List[str]:
         """
@@ -707,7 +777,8 @@ class TextProcessor:
         self,
         character_descriptions: Dict[str, Dict[str, str]],
         text_material: Optional[str] = None,
-        topic: Optional[str] = None
+        topic: Optional[str] = None,
+        instruction: Optional[str] = None
     ) -> str:
         """
         构建基于角色人设的播客提示词（支持详细角色人设）
@@ -725,6 +796,7 @@ class TextProcessor:
             }
             或者简化为 {角色名: "人设描述"} 格式（向后兼容）
             topic: 可选的主题
+            instruction: 用户指令（可选），用于控制播客生成过程，如"生成1分钟播客"、"使用轻松风格"等，必须严格按照指令执行
         
         Returns:
             构建的提示词
@@ -769,12 +841,18 @@ class TextProcessor:
 
 你是一个专业的对话编剧和配音指导。你的任务是根据用户提供的精确角色人设和文本素材，生成一段高度拟人化、真实自然的N角色互动对话。
 
+{f"**⚠️ 用户指令执行规则**：\n- 必须严格按照用户指令执行，特别是关于内容要求、时长要求、风格要求等\n- 如果指令中指定了时长（如\"1分钟\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容\n- 如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行\n- 用户指令的优先级高于默认设置，必须优先满足指令要求\n\n" if instruction else ""}
 【用户自定义角色人设】
 
 {character_text}
 
 {material_text}
+{f'''\n【用户指令】
 
+{instruction}
+
+**⚠️ 重要**：必须严格按照上述用户指令执行，特别是关于内容要求、时长要求、风格要求等。如果指令中指定了时长（如"1分钟"、"5分钟"等），必须严格按照该时长生成相应长度的对话内容。如果指令中指定了内容要求（如"简短"、"详细"等），必须严格按照要求执行。
+''' if instruction else ""}
 【核心要求：高度拟人化对话】
 
 **1. 真实对话感（最重要）**
@@ -852,7 +930,8 @@ class TextProcessor:
         topic: Optional[str] = None,
         character_descriptions: Optional[Dict[str, Dict[str, str]]] = None,
         scene_types: Optional[List[str]] = None,
-        category: Optional[str] = None
+        category: Optional[str] = None,
+        instruction: Optional[str] = None
     ) -> str:
         """
         构建将普通文本转换为多角色对话的提示词（支持情绪标注和完整播客结构）
@@ -870,7 +949,8 @@ class TextProcessor:
                 }
             }
             scene_types: 互动场景类型列表，如 ["接梗玩梗", "立场冲突"] 等
-            category: 播客分类（可选），如：商业、科技、财经、新闻、影视、自我成长与自愈、职场万象、学习类、娱乐八卦类、考题、文化艺术、职场类—人际关系、学生类—求职就业等
+            category: 播客分类（可选），如：社会文化与历史、音乐、影视、书、喜剧/脱口秀、艺术、宗教与灵修、科学与科技、时尚与美妆、健康、健身与养身、育儿与家庭、情感、生活、体育运动、休闲娱乐与爱好、商业与财经、新闻、职场万象、自我成长与自愈、学术研究等
+            instruction: 用户指令（可选），用于控制播客生成过程，如"生成1分钟播客"、"使用轻松风格"等，必须严格按照指令执行
         
         Returns:
             构建的提示词
@@ -896,13 +976,14 @@ class TextProcessor:
         character_info = ""
         if character_descriptions:
             character_info = "\n2. 角色设定（2-4个角色）\n\n"
+            character_info += f"**重要说明**：以下角色名称仅用于描述角色特征，但在对话标记中必须使用标准角色名（{role_list}），不能使用文本素材中的人名或其他名称。\n\n"
             for i, (role, desc) in enumerate(character_descriptions.items(), 1):
                 if i > num_characters:
                     break
                 name = desc.get("name", role)
                 personality = desc.get("personality", "")
                 speaking_style = desc.get("speaking_style", "")
-                character_info += f"角色{i}名称：{name}\n"
+                character_info += f"{role_names[i-1]}（角色名称：{name}）\n"
                 if personality:
                     character_info += f"性格特点：{personality}\n"
                 if speaking_style:
@@ -913,6 +994,7 @@ class TextProcessor:
             character_info += "- **姓名与身份**：为每个角色设定具体的姓名和身份\n"
             character_info += "- **核心性格**：定义每个角色的核心性格特征\n"
             character_info += "- **说话风格**：定义每个角色的说话风格和习惯\n"
+            character_info += f"\n**重要**：即使文本素材中有人名，也必须使用标准角色名（{role_list}）作为对话标记，不能使用文本素材中的人名。\n"
         
         # 构建场景类型要求
         scene_requirements = ""
@@ -937,33 +1019,28 @@ class TextProcessor:
         # 构建分类相关的指导信息
         category_section = ""
         if category:
-            # 根据分类提供具体指导（已合并重复分类）
+            # 根据分类提供具体指导
             category_styles = {
-                "商业": "注重商业逻辑、市场分析、商业模式、创业经验、创新思维，使用专业术语但要通俗易懂，对话要有深度和实用性",
-                "科技": "注重技术原理、科学原理、科学发现、发展趋势、创新应用，保持专业性和前瞻性，语言清晰准确、易懂",
-                "财经": "注重经济分析、投资理财、市场趋势，使用财经术语但要解释清楚，内容要有参考价值",
+                "社会文化与历史": "注重社会现象、文化内涵、历史事件、人物故事、历史背景，语言优雅有深度，要有文化底蕴和故事性",
+                "音乐": "注重音乐赏析、音乐文化、音乐创作、音乐历史，语言优雅有趣，要有艺术性和感染力",
+                "影视": "注重剧情分析、角色解读、影视文化、影视评论，语言生动有趣，可以引用经典台词",
+                "书": "注重书籍推荐、阅读心得、文学赏析、读书感悟，语言优雅有深度，要有文化底蕴和启发性",
+                "喜剧/脱口秀": "注重趣味性、轻松幽默、话题性、幽默搞笑、喜剧表演、轻松对话，语言活泼有趣，节奏可以更快，要有趣味性和娱乐性",
+                "艺术": "注重艺术赏析、艺术创作、艺术文化、艺术历史，语言优雅有深度，要有艺术性和感染力",
+                "宗教与灵修": "注重精神探索、心灵成长、宗教文化、哲学思辨，语言深刻优雅，要有深度和启发性",
+                "科学与科技": "注重技术原理、科学原理、科学发现、发展趋势、创新应用，保持专业性和前瞻性，语言清晰准确、易懂",
+                "时尚与美妆": "注重时尚趋势、美妆技巧、穿搭建议、时尚文化，语言时尚有趣，要有实用性和美观性",
+                "健康、健身与养身": "注重健康知识、养生方法、疾病预防、运动技巧、健身方法、训练计划，语言温和专业、积极向上，要有科学性和实用性、激励性和可操作性",
+                "育儿与家庭": "注重育儿知识、教育方法、亲子关系、家庭生活，语言温和耐心，要有实用性和可操作性",
+                "情感": "注重情感分析、情感故事、情感共鸣、情感表达，语言温暖真诚，要有共鸣感和代入感",
+                "生活": "注重生活技巧、生活态度、生活分享、生活感悟，语言轻松有趣，要有实用性和共鸣感",
+                "体育运动": "注重体育赛事、运动技巧、体育文化、运动健康，语言激情有力，要有竞争性和观赏性",
+                "休闲娱乐与爱好": "注重兴趣爱好、休闲活动、娱乐方式、生活乐趣，语言轻松有趣，要有趣味性和娱乐性",
+                "商业与财经": "注重商业逻辑、市场分析、商业模式、创业经验、经济分析、投资理财、市场趋势，使用专业术语但要通俗易懂，对话要有深度和实用性",
                 "新闻": "注重事实陈述、多角度分析、时效性，保持客观中立，语言简洁明了",
-                "影视": "注重剧情分析、角色解读、影视文化，语言生动有趣，可以引用经典台词",
-                "音乐": "注重音乐赏析、音乐文化、音乐创作，语言优雅有趣，要有艺术性和感染力",
-                "文化艺术": "注重文化内涵、艺术赏析、历史背景、书籍推荐、阅读心得、文学赏析，语言优雅有深度，要有文化底蕴",
-                "历史": "注重历史事件、人物故事、历史背景，语言生动有趣，要有故事性和深度",
-                "哲学思考": "注重哲学思辨、人生思考、价值探讨，语言深刻优雅，要有深度和启发性",
-                "自我成长": "注重心理分析、行为解读、成长故事、情感共鸣、心理应用，语言温暖治愈、专业易懂，要有启发性和正能量",
-                "职场": "注重职场经验、人际关系、沟通技巧、人际交往、职场情商、职业发展、求职技巧、职业规划、面试经验，语言实用接地气，要有真实感和代入感、场景感和实用性",
-                "学习": "注重知识讲解、学习方法、学习技巧、题目解析、解题思路、知识点梳理，语言清晰易懂、严谨清晰，要有实用性和可操作性、逻辑严密",
-                "教育育儿": "注重育儿知识、教育方法、亲子关系，语言温和耐心，要有实用性和可操作性",
-                "情感恋爱": "注重情感分析、恋爱技巧、情感故事，语言温暖真诚，要有共鸣感和代入感",
-                "健康养生": "注重健康知识、养生方法、疾病预防、运动技巧、健身方法、训练计划，语言温和专业、积极向上，要有科学性和实用性、激励性和可操作性",
-                "旅游": "注重旅行体验、目的地介绍、旅行攻略，语言生动有趣，要有画面感和代入感",
-                "美食": "注重烹饪技巧、美食文化、餐厅推荐，语言诱人有趣，要有色香味俱全的描述",
-                "生活方式": "注重生活技巧、生活态度、生活分享，语言轻松有趣，要有实用性和共鸣感",
-                "娱乐": "注重趣味性、轻松幽默、话题性、幽默搞笑、喜剧表演、轻松对话，语言活泼有趣，节奏可以更快，要有趣味性和娱乐性",
-                "游戏电竞": "注重游戏攻略、电竞赛事、游戏文化，语言活泼有趣，要有竞技性和趣味性",
-                "体育": "注重体育赛事、运动技巧、体育文化，语言激情有力，要有竞争性和观赏性",
-                "时尚美妆": "注重时尚趋势、美妆技巧、穿搭建议，语言时尚有趣，要有实用性和美观性",
-                "汽车": "注重汽车评测、驾驶技巧、汽车文化，语言专业有趣，要有实用性和专业性",
-                "法律": "注重法律知识、案例分析、法律应用，语言严谨准确，要有专业性和实用性",
-                "宠物": "注重宠物护理、训练技巧、宠物故事，语言温馨有趣，要有实用性和情感共鸣"
+                "职场万象": "注重职场经验、人际关系、沟通技巧、人际交往、职场情商、职业发展、求职技巧、职业规划、面试经验，语言实用接地气，要有真实感和代入感、场景感和实用性",
+                "自我成长与自愈": "注重心理分析、行为解读、成长故事、情感共鸣、心理应用、自我疗愈，语言温暖治愈、专业易懂，要有启发性和正能量",
+                "学术研究": "注重学术探讨、研究方法、学术观点、知识讲解、学习方法、学习技巧，语言清晰易懂、严谨清晰，要有实用性和可操作性、逻辑严密"
             }
             
             style_guide = category_styles.get(category, "根据分类特点调整对话风格和内容深度")
@@ -983,6 +1060,16 @@ class TextProcessor:
         prompt = f"""【核心任务】
 你是一位专业的播客编剧和对话导演。请将提供的文本素材转化为一段结构完整、互动自然、内容丰富、符合真人交流方式的多角色播客对话脚本。对话要像真实朋友之间的聊天一样自然、真实、有深度。
 
+【⚠️ 关键要求 - 必须严格遵守】
+**角色名称使用规则**：
+- 对话标记中必须使用标准角色名：{role_list}
+- **绝对禁止**使用文本素材中出现的任何人名、角色名、实体名称或其他非标准角色名
+- 无论文本素材中出现了什么人名、角色名、实体名称，都必须映射到标准角色名（{role_list}）进行对话标记
+- 文本素材中的人名、角色名仅用于理解内容，不能直接用作对话标记
+- 违反此规则会导致生成失败，请务必严格遵守
+
+{f"**用户指令执行规则**：\n- 必须严格按照用户指令执行，特别是关于内容要求、时长要求、风格要求等\n- 如果指令中指定了时长（如\"1分钟\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容\n- 如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行\n- 用户指令的优先级高于默认设置，必须优先满足指令要求\n" if instruction else ""}
+
 【输入信息】
 
 1. 播客基本信息
@@ -997,7 +1084,12 @@ class TextProcessor:
 4. 互动场景类型
 {scene_types_str}
 {category_section}
+{f'''5. 用户指令
 
+{instruction}
+
+** 重要**：必须严格按照上述用户指令执行，特别是关于内容要求、时长要求、风格要求等。如果指令中指定了时长（如"1分钟"、"5分钟"等），必须严格按照该时长生成相应长度的对话内容。如果指令中指定了内容要求（如"简短"、"详细"等），必须严格按照要求执行。
+''' if instruction else ""}
 【生成要求】
 
 一、播客结构模板
@@ -1030,7 +1122,12 @@ class TextProcessor:
 - 主要格式：`[角色名]（情绪地）对话内容`（推荐）
 - 重要：不要使用冒号，直接写对话内容
 - **角色名称必须严格使用**：{role_list}
-- **禁止使用**：不能使用纯数字（如[1]、[2]）、单个字母（如[J]、[A]）或其他非标准角色名，只能使用{role_list}中指定的角色名
+- **禁止使用**：
+  - 不能使用纯数字（如[1]、[2]）、单个字母（如[J]、[A]）或其他非标准角色名
+  - **绝对不能使用文本素材中的任何人名、角色名、实体名称**，无论文本素材中出现了什么名称，都必须使用标准角色名
+  - 文本素材中的人名、角色名、实体名称仅用于理解内容背景，不能直接用作对话标记
+  - 只能使用{role_list}中指定的角色名
+- **关键要求**：无论文本素材中出现了什么人名、角色名、实体名称，对话标记都必须使用{role_list}，这是硬性要求，违反会导致生成失败
 
 **对话要求**：
 - 每个角色发言10-12次，总共约{num_characters * 13}段对话（控制在30-40轮以内，确保内容丰富）
@@ -1045,6 +1142,8 @@ class TextProcessor:
 
 四、输出示例
 
+**注意**：以下示例中的"角色A"、"角色B"是标准角色名，必须严格按照此格式使用，不能替换为文本素材中的人名。
+
 ```
 [角色A]嘿，听众朋友们，欢迎回到我们的频道！今天咱们可有个大话题要聊。
 
@@ -1054,6 +1153,13 @@ class TextProcessor:
 
 [角色B]嗯...这个问题确实很有意思。从技术角度看，AI理解幽默的关键在于...
 ```
+
+【最后提醒】
+在生成对话时，请务必：
+1. 使用标准角色名（{role_list}）作为所有对话标记
+2. 绝对不要使用文本素材中出现的任何人名、角色名、实体名称或其他非标准名称
+3. 文本素材中的人名、角色名、实体名称仅用于理解内容，必须映射到标准角色名（{role_list}）进行对话标记
+4. 无论文本素材中出现什么名称，对话标记都必须使用{role_list}，这是硬性要求，违反会导致生成失败
 
 现在请开始生成，直接输出对话内容，不要添加任何其他说明、注释或解释。"""
         return prompt
@@ -1119,7 +1225,8 @@ class TextProcessor:
         self,
         topic: str,
         depth_level: str = "深度",
-        num_characters: int = 2
+        num_characters: int = 2,
+        instruction: Optional[str] = None
     ) -> str:
         """
         构建深度播客生成的提示词
@@ -1128,6 +1235,7 @@ class TextProcessor:
             topic: 播客主题
             depth_level: 深度级别（深度/中等/浅层）
             num_characters: 角色数量
+            instruction: 用户指令（可选），用于控制播客生成过程，如"生成1分钟播客"、"使用轻松风格"等，必须严格按照指令执行
         
         Returns:
             构建的提示词
@@ -1188,6 +1296,7 @@ class TextProcessor:
 
 你是一档知名深度访谈播客的主编和首席研究员。请围绕用户指定的主题，生成一份有深度、有见地、能引发听众长期思考的播客脚本。
 
+{f"**⚠️ 用户指令执行规则**：\n- 必须严格按照用户指令执行，特别是关于内容要求、时长要求、风格要求等\n- 如果指令中指定了时长（如\"1分钟\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容\n- 如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行\n- 用户指令的优先级高于默认设置，必须优先满足指令要求\n\n" if instruction else ""}
 【核心原则】
 - **就事论事**：必须严格围绕用户指定的主题展开讨论，不要偏离主题或引入无关内容
 - **有依据有见地**：所有观点和论述都要有事实依据、理论支撑或案例佐证，不能空泛议论
@@ -1197,7 +1306,12 @@ class TextProcessor:
 
 【主题】
 {topic}
+{f'''\n【用户指令】
 
+{instruction}
+
+**⚠️ 重要**：必须严格按照上述用户指令执行，特别是关于内容要求、时长要求、风格要求等。如果指令中指定了时长（如"1分钟"、"5分钟"等），必须严格按照该时长生成相应长度的对话内容。如果指令中指定了内容要求（如"简短"、"详细"等），必须严格按照要求执行。
+''' if instruction else ""}
 【内容深度要求】
 
 请生成的脚本严格围绕上述主题，包含以下层次，以引导听众进行深度思考：
