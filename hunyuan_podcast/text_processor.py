@@ -856,7 +856,8 @@ class TextProcessor:
    - 对话必须高度拟人，像真实人类在聊天一样自然
    - 使用大量感叹词、语气词、填充词：如"嗯..."、"啊？"、"呃..."、"啧"、"哈哈！"、"哇塞！"、"天哪！"、"真的假的？"、"那当然了"、"怎么说呢"、"我想想啊"等
    - 角色应该有自然的犹豫、思考、打断、附和、反问等真实反应
-   - 允许角色偶尔说错话、重复、纠正自己，体现真实对话的不完美性
+   - 允许角色偶尔说错话、纠正自己（如"不对，我想说的是..."），体现真实对话的不完美性
+   - **严禁内容重复**：绝对禁止重复相同或相似的话题、观点、例子。每个话题、观点、例子只能出现一次。如果已经讨论过某个话题，必须转向新的话题或从不同角度深入探讨，绝不能重复之前已经说过的内容。
 
 **2. 精巧的对话设计**
    - 话题要有自然的流动和转换，不要生硬地切换话题
@@ -892,6 +893,7 @@ class TextProcessor:
    - 必须包含感叹词、语气词、填充词等真实对话元素
    - 对话要有话题的自然流动和转换
    - 每个角色的说话风格要严格符合其角色人设
+   - **严禁重复内容**：绝对禁止重复相同或相似的内容、观点、例子。每个话题、观点、例子只能出现一次。如果发现开始重复，必须立即转换到全新的角度或话题。
 
 **7. 输出格式示例**（SoulX-Podcast兼容格式）：
 **示例1：简洁格式（推荐）**
@@ -1225,6 +1227,7 @@ class TextProcessor:
 - **对话深度**：每段对话要深入展开，包含具体细节、案例分析、个人经历、专业见解、不同观点碰撞
 - **互动频率**：角色之间要有频繁且自然的互动，包括提问、回应、补充、质疑、赞同、反驳、举例等
 - **内容充实**：确保对话内容丰富，不要过于简短，每段对话都要有实质性内容，避免空洞的客套话
+- **严禁重复**：绝对禁止重复相同或相似的内容、观点、例子或对话。每个话题、每个观点、每个例子只能出现一次。如果已经讨论过某个话题，必须转向新的话题或从不同角度深入探讨，绝不能重复之前已经说过的内容。如果发现开始重复，必须立即转换到全新的角度或话题。
 
 {scene_requirements}
 
@@ -1272,6 +1275,7 @@ class TextProcessor:
 2. 绝对不要使用文本素材中出现的任何人名、角色名、实体名称或其他非标准名称
 3. 文本素材中的人名、角色名、实体名称仅用于理解内容，必须映射到标准角色名（{role_list}）进行对话标记
 4. 无论文本素材中出现什么名称，对话标记都必须使用{role_list}，这是硬性要求，违反会导致生成失败
+5. **严禁重复内容**：绝对禁止重复相同或相似的内容、观点、例子。每个话题、观点、例子只能出现一次。如果发现开始重复，必须立即转换到全新的角度或话题。
 
 现在请开始生成，直接输出对话内容，不要添加任何其他说明、注释或解释。"""
         return prompt
@@ -1681,4 +1685,74 @@ class TextProcessor:
         if cleaned_lines:
             text = '\n'.join(cleaned_lines)
         
+        # 检测并移除重复的对话内容
+        text = self.remove_duplicate_dialogues(text)
+        
         return text
+    
+    def remove_duplicate_dialogues(self, text: str) -> str:
+        """
+        检测并移除重复的对话内容
+        
+        Args:
+            text: 原始文本
+        
+        Returns:
+            移除重复后的文本
+        """
+        lines = text.split('\n')
+        cleaned_lines = []
+        seen_contents = set()  # 用于存储已见过的对话内容（去除角色标记）
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                cleaned_lines.append(line)
+                continue
+            
+            # 提取对话内容（去除角色标记和情绪标注）
+            # 匹配格式：[角色名]（情绪地）内容 或 [角色名]内容
+            match = re.match(r'\[[^\]]+\](?:（[^）]+）)?(.+)', line)
+            if match:
+                content = match.group(1).strip()
+                
+                # 如果内容太短（少于10个字符），可能是无效内容，跳过检查
+                if len(content) < 10:
+                    cleaned_lines.append(line)
+                    continue
+                
+                # 检查是否与之前的内容高度相似（使用简单的字符串相似度检查）
+                is_duplicate = False
+                for seen_content in seen_contents:
+                    # 如果内容完全相同或高度相似（相似度超过80%），认为是重复
+                    if content == seen_content:
+                        is_duplicate = True
+                        break
+                    # 检查是否包含相同的核心内容（去除标点符号和空格后比较）
+                    content_normalized = re.sub(r'[^\w\u4e00-\u9fff]', '', content)
+                    seen_normalized = re.sub(r'[^\w\u4e00-\u9fff]', '', seen_content)
+                    
+                    # 如果归一化后的内容长度相似且包含大量相同字符，认为是重复
+                    if len(content_normalized) > 20 and len(seen_normalized) > 20:
+                        # 计算相同字符的比例
+                        common_chars = set(content_normalized) & set(seen_normalized)
+                        if len(common_chars) / max(len(set(content_normalized)), len(set(seen_normalized))) > 0.8:
+                            # 进一步检查：如果内容本身也高度相似（使用简单的子串匹配）
+                            if content_normalized in seen_normalized or seen_normalized in content_normalized:
+                                is_duplicate = True
+                                break
+                            # 或者如果两个内容的前50个字符相同
+                            if len(content_normalized) >= 50 and len(seen_normalized) >= 50:
+                                if content_normalized[:50] == seen_normalized[:50]:
+                                    is_duplicate = True
+                                    break
+                
+                if not is_duplicate:
+                    cleaned_lines.append(line)
+                    seen_contents.add(content)
+                # 如果是重复内容，跳过这一行
+            else:
+                # 如果不是对话格式，保留原样
+                cleaned_lines.append(line)
+        
+        return '\n'.join(cleaned_lines)
