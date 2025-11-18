@@ -108,112 +108,35 @@ class InputProcessor:
             logger.error(f"提取微信公众号文章内容失败: {str(e)}")
             raise Exception(f"提取微信公众号文章内容失败: {str(e)}")
     
-    def extract_text_from_webpage_with_browser(self, url: str, timeout: int = 30) -> str:
-        """
-        使用无头浏览器提取需要JavaScript渲染的网页内容
-        
-        Args:
-            url: 网页URL
-            timeout: 请求超时时间（秒）
-        
-        Returns:
-            提取的文本内容
-        """
-        try:
-            from playwright.sync_api import sync_playwright
-            
-            logger.info(f"使用无头浏览器提取网页内容: {url}")
-            
-            with sync_playwright() as p:
-                # 启动浏览器（使用Chromium）
-                browser = p.chromium.launch(headless=True)
-                page = browser.new_page()
-                
-                # 设置超时
-                page.set_default_timeout(timeout * 1000)
-                
-                # 访问网页
-                page.goto(url, wait_until='networkidle', timeout=timeout * 1000)
-                
-                # 等待页面加载完成（可选：等待特定元素出现）
-                page.wait_for_timeout(2000)  # 等待2秒，确保JavaScript执行完成
-                
-                # 提取文本内容
-                # 尝试提取主要内容区域
-                content_selectors = [
-                    'main',
-                    'article',
-                    '[class*="content"]',
-                    '[class*="article"]',
-                    '[class*="post"]',
-                    '[id*="content"]',
-                    'body'
-                ]
-                
-                text = None
-                for selector in content_selectors:
-                    try:
-                        element = page.query_selector(selector)
-                        if element:
-                            text = element.inner_text()
-                            if text and len(text.strip()) > 100:
-                                logger.info(f"使用选择器 '{selector}' 提取到 {len(text)} 字符")
-                                break
-                    except Exception:
-                        continue
-                
-                # 如果没找到，使用整个body
-                if not text or len(text.strip()) < 100:
-                    text = page.inner_text('body')
-                
-                browser.close()
-                
-                if not text or len(text.strip()) < 100:
-                    raise Exception(f"提取的文本内容过短（{len(text)}字符），可能页面未正确加载")
-                
-                logger.info(f"无头浏览器提取成功: {len(text)} 字符")
-                return text.strip()
-                
-        except ImportError:
-            raise Exception("需要安装playwright库才能提取需要JavaScript渲染的网页。安装方法: pip install playwright && playwright install chromium")
-        except Exception as e:
-            logger.error(f"无头浏览器提取失败: {str(e)}")
-            raise Exception(f"无头浏览器提取失败: {str(e)}")
-    
-    def extract_text_from_webpage(self, url: str, timeout: int = 30, use_browser: bool = False) -> str:
+    def extract_text_from_webpage(self, url: str, timeout: int = 30) -> str:
         """
         从网页URL提取文本内容
         
         Args:
             url: 网页URL
             timeout: 请求超时时间（秒）
-            use_browser: 是否使用无头浏览器（用于需要JavaScript渲染的网页）
         
         Returns:
             提取的文本内容
         """
-        # 如果指定使用浏览器，直接使用浏览器方法
-        if use_browser:
-            return self.extract_text_from_webpage_with_browser(url, timeout)
-        
         try:
             logger.info(f"正在提取网页内容: {url}")
             
             # 检测特殊网站（需要JavaScript渲染的网站）
             url_lower = url.lower()
             special_sites = {
-                'weibo.com': '微博网站需要JavaScript渲染',
-                'twitter.com': 'Twitter网站需要JavaScript渲染',
-                'facebook.com': 'Facebook网站需要JavaScript渲染',
-                'instagram.com': 'Instagram网站需要JavaScript渲染',
-                'mbd.baidu.com': '百度移动端网页需要JavaScript渲染',
+                'weibo.com': '微博网站需要JavaScript渲染，无法直接提取内容。建议：1) 复制微博文本内容直接输入；2) 使用"文字+指令"类型；3) 或提供微博文章的完整URL（而非用户主页）',
+                'twitter.com': 'Twitter网站需要JavaScript渲染，无法直接提取内容。建议复制推文内容直接输入',
+                'facebook.com': 'Facebook网站需要JavaScript渲染，无法直接提取内容。建议复制内容直接输入',
+                'instagram.com': 'Instagram网站需要JavaScript渲染，无法直接提取内容。建议复制内容直接输入',
+                'mbd.baidu.com': '百度移动端网页需要JavaScript渲染，无法直接提取内容。建议：1) 复制网页文本内容直接输入；2) 使用"文字+指令"类型；3) 或访问PC版网页',
             }
             
-            site_needs_browser = None
-            for site_key, site_name in special_sites.items():
+            site_warning = None
+            for site_key, warning_msg in special_sites.items():
                 if site_key in url_lower:
-                    site_needs_browser = site_name
-                    logger.info(f"检测到需要JavaScript渲染的网站: {site_key}")
+                    site_warning = warning_msg
+                    logger.warning(f"检测到特殊网站: {site_key}, 警告: {warning_msg}")
                     break
             
             # 设置请求头，模拟浏览器访问
@@ -278,16 +201,10 @@ class InputProcessor:
             
             # 检查是否是空页面或仅包含脚本
             if len(html) < 500:
-                # 如果检测到需要JavaScript渲染的网站，尝试使用无头浏览器
-                if site_needs_browser:
-                    logger.info(f"检测到需要JavaScript渲染的网站且HTML过短，尝试使用无头浏览器提取...")
-                    try:
-                        return self.extract_text_from_webpage_with_browser(url, timeout)
-                    except Exception as browser_error:
-                        logger.warning(f"无头浏览器提取也失败: {str(browser_error)}")
-                        raise Exception(f'{site_needs_browser}，无法直接提取内容。已尝试使用无头浏览器但仍失败: {str(browser_error)}。建议：1) 复制网页文本内容直接输入；2) 使用"文字+指令"类型；3) 或安装playwright库（pip install playwright && playwright install chromium）后重试')
+                if site_warning:
+                    raise Exception(f"{site_warning}")
                 else:
-                    raise Exception(f'网页内容为空或过短，可能是需要JavaScript渲染的动态网站。建议：1) 复制网页文本内容直接输入；2) 使用"文字+指令"类型；3) 或安装playwright库后使用无头浏览器提取')
+                    raise Exception(f'网页内容为空或过短，可能是需要JavaScript渲染的动态网站。建议：1) 复制网页文本内容直接输入；2) 使用"文字+指令"类型')
             
             # 移除脚本和样式
             html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
@@ -352,16 +269,10 @@ class InputProcessor:
                 preview = text[:200] if len(text) > 200 else text
                 logger.warning(f"提取的文本过短（{len(text)}字符），预览: {preview}")
                 
-                # 如果检测到需要JavaScript渲染的网站，尝试使用无头浏览器
-                if site_needs_browser:
-                    logger.info(f"检测到需要JavaScript渲染的网站，尝试使用无头浏览器提取...")
-                    try:
-                        return self.extract_text_from_webpage_with_browser(url, timeout)
-                    except Exception as browser_error:
-                        logger.warning(f"无头浏览器提取也失败: {str(browser_error)}")
-                        raise Exception(f'{site_needs_browser}，无法直接提取内容。已尝试使用无头浏览器但仍失败: {str(browser_error)}。建议：1) 复制网页文本内容直接输入；2) 使用"文字+指令"类型；3) 或安装playwright库（pip install playwright && playwright install chromium）后重试')
-                
-                raise Exception(f'无法从该网页提取有效文本内容（仅提取到{len(text)}字符，内容: "{text[:50]}..."）。可能原因：1) 网页需要JavaScript渲染（如百度移动端、微博等）；2) 网页有反爬虫保护；3) 网页结构特殊。建议：1) 复制网页文本内容直接输入；2) 使用"文字+指令"类型；3) 或安装playwright库后使用无头浏览器提取')
+                if site_warning:
+                    raise Exception(f"{site_warning}")
+                else:
+                    raise Exception(f'无法从该网页提取有效文本内容（仅提取到{len(text)}字符，内容: "{text[:50]}..."）。可能原因：1) 网页需要JavaScript渲染（如百度移动端、微博等）；2) 网页有反爬虫保护；3) 网页结构特殊。建议：1) 复制网页文本内容直接输入；2) 使用"文字+指令"类型；3) 或提供PC版网页URL')
             
             logger.info(f"网页内容提取成功: {len(text)} 字符")
             return text

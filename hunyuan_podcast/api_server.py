@@ -1517,11 +1517,18 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
             logger.info(f"文件读取成功: {len(text_content)} 字符")
             
             # 如果输入类型包含指令，尝试解析指令
+            # 优先使用 request.instruction，如果不存在才从文件内容中解析
             if "指令" in input_type or "instruction" in input_type.lower():
-                input_processor = get_processor()
-                text_content, extracted_instruction = input_processor.parse_instruction(text_content)
-                if extracted_instruction:
-                    logger.info(f"从文件中提取的指令: {extracted_instruction}")
+                if not extracted_instruction:
+                    # 如果 request.instruction 不存在，才从文件内容中解析
+                    input_processor = get_processor()
+                    text_content, file_instruction = input_processor.parse_instruction(text_content)
+                    if file_instruction:
+                        extracted_instruction = file_instruction
+                        logger.info(f"从文件中提取的指令: {extracted_instruction}")
+                else:
+                    # 如果 request.instruction 存在，直接使用，不需要从文件内容中解析
+                    logger.info(f"使用请求参数中的指令: {extracted_instruction}")
         except HTTPException:
             raise
         except Exception as e:
@@ -1532,11 +1539,18 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
         text_content = request.text
         
         # 如果输入类型包含指令，尝试解析指令
+        # 优先使用 request.instruction，如果不存在才从文本内容中解析
         if "指令" in input_type or "instruction" in input_type.lower():
-            input_processor = get_processor()
-            text_content, extracted_instruction = input_processor.parse_instruction(text_content)
-            if extracted_instruction:
-                logger.info(f"从文本中提取的指令: {extracted_instruction}")
+            if not extracted_instruction:
+                # 如果 request.instruction 不存在，才从文本内容中解析
+                input_processor = get_processor()
+                text_content, text_instruction = input_processor.parse_instruction(text_content)
+                if text_instruction:
+                    extracted_instruction = text_instruction
+                    logger.info(f"从文本中提取的指令: {extracted_instruction}")
+            else:
+                # 如果 request.instruction 存在，直接使用，不需要从文本内容中解析
+                logger.info(f"使用请求参数中的指令: {extracted_instruction}")
         
         logger.info(f"使用直接输入的文本: {len(text_content)} 字符")
     else:

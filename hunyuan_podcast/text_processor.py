@@ -691,7 +691,7 @@ class TextProcessor:
     
     def extract_roles(self, text: str) -> List[str]:
         """
-        提取文本中的所有角色名（排除音效和音乐标记）
+        提取文本中的所有角色名（只提取行首的角色标记，不提取对话内容中的名词）
         
         Args:
             text: 包含角色标记的文本
@@ -699,7 +699,11 @@ class TextProcessor:
         Returns:
             角色名列表（去重）
         """
-        roles = self.ROLE_PATTERN.findall(text)
+        # 只匹配行首的角色标记，格式：[角色名]对话内容
+        # 使用多行模式，^ 匹配行首
+        line_start_role_pattern = re.compile(r'^\s*\[([^\]]+)\]', re.MULTILINE)
+        
+        roles = line_start_role_pattern.findall(text)
         # 去重并保持顺序，同时过滤掉音效和音乐标记
         seen = set()
         unique_roles = []
@@ -707,29 +711,32 @@ class TextProcessor:
         # 需要排除的关键词
         exclude_keywords = ['音效', '音乐', '开场', '结束', '背景']
         
+        # 标准角色名模式（用于识别和优先选择）
+        standard_role_names = ['角色A', '角色B', '角色C', '角色a', '角色b', '角色c']
+        
+        # 优先收集标准角色名
+        standard_roles_found = []
+        other_roles = []
+        
         for role in roles:
             role = role.strip()
             if not role:
                 continue
 
-            # 过滤掉明显的二进制或不可打印字符串（例如直接把 docx 二进制解码为字符串的情况）
-            # 如果包含不可打印字符或过长，则视为无效角色
+            # 过滤掉明显的二进制或不可打印字符串
             if not role.isprintable():
                 continue
             if '\x00' in role:
                 continue
             if len(role) > 64:
-                # 过长的角色名通常不是有效的角色标识，跳过
                 continue
 
-            # 过滤掉纯数字或单个字符的角色（通常是PDF页码、章节编号等）
-            # 例如：[1], [2], [J], [A] 等
+            # 过滤掉纯数字或单个字符的角色
             if len(role) == 1:
-                # 单个字符：如果是纯数字或单个字母，很可能是页码或编号，跳过
                 if role.isdigit() or role.isalpha():
                     continue
             
-            # 过滤掉纯数字的角色（例如：[123], [456] 等，可能是页码）
+            # 过滤掉纯数字的角色
             if role.isdigit():
                 continue
             
@@ -740,30 +747,40 @@ class TextProcessor:
                 continue
 
             # 跳过音效和音乐标记
-            # 检查是否包含排除关键词
             should_exclude = False
             for keyword in exclude_keywords:
                 if keyword in role:
                     should_exclude = True
                     break
 
-            # 检查是否是音效格式：[音效：xxx] 或 [音效:xxx]
             if role.startswith('音效') or '音效' in role:
                 should_exclude = True
 
-            # 检查是否是音乐格式：[开场音乐...] 或 [结束音乐...] 或 [音乐...]
             if '音乐' in role:
                 should_exclude = True
 
             if should_exclude:
                 continue
 
-            # 只添加真正的角色标记
-            if role not in seen:
-                seen.add(role)
-                unique_roles.append(role)
+            # 检查是否是标准角色名
+            is_standard_role = role in standard_role_names or role.lower() in [r.lower() for r in standard_role_names]
+            
+            if is_standard_role:
+                if role not in seen:
+                    seen.add(role)
+                    standard_roles_found.append(role)
+            else:
+                # 非标准角色名，暂时收集但不优先返回
+                if role not in seen:
+                    seen.add(role)
+                    other_roles.append(role)
         
-        return unique_roles
+        # 如果找到标准角色名，优先返回标准角色名
+        if standard_roles_found:
+            return standard_roles_found
+        
+        # 如果没有标准角色名，返回其他角色名
+        return other_roles
     
     def build_character_prompt(
         self,
@@ -1222,7 +1239,7 @@ class TextProcessor:
 {chr(10) + f"[角色B]我是{role_virtual_names[1]}。今天我们要聊一个很有意思的话题：{topic if topic else '[本期主题]'}。" if num_characters >= 2 else ""}
 [角色A]没错！说到这个话题，我最近发现...[自然引入主题]
 
-[讨论主体 - ⚠️ 必须严格按照文本素材的内容展开，包含文本素材中提到的具体事实、数据、事件、观点等，不能偏离文本素材的主题，时长约3-4分钟]
+[讨论主体 - 必须严格按照文本素材的内容展开，包含文本素材中提到的具体事实、数据、事件、观点等，不能偏离文本素材的主题，时长约3-4分钟（如果用户指令中指定了其他时长如"1分钟"、"一分钟以内"等，必须严格按照指令执行，相应减少对话内容）]
 
 {chr(10) + f"[角色C]好了，今天关于{topic if topic else '[本期主题]'}的讨论就到这里。" if num_characters >= 3 else ""}
 [角色A]感谢大家的收听！如果有什么想法，欢迎在评论区留言。
@@ -1262,9 +1279,11 @@ class TextProcessor:
 **对话要求**：
 - 每个角色发言10-12次，总共约{num_characters * 13}段对话（控制在30-40轮以内，确保内容丰富）
 - 每段对话50-80字，包含具体观点、例子、解释、讨论、反驳或补充
-- 播客时长约5-7分钟
+- 播客时长约5-7分钟（如果用户指令中指定了其他时长，必须严格按照指令执行）
 - 对话总字数建议2500-3500字（纯对话内容，确保内容充实）
+- **⚠️ 如果用户指令中指定了时长（如"1分钟"、"一分钟以内"等），必须严格按照该时长生成相应长度的对话内容，对话总字数应相应减少**
 - **真实对话感**：使用口语化表达、自然停顿、思考过程、即兴反应，避免过于正式或书面化的语言
+- **⚠️ 重要格式要求**：对话内容中绝对不要使用 `[xxx]` 格式（除非是角色标记）。如果需要在对话中提到物品名、人名等，直接使用文字描述，不要加方括号。例如：不要说"这个[地雷]很危险"，而要说"这个地雷很危险"或"这种地雷很危险"。
 
 **音效标注**（可选）：
 - 格式：`<|laughter|>`、`<|sigh|>`、`<|applause|>`
@@ -1291,7 +1310,8 @@ class TextProcessor:
 3. 绝对不要使用文本素材中出现的任何人名、角色名、实体名称或其他非标准名称
 4. 文本素材中的人名、角色名、实体名称仅用于理解内容，必须映射到标准角色名（{role_list}）进行对话标记
 5. 无论文本素材中出现什么名称，对话标记都必须使用{role_list}，这是硬性要求，违反会导致生成失败
-6. **⚠️ 严禁重复内容**：绝对禁止重复相同或相似的内容、观点、例子。每个话题、观点、例子只能出现一次。如果发现开始重复，必须立即转换到全新的角度或话题。
+6. **⚠️ 严禁在对话内容中使用方括号**：对话内容中绝对不要使用 `[xxx]` 格式（除非是角色标记）。如果需要在对话中提到物品名、人名等，直接使用文字描述，不要加方括号。例如：不要说"这个[地雷]很危险"，而要说"这个地雷很危险"。
+7. **⚠️ 严禁重复内容**：绝对禁止重复相同或相似的内容、观点、例子。每个话题、观点、例子只能出现一次。如果发现开始重复，必须立即转换到全新的角度或话题。
 
 现在请开始生成，直接输出对话内容，不要添加任何其他说明、注释或解释。"""
         return prompt
