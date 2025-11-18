@@ -303,17 +303,20 @@ class TextProcessor:
         text = re.sub(r'[¥$]\d+\.?\d*', replace_price, text)  # ¥100, $100
         text = re.sub(r'\d+\.?\d*[元块]', replace_price, text)  # 100元, 100.50块
         
-        # 2.5. 处理带单位的金额（如 116.3亿元、50.5万元、10.2千元、5.8百元等）
+        # 2.5. 处理带单位的金额（如 116.3亿元、50.5万元、10.2千元、5.8百元、34.93亿港元等）
         def replace_amount_with_unit(match):
             num_str = match.group(1)
-            unit = match.group(2)  # 亿元、万元、千元、百元
+            unit_prefix = match.group(2)  # 亿、万、千、百（可选）
+            currency_unit = match.group(3)  # 元、港元、港币、美元等
             chinese_num = self.number_to_chinese(num_str)
-            return f"{chinese_num}{unit}"
+            # 组合单位：单位前缀 + 货币单位
+            full_unit = f"{unit_prefix}{currency_unit}" if unit_prefix else currency_unit
+            return f"{chinese_num}{full_unit}"
         
-        # 匹配：数字 + 单位（优先匹配亿元、万元、千元、百元，避免与单独的"元"冲突）
+        # 匹配：数字 + 单位（优先匹配亿元、万元、千元、百元、亿港元、万港元等，避免与单独的"元"冲突）
         # 注意：这个处理在价格处理之后，所以单独的"元"已经被处理过了
-        # 使用非贪婪匹配，优先匹配更长的单位（如"亿元"优先于"元"）
-        text = re.sub(r'(\d+\.?\d*)(亿元|万元|千元|百元)', replace_amount_with_unit, text)
+        # 匹配模式：数字 + (亿|万|千|百)? + (元|港元|港币|美元|人民币)
+        text = re.sub(r'(\d+\.?\d*)([亿万千百]?)(元|港元|港币|美元|人民币)', replace_amount_with_unit, text)
         
         # 3. 处理百分比：如 50% -> 百分之五十，87% -> 百分之八十七
         # 使用更精确的正则表达式，确保匹配到百分比符号前的数字
@@ -358,9 +361,15 @@ class TextProcessor:
                     return num_str
                 if next_char in '年月日¥$元块%':
                     return num_str
-                # 如果下一个字符是"万"、"千"、"百"，后面可能跟着"元"，说明已经被处理过，跳过
-                if next_char in '万千百' and end_pos + 1 < len(text) and text[end_pos + 1] == '元':
-                    return num_str
+                # 如果下一个字符是"万"、"千"、"百"、"亿"，后面可能跟着"元"、"港元"等，说明已经被处理过，跳过
+                if next_char in '亿万千百':
+                    # 检查后面是否跟着货币单位（元、港元、港币、美元、人民币）
+                    if end_pos + 1 < len(text):
+                        remaining_text = text[end_pos + 1:end_pos + 4]  # 最多检查3个字符（如"港元"）
+                        if remaining_text.startswith('元') or remaining_text.startswith('港元') or \
+                           remaining_text.startswith('港币') or remaining_text.startswith('美元') or \
+                           remaining_text.startswith('人民币'):
+                            return num_str
             
             return self.number_to_chinese(num_str)
         
