@@ -99,6 +99,13 @@ class TextProcessor:
             if remainder > 0:
                 if remainder < 10:
                     result += '零' + self.DIGIT_TO_CHINESE[str(remainder)]
+                elif remainder < 20:
+                    # 10-19在百位后要读作"一十X"，不能省略"一"
+                    ones = remainder % 10
+                    if ones > 0:
+                        result += '一十' + self.DIGIT_TO_CHINESE[str(ones)]
+                    else:
+                        result += '一十'
                 else:
                     result += self._number_to_chinese_integer(str(remainder))
             return ('负' + result) if is_negative else result
@@ -110,7 +117,15 @@ class TextProcessor:
             result = self.DIGIT_TO_CHINESE[str(thousands)] + '千'
             if remainder > 0:
                 if remainder < 100:
-                    result += '零' + self._number_to_chinese_integer(str(remainder))
+                    # 如果余数小于100，需要特殊处理10-19的情况
+                    if 10 <= remainder < 20:
+                        ones = remainder % 10
+                        if ones > 0:
+                            result += '零一十' + self.DIGIT_TO_CHINESE[str(ones)]
+                        else:
+                            result += '零一十'
+                    else:
+                        result += '零' + self._number_to_chinese_integer(str(remainder))
                 else:
                     result += self._number_to_chinese_integer(str(remainder))
             return ('负' + result) if is_negative else result
@@ -122,7 +137,15 @@ class TextProcessor:
             result = self._number_to_chinese_integer(str(wan)) + '万'
             if remainder > 0:
                 if remainder < 1000:
-                    result += '零' + self._number_to_chinese_integer(str(remainder))
+                    # 如果余数小于1000，需要特殊处理10-19的情况
+                    if 10 <= remainder < 20:
+                        ones = remainder % 10
+                        if ones > 0:
+                            result += '零一十' + self.DIGIT_TO_CHINESE[str(ones)]
+                        else:
+                            result += '零一十'
+                    else:
+                        result += '零' + self._number_to_chinese_integer(str(remainder))
                 else:
                     result += self._number_to_chinese_integer(str(remainder))
             return ('负' + result) if is_negative else result
@@ -133,6 +156,8 @@ class TextProcessor:
         result = self._number_to_chinese_integer(str(yi)) + '亿'
         if remainder > 0:
             if remainder < 10000000:
+                # 对于小于1000万的余数，需要检查是否包含10-19的情况
+                # 这里直接调用递归处理，因为_number_to_chinese_integer已经处理了10-19的情况
                 result += '零' + self._number_to_chinese_integer(str(remainder))
             else:
                 result += self._number_to_chinese_integer(str(remainder))
