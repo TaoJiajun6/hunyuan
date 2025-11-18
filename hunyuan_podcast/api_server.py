@@ -1016,6 +1016,13 @@ def download_text_from_url(url: Union[str, List[str]], timeout: int = 60) -> str
         # 合并所有文件内容，用两个换行分隔
         merged_text = "\n\n".join(all_texts)
         logger.info(f"所有文件下载完成，合并后总长度: {len(merged_text)} 字符")
+        
+        # 清理小说文本内容（移除中括号标记和无关内容）
+        from .input_processor import get_processor
+        input_processor = get_processor()
+        merged_text = input_processor.clean_novel_content(merged_text)
+        logger.info(f"文本清理后长度: {len(merged_text)} 字符")
+        
         return merged_text
     
     # 单个文件处理（原有逻辑）
@@ -1088,6 +1095,13 @@ def download_text_from_url(url: Union[str, List[str]], timeout: int = 60) -> str
                         # 最后尝试latin-1（不会失败）
                         text = content_bytes.decode('latin-1', errors='ignore')
             logger.info(f"文本文件读取成功: {len(text)} 字符")
+            
+            # 清理小说文本内容（移除中括号标记和无关内容）
+            from .input_processor import get_processor
+            input_processor = get_processor()
+            text = input_processor.clean_novel_content(text)
+            logger.info(f"文本清理后长度: {len(text)} 字符")
+            
             return text
         elif file_extension == 'pdf' or 'application/pdf' in content_type:
             # PDF文件，使用input_processor提取文本
@@ -1102,6 +1116,11 @@ def download_text_from_url(url: Union[str, List[str]], timeout: int = 60) -> str
                 try:
                     text = input_processor.extract_text_from_pdf_file(temp_file.name)
                     logger.info(f"PDF文件读取成功: {len(text)} 字符")
+                    
+                    # 清理小说文本内容（移除中括号标记和无关内容）
+                    text = input_processor.clean_novel_content(text)
+                    logger.info(f"文本清理后长度: {len(text)} 字符")
+                    
                     return text
                 finally:
                     # 删除临时文件
@@ -1133,6 +1152,13 @@ def download_text_from_url(url: Union[str, List[str]], timeout: int = 60) -> str
                 
                 text = '\n'.join(text_parts)
                 logger.info(f"Word文件读取成功: {len(text)} 字符")
+                
+                # 清理小说文本内容（移除中括号标记和无关内容）
+                from .input_processor import get_processor
+                input_processor = get_processor()
+                text = input_processor.clean_novel_content(text)
+                logger.info(f"文本清理后长度: {len(text)} 字符")
+                
                 return text
             except ImportError:
                 logger.error("需要安装python-docx库来处理Word文件: pip install python-docx")

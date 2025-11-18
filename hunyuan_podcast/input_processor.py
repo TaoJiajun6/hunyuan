@@ -422,6 +422,114 @@ class InputProcessor:
             logger.error(f"提取PDF内容失败: {str(e)}")
             raise Exception(f"提取PDF内容失败: {str(e)}")
     
+    def clean_novel_content(self, text: str) -> str:
+        """
+        清理小说文本内容，移除中括号标记和无关内容
+        
+        Args:
+            text: 原始文本内容
+        
+        Returns:
+            清理后的文本内容
+        """
+        if not text:
+            return text
+        
+        lines = text.split('\n')
+        cleaned_lines = []
+        
+        # 需要移除的关键词（包含这些关键词的行会被移除，这些通常是文档结构标记）
+        exclude_keywords = [
+            '作者公告', '入V章节说明', '入v章节说明', '入V说明', '入v说明',
+            '关于简介君', '闲话', '排榜', '致敬汪先生', '声明', '用户上传',
+            '八零电子书', 'txt80.cc', '存储空间', '免费下载服务',
+            '收藏评论打赏', '古风首饰', '幸运读者', '完本',
+            '美男出场惊艳榜', '惊艳程度', '按照本文出场顺序',
+            '可曾有一句诗打动你', '可曾有一首诗打动过你'
+        ]
+        
+        # 需要移除的段落起始关键词（包含这些关键词的段落会被整体移除）
+        exclude_section_keywords = [
+            '作者公告', '入V章节说明', '入v章节说明', '关于简介君', '闲话',
+            '排榜', '致敬', '声明', '用户上传之内容开始'
+        ]
+        
+        skip_until_empty = False  # 标记是否在跳过某个段落
+        
+        for line in lines:
+            original_line = line
+            line = line.strip()
+            
+            # 如果遇到空行，结束跳过段落
+            if not line:
+                skip_until_empty = False
+                # 如果上一行不是空行，保留一个空行作为段落分隔
+                if cleaned_lines and cleaned_lines[-1]:
+                    cleaned_lines.append('')
+                continue
+            
+            # 如果正在跳过段落，继续跳过直到空行
+            if skip_until_empty:
+                continue
+            
+            # 检查是否是段落起始关键词（需要移除整个段落）
+            is_section_start = False
+            for keyword in exclude_section_keywords:
+                if keyword in line:
+                    is_section_start = True
+                    skip_until_empty = True
+                    break
+            
+            if is_section_start:
+                continue
+            
+            # 移除所有中括号标记（【xxx】格式）
+            # 匹配全角中括号【】和半角中括号[]
+            # 注意：保留角色标记格式 [角色A] 等，只移除其他中括号内容
+            # 先检查是否是角色标记格式
+            if not re.match(r'^\s*\[角色[ABC]\]', line, re.IGNORECASE):
+                # 如果不是角色标记，移除所有中括号内容
+                line = re.sub(r'[【\[][^】\]]*[】\]]', '', line)
+            
+            # 如果移除中括号后行变空，跳过这一行
+            if not line.strip():
+                continue
+            
+            # 检查是否包含需要排除的关键词（这些通常是文档结构标记行）
+            should_exclude = False
+            for keyword in exclude_keywords:
+                if keyword in line:
+                    should_exclude = True
+                    break
+            
+            # 如果包含排除关键词，跳过这一行
+            if should_exclude:
+                continue
+            
+            # 检查是否是分隔线（多个连续的符号）
+            if re.match(r'^[-=*_]{3,}$', line):
+                continue
+            
+            # 检查是否是明显的文档结构标记
+            if line.startswith('------------') or line.startswith('==========') or line.startswith('********'):
+                continue
+            
+            # 保留清理后的行
+            cleaned_lines.append(line)
+        
+        # 合并清理后的行
+        cleaned_text = '\n'.join(cleaned_lines)
+        
+        # 清理多余的空行（多个连续空行合并为两个）
+        cleaned_text = re.sub(r'\n{3,}', '\n\n', cleaned_text)
+        
+        # 移除首尾空白
+        cleaned_text = cleaned_text.strip()
+        
+        logger.info(f"文本清理完成: 原始长度 {len(text)} 字符，清理后 {len(cleaned_text)} 字符")
+        
+        return cleaned_text
+    
     def parse_instruction(self, text_with_instruction: str) -> Tuple[str, Optional[str]]:
         """
         解析包含指令的文本，分离出文本内容和指令
