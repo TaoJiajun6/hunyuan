@@ -1495,6 +1495,10 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 instruction=request.instruction
             )
             logger.info(f"{input_type}类型输入处理成功: {len(text_content)} 字符")
+            # 记录文本素材的前200个字符，用于调试
+            if text_content:
+                preview = text_content[:200] + "..." if len(text_content) > 200 else text_content
+                logger.info(f"文本素材预览: {preview}")
             if extracted_instruction:
                 logger.info(f"提取的指令: {extracted_instruction}")
         except Exception as e:
@@ -1681,6 +1685,15 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                             "personality": personality.strip() if personality else "",
                             "speaking_style": speaking_style.strip() if speaking_style else ""
                         }
+                
+                # 验证文本素材
+                if not text_content or len(text_content.strip()) < 20:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"文本素材为空或过短（{len(text_content)}字符），无法生成播客。请检查输入URL是否正确，或尝试直接输入文本内容。"
+                    )
+                
+                logger.info(f"准备生成对话，文本素材长度: {len(text_content)} 字符，前100字符: {text_content[:100]}")
                 
                 prompt = processor.build_text_to_dialogue_prompt(
                     text=text_content,
