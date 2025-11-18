@@ -1686,11 +1686,12 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                             "speaking_style": speaking_style.strip() if speaking_style else ""
                         }
                 
-                # 验证文本素材
-                if not text_content or len(text_content.strip()) < 20:
+                # 验证文本素材（提高阈值到100字符，确保有足够的内容生成播客）
+                if not text_content or len(text_content.strip()) < 100:
+                    preview = text_content[:100] if text_content and len(text_content) > 100 else text_content
                     raise HTTPException(
                         status_code=400, 
-                        detail=f"文本素材为空或过短（{len(text_content)}字符），无法生成播客。请检查输入URL是否正确，或尝试直接输入文本内容。"
+                        detail=f"文本素材为空或过短（{len(text_content)}字符，内容: \"{preview}...\"），无法生成播客。可能原因：1) 网页需要JavaScript渲染（如百度移动端、微博等）；2) 网页有反爬虫保护；3) 网页结构特殊。建议：1) 复制网页文本内容直接输入；2) 使用\"文字+指令\"类型；3) 或提供PC版网页URL"
                     )
                 
                 logger.info(f"准备生成对话，文本素材长度: {len(text_content)} 字符，前100字符: {text_content[:100]}")

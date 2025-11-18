@@ -129,6 +129,7 @@ class InputProcessor:
                 'twitter.com': 'Twitter网站需要JavaScript渲染，无法直接提取内容。建议复制推文内容直接输入',
                 'facebook.com': 'Facebook网站需要JavaScript渲染，无法直接提取内容。建议复制内容直接输入',
                 'instagram.com': 'Instagram网站需要JavaScript渲染，无法直接提取内容。建议复制内容直接输入',
+                'mbd.baidu.com': '百度移动端网页需要JavaScript渲染，无法直接提取内容。建议：1) 复制网页文本内容直接输入；2) 使用"文字+指令"类型；3) 或访问PC版网页',
             }
             
             site_warning = None
@@ -150,7 +151,53 @@ class InputProcessor:
             response = requests.get(url, headers=headers, timeout=timeout)
             response.raise_for_status()
             
-            html = response.text
+            # 处理编码问题：先尝试从响应头获取编码，如果没有则尝试检测
+            html = None
+            encoding_used = None
+            
+            # 方法1: 尝试从响应头获取编码
+            if response.encoding:
+                try:
+                    html = response.text
+                    encoding_used = response.encoding
+                except (UnicodeDecodeError, UnicodeError):
+                    logger.warning(f"使用响应头编码 {response.encoding} 失败，尝试其他编码")
+                    html = None
+            
+            # 方法2: 如果没有成功，尝试检测编码
+            if html is None:
+                try:
+                    import chardet
+                    detected = chardet.detect(response.content)
+                    if detected and detected.get('encoding'):
+                        detected_encoding = detected['encoding']
+                        response.encoding = detected_encoding
+                        html = response.text
+                        encoding_used = detected_encoding
+                        logger.info(f"使用chardet检测到编码: {detected_encoding}")
+                except ImportError:
+                    logger.warning("chardet库未安装，跳过自动编码检测")
+                except Exception as e:
+                    logger.warning(f"编码检测失败: {str(e)}")
+            
+            # 方法3: 如果还是失败，尝试常见的中文编码
+            if html is None:
+                for encoding in ['utf-8', 'gbk', 'gb2312', 'gb18030', 'big5']:
+                    try:
+                        response.encoding = encoding
+                        html = response.text
+                        encoding_used = encoding
+                        logger.info(f"使用编码 {encoding} 成功")
+                        break
+                    except (UnicodeDecodeError, UnicodeError):
+                        continue
+            
+            # 如果所有方法都失败，抛出异常
+            if html is None:
+                raise Exception("无法确定网页编码，请检查网页是否可访问")
+            
+            # 记录实际使用的编码
+            logger.info(f"网页编码: {response.encoding}, HTML长度: {len(html)} 字符")
             
             # 检查是否是空页面或仅包含脚本
             if len(html) < 500:
@@ -216,11 +263,16 @@ class InputProcessor:
             text = text.strip()
             
             # 如果提取的文本为空或过短，提供更友好的错误信息
-            if len(text) < 10:
+            # 提高阈值到100字符，因为太短的内容通常不是有效的文章内容
+            if len(text) < 100:
+                # 记录提取到的内容预览，用于调试
+                preview = text[:200] if len(text) > 200 else text
+                logger.warning(f"提取的文本过短（{len(text)}字符），预览: {preview}")
+                
                 if site_warning:
                     raise Exception(f"{site_warning}")
                 else:
-                    raise Exception(f'无法从该网页提取有效文本内容（提取到{len(text)}字符）。可能原因：1) 网页需要JavaScript渲染；2) 网页有反爬虫保护；3) 网页结构特殊。建议：1) 复制网页文本内容直接输入；2) 使用"文字+指令"类型；3) 或提供网页文章的完整URL')
+                    raise Exception(f'无法从该网页提取有效文本内容（仅提取到{len(text)}字符，内容: "{text[:50]}..."）。可能原因：1) 网页需要JavaScript渲染（如百度移动端、微博等）；2) 网页有反爬虫保护；3) 网页结构特殊。建议：1) 复制网页文本内容直接输入；2) 使用"文字+指令"类型；3) 或提供PC版网页URL')
             
             logger.info(f"网页内容提取成功: {len(text)} 字符")
             return text
