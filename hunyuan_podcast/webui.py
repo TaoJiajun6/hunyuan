@@ -1429,11 +1429,12 @@ def create_webui():
                             info="启用后，系统会根据播客内容、主题和场景类型，从音乐库中自动选择最合适的背景音乐"
                         )
                         
+                        gr.Markdown("**💡 手动上传说明**：如果关闭AI自动选择，可以手动上传背景音乐文件。可以上传多个文件（WAV、MP3、M4A、FLAC格式），系统会根据下方模式处理。")
+                        
                         background_music = gr.File(
                             label="🎵 手动上传背景音乐（可多选，仅在AI自动选择关闭时生效）",
                             file_count="multiple",
                             file_types=[".wav", ".mp3", ".m4a", ".flac"],
-                            info="如果关闭AI自动选择，可以手动上传背景音乐文件。可以上传多个文件，系统会根据下方模式处理。",
                             elem_classes=["audio-container"]
                         )
                         
