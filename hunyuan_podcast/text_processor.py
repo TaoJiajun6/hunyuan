@@ -689,6 +689,78 @@ class TextProcessor:
         
         return dialogues
     
+    def trim_dialogue_for_duration(self, text: str, instruction: Optional[str] = None, max_chars: Optional[int] = None) -> str:
+        """
+        根据时长要求截断对话文本
+        
+        Args:
+            text: 原始对话文本
+            instruction: 用户指令（用于检测时长要求）
+            max_chars: 最大字符数（如果提供，直接使用）
+        
+        Returns:
+            截断后的对话文本
+        """
+        if not text:
+            return text
+        
+        # 如果没有提供max_chars，尝试从instruction中检测
+        if max_chars is None and instruction:
+            # 检测是否是1分钟要求
+            one_minute_keywords = ['1分钟', '一分钟', '一分钟以内', '1分钟内']
+            if any(keyword in instruction for keyword in one_minute_keywords):
+                max_chars = 500  # 1分钟以内：最多500字
+        
+        # 如果没有时长要求，不截断
+        if max_chars is None:
+            return text
+        
+        # 解析对话
+        dialogues = self.parse_role_text(text)
+        if not dialogues:
+            return text
+        
+        # 计算当前总字数
+        total_chars = sum(len(content) for _, content in dialogues)
+        
+        # 如果已经符合要求，直接返回
+        if total_chars <= max_chars:
+            return text
+        
+        # 需要截断：从后往前删除对话，直到符合要求
+        trimmed_dialogues = []
+        current_chars = 0
+        
+        for role, content in dialogues:
+            content_len = len(content)
+            # 如果加上这段对话会超过限制，停止
+            if current_chars + content_len > max_chars:
+                break
+            trimmed_dialogues.append((role, content))
+            current_chars += content_len
+        
+        # 重新构建文本
+        if not trimmed_dialogues:
+            # 如果所有对话都太长，至少保留第一段
+            if dialogues:
+                role, content = dialogues[0]
+                # 如果第一段也超过限制，截断内容
+                if len(content) > max_chars:
+                    content = content[:max_chars-3] + "..."
+                trimmed_dialogues = [(role, content)]
+        
+        # 重新构建对话文本
+        lines = []
+        for role, content in trimmed_dialogues:
+            lines.append(f"[{role}]{content}")
+        
+        trimmed_text = '\n'.join(lines)
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"对话截断完成: 原始长度 {total_chars} 字，截断后 {current_chars} 字（限制: {max_chars} 字）")
+        
+        return trimmed_text
+    
     def extract_roles(self, text: str) -> List[str]:
         """
         提取文本中的所有角色名（只提取行首的角色标记，不提取对话内容中的名词）
@@ -1187,7 +1259,12 @@ class TextProcessor:
             
             duration_warning = ""
             if has_duration:
-                duration_warning = "\n\n**⚠️ 时长要求检测**：检测到指令中包含时长要求，必须严格按照该时长生成对话内容。如果要求\"1分钟\"或\"一分钟以内\"，对话总字数必须控制在400-600字；如果要求\"5分钟\"或更长，可以相应增加对话内容。"
+                # 检查是否是1分钟要求
+                is_one_minute = any(keyword in instruction for keyword in ['1分钟', '一分钟', '一分钟以内', '1分钟内'])
+                if is_one_minute:
+                    duration_warning = "\n\n**⚠️ 时长要求检测（1分钟以内）**：检测到指令要求\"1分钟\"或\"一分钟以内\"，这是硬性要求，必须严格遵守：\n- 对话总字数**严格控制在400-500字以内**（绝对不能超过500字）\n- 每个角色发言**最多3次**，总共**最多6段对话**（2个角色）或**最多9段对话**（3个角色）\n- 每段对话控制在30-50字，简短精炼\n- **如果生成的对话超过500字，会导致播客时长超过1分钟，这是不允许的**\n- 只选择最核心、最精彩的内容进行讨论，不要展开过多细节"
+                else:
+                    duration_warning = "\n\n**⚠️ 时长要求检测**：检测到指令中包含时长要求，必须严格按照该时长生成对话内容。如果要求\"5分钟\"或更长，可以相应增加对话内容。"
             
             instruction_detail_text_short = f"5. 用户指令\n\n{instruction}\n\n** 重要**：必须严格按照上述用户指令执行，特别是关于内容要求、时长要求、风格要求等。如果指令中指定了时长（如\"1分钟\"、\"一分钟以内\"、\"5分钟\"等），必须严格按照该时长生成相应长度的对话内容。如果指令中指定了内容要求（如\"简短\"、\"详细\"等），必须严格按照要求执行。{duration_warning}"
         
@@ -1301,7 +1378,12 @@ class TextProcessor:
 
 **对话要求**：
 - **⚠️ 时长控制（最重要，必须严格按照用户指令执行）**：
-  - 如果用户指令中指定了"1分钟"或"一分钟以内"：每个角色发言3-4次，总共约{num_characters * 3}段对话，对话总字数约400-600字，播客时长严格控制在1分钟以内
+  - **如果用户指令中指定了"1分钟"或"一分钟以内"**：
+    - 每个角色发言**最多3次**，总共**最多{num_characters * 3}段对话**
+    - 对话总字数**严格控制在400-500字以内**（绝对不能超过500字）
+    - 每段对话控制在30-50字，简短精炼
+    - 播客时长**必须严格控制在1分钟以内**，这是硬性要求
+    - **⚠️ 警告**：如果生成的对话超过500字，会导致播客时长超过1分钟，这是不允许的
   - 如果用户指令中指定了"3-5分钟"：每个角色发言6-8次，总共约{num_characters * 7}段对话，对话总字数约1500-2500字
   - 如果用户指令中指定了"5分钟"或更长：每个角色发言10-12次，总共约{num_characters * 11}段对话，对话总字数约2500-3500字
   - 如果没有指定时长，默认使用5-7分钟的标准：每个角色发言10-12次，总共约{num_characters * 13}段对话，对话总字数约2500-3500字

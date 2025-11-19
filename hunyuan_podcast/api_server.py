@@ -560,7 +560,41 @@ MAX_REQUEST_BODY_SIZE = 100 * 1024 * 1024  # 100MB
 
 app = FastAPI(
     title="混元AI播客生成API",
-    description="基于混元大模型和SoulX-Podcast的智能播客音频生成API",
+    description="""
+    基于混元大模型和SoulX-Podcast的智能播客音频生成API
+    
+    ## 功能特性
+    
+    本API实现了混元AI播客：
+    
+    ### 1. 多角色自然互动播客音频生成
+    - 支持通过文本标记(如`[角色A]`、`[角色B]`)区分不同角色
+    - 自动识别角色并生成对应的播客音频
+    - 支持多角色间的自然对话和互动
+    - 支持情绪标注,增强对话表现力
+    - 支持普通文本自动转换为多角色对话
+    
+    ### 2. 自定义角色人设和音色播客生成
+    - 支持为每个角色设置详细的人设描述(身份、性格、说话风格等)
+    - 支持动态上传音色参考音频
+    - 根据角色人设生成符合风格的播客对话
+    - 确保角色人设一致性,风格固化
+    
+    ### 3. 主题深度播客生成
+    - 基于指定主题生成有深度、引发思考的播客内容
+    - 支持多维度分析,提供全面视角
+    - 引用理论、数据、案例等支撑观点
+    - 使用开放式结尾,引导听众继续思考
+    
+    ## API端点
+    
+    - `POST /api/v1/podcast/multi_role` - 多角色互动播客生成
+    - `POST /api/v1/podcast/character` - 自定义角色播客生成
+    - `POST /api/v1/podcast/deep` - 主题深度播客生成
+    - `POST /api/v1/podcast/analyze` - 文本分析
+    - `GET /api/v1/podcast/progress/{job_id}` - 查询生成进度
+    - `GET /health` - 健康检查
+    """,
     version="1.0.0"
 )
 
@@ -1423,25 +1457,69 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.post("/api/v1/podcast/multi_role", response_model=ApiResponse)
 async def generate_multi_role_podcast(request: MultiRoleRequest, background_tasks: BackgroundTasks):
     """
-    生成多角色互动播客（子题目1）
+    生成多角色互动播客（子题目1：将文本素材转化为多角色自然互动的播客音频）
     
-    - **text**: 播客文本（支持角色标记或普通文本）
-    - **role_voice_urls**: 角色音色映射，键为角色名，值为云存储下载URL（必需）
-    - **silence_interval**: 角色切换静音间隔（毫秒）
-    - **podcast_name**: 播客名称（可选）
-    - **topic**: 本期主题（可选）
-    - **character_1_name**: 角色1名称（可选）
-    - **character_1_personality**: 角色1性格特点（可选）
-    - **character_1_speaking_style**: 角色1说话风格（可选）
-    - **character_2_name**: 角色2名称（可选）
-    - **character_2_personality**: 角色2性格特点（可选）
-    - **character_2_speaking_style**: 角色2说话风格（可选）
-    - **character_3_name**: 角色3名称（可选）
-    - **character_3_personality**: 角色3性格特点（可选）
-    - **character_3_speaking_style**: 角色3说话风格（可选）
-    - **scene_types**: 互动场景类型列表（可选），如：["接梗玩梗的轻松交流", "立场冲突的激烈辩论"]
+    ## 功能说明
     
-    注意：本接口仅支持云存储URL，不再支持base64编码的音频文件
+    将文本素材转化为多角色自然互动的播客音频。支持以下输入方式：
+    - 直接输入文本（支持角色标记或普通文本）
+    - 上传文本文件（.txt、.doc、.docx、.pdf等）
+    - 输入公众号/网页URL（自动提取内容）
+    
+    如果输入的是普通文本（没有角色标记），系统会自动调用混元大模型将其转换为多角色对话。
+    
+    ## 请求参数
+    
+    ### 必需参数
+    - **text** (可选): 播客文本（支持角色标记或普通文本，如果使用text_file_url或input_url，此字段可为空）
+    - **text_file_url** (可选): 文本文件云存储URL（.txt或Word文件，如果提供，优先使用）。支持单个URL字符串或URL数组（多个文件）
+    - **input_url** (可选): 输入URL（用于公众号、网页、PDF等类型）
+    - **input_type** (可选): 输入类型，可选值：文字、文字+指令、公众号、公众号+指令、网页、网页+指令、文件、文件+指令、文字+英文指令
+    - **role_voice_urls** (必需): 角色音色映射，键为角色名，值为云存储下载URL（至少需要2个角色）
+    
+    ### 可选参数
+    - **instruction** (可选): 指令内容（用于控制播客生成过程，如'生成5分钟播客'、'使用轻松风格'等）
+    - **silence_interval** (可选): 角色切换静音间隔（毫秒），默认800ms
+    - **podcast_name** (可选): 播客名称
+    - **topic** (可选): 本期主题
+    - **character_1_name** (可选): 角色1名称
+    - **character_1_personality** (可选): 角色1性格特点
+    - **character_1_speaking_style** (可选): 角色1说话风格
+    - **character_2_name** (可选): 角色2名称
+    - **character_2_personality** (可选): 角色2性格特点
+    - **character_2_speaking_style** (可选): 角色2说话风格
+    - **character_3_name** (可选): 角色3名称
+    - **character_3_personality** (可选): 角色3性格特点
+    - **character_3_speaking_style** (可选): 角色3说话风格
+    - **scene_types** (可选): 互动场景类型列表，如：["接梗玩梗的轻松交流", "立场冲突的激烈辩论", "愉快合作的访谈对话", "不愉快的质疑访谈"]
+    - **category** (可选): 播客分类，用于背景音乐选择
+    - **background_volume** (可选): 背景音乐音量（0.0-1.0），默认0.3
+    - **job_id** (可选): 任务ID，用于前端轮询进度
+    
+    ## 响应格式
+    
+    成功时返回：
+    ```json
+    {
+        "success": true,
+        "message": "播客生成成功",
+        "data": {
+            "audio_base64": "base64编码的音频数据",
+            "audio_path": "音频文件路径",
+            "audio_url": "音频云存储URL（如果配置了云存储）",
+            "file_size_mb": 2.5,
+            "script": "生成的脚本内容",
+            "roles": ["角色A", "角色B"]
+        }
+    }
+    ```
+    
+    ## 注意事项
+    
+    - 本接口仅支持云存储URL，不再支持base64编码的音频文件
+    - 如果输入普通文本，系统会自动转换为多角色对话，需要至少上传2个角色的音色文件
+    - 系统会自动选择背景音乐，无需手动指定
+    - 生成过程可能需要几分钟，建议使用job_id轮询进度
     """
     # 立即创建初始进度，确保前端轮询时能立即获取到状态
     _update_progress(request.job_id, "queued", 1, "任务已提交，准备开始处理")
@@ -1748,10 +1826,19 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 )
                 
                 text_generation_start = time.time()
+                
+                # 根据指令调整max_tokens：如果要求1分钟以内，限制生成长度
+                max_tokens = 6000  # 默认值
+                if extracted_instruction:
+                    one_minute_keywords = ['1分钟', '一分钟', '一分钟以内', '1分钟内']
+                    if any(keyword in extracted_instruction for keyword in one_minute_keywords):
+                        max_tokens = 1000  # 1分钟以内：限制为1000 tokens（约500-600字）
+                        logger.info("检测到1分钟以内要求，限制max_tokens为1000")
+                
                 generated_text = api_client.generate_text(
                     prompt=prompt,
                     temperature=0.7,  # 提高温度以增加对话的自然性和多样性
-                    max_tokens=6000  # 增加到6000以支持更长的对话（8-10分钟播客）
+                    max_tokens=max_tokens
                 )
                 text_generation_time = time.time() - text_generation_start
                 retrieval_timings["对话文本生成"] = text_generation_time
@@ -1762,6 +1849,15 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 logger.info(f"对话文本生成完成，耗时: {text_generation_time:.2f}s，文本长度: {len(generated_text)}")
                 
                 generated_text = processor.clean_text(generated_text)
+                
+                # 如果指令要求1分钟以内，截断超长内容
+                if extracted_instruction:
+                    one_minute_keywords = ['1分钟', '一分钟', '一分钟以内', '1分钟内']
+                    if any(keyword in extracted_instruction for keyword in one_minute_keywords):
+                        logger.info("检测到1分钟以内要求，将对生成的对话进行截断验证")
+                        generated_text = processor.trim_dialogue_for_duration(generated_text, extracted_instruction, max_chars=500)
+                        logger.info(f"截断后对话长度: {len(generated_text)} 字符")
+                
                 text_content = generated_text
                 roles = processor.extract_roles(text_content)
             
@@ -1797,13 +1893,13 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                     logger.info(f"✓ 自动选择背景音乐: {os.path.basename(background_music_path)}")
                     # 验证文件是否存在
                     if not os.path.exists(background_music_path):
-                        logger.warning(f"⚠️ 背景音乐文件不存在: {background_music_path}")
+                        logger.warning(f" 背景音乐文件不存在: {background_music_path}")
                         background_music_path = None
                 else:
-                    logger.warning("⚠️ 未找到合适的背景音乐，将不使用背景音乐")
+                    logger.warning(" 未找到合适的背景音乐，将不使用背景音乐")
                     background_music_path = None
             except Exception as e:
-                logger.warning(f"⚠️ 自动选择背景音乐失败: {str(e)}，将不使用背景音乐")
+                logger.warning(f" 自动选择背景音乐失败: {str(e)}，将不使用背景音乐")
                 import traceback
                 logger.debug(f"错误详情: {traceback.format_exc()}")
                 background_music_path = None
@@ -2014,14 +2110,58 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
 @app.post("/api/v1/podcast/character", response_model=ApiResponse)
 async def generate_character_podcast(request: CharacterRequest, background_tasks: BackgroundTasks):
     """
-    生成自定义角色播客（子题目2）
+    生成自定义角色播客（子题目2：根据用户自定义的角色人设和音色生成契合风格的播客音频）
     
-    - **characters**: 角色列表（至少2个，最多4个），每个角色必须提供voice_url（云存储URL）
-    - **text**: 文本素材（必需）
-    - **topic**: 播客主题（可选，主要用于背景音乐选择）
-    - **silence_interval**: 角色切换静音间隔（毫秒）
+    ## 功能说明
     
-    注意：本接口仅支持云存储URL，不再支持base64编码的音频文件
+    根据用户自定义的角色人设和音色生成契合风格的播客音频。系统会根据角色人设生成符合风格的对话，确保角色人设一致性。
+    
+    ## 请求参数
+    
+    ### 必需参数
+    - **characters** (必需): 角色列表（至少2个，最多4个），每个角色必须提供以下信息：
+        - **name** (必需): 角色名称
+        - **voice_url** (必需): 音色文件云存储URL
+        - **identity** (可选): 身份/职业
+        - **personality** (可选): 核心性格
+        - **catchphrase** (可选): 口头禅/说话习惯
+        - **speaking_style** (可选): 说话风格
+        - **relationship** (可选): 与其他角色的关系
+    - **text** (必需): 文本素材
+    
+    ### 可选参数
+    - **topic** (可选): 播客主题（主要用于背景音乐选择）
+    - **instruction** (可选): 指令内容（用于控制播客生成过程，如'生成1分钟播客'、'使用轻松风格'等）
+    - **silence_interval** (可选): 角色切换静音间隔（毫秒），默认800ms
+    - **category** (可选): 播客分类，用于背景音乐选择
+    - **background_volume** (可选): 背景音乐音量（0.0-1.0），默认0.3
+    - **job_id** (可选): 任务ID，用于前端轮询进度
+    
+    ## 响应格式
+    
+    成功时返回：
+    ```json
+    {
+        "success": true,
+        "message": "播客生成成功",
+        "data": {
+            "audio_base64": "base64编码的音频数据",
+            "audio_path": "音频文件路径",
+            "audio_url": "音频云存储URL（如果配置了云存储）",
+            "file_size_mb": 2.5,
+            "script": "生成的脚本内容",
+            "characters": ["角色A", "角色B"]
+        }
+    }
+    ```
+    
+    ## 注意事项
+    
+    - 本接口仅支持云存储URL，不再支持base64编码的音频文件
+    - 至少需要提供2个角色的完整信息（名称和音色文件）
+    - 系统会根据角色人设生成符合风格的对话
+    - 系统会自动选择背景音乐，无需手动指定
+    - 生成过程可能需要几分钟，建议使用job_id轮询进度
     """
     # 立即创建初始进度，确保前端轮询时能立即获取到状态
     _update_progress(request.job_id, "queued", 1, "任务已提交，准备开始处理")
@@ -2317,15 +2457,53 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
 @app.post("/api/v1/podcast/deep", response_model=ApiResponse)
 async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: BackgroundTasks):
     """
-    生成主题深度播客（子题目3）
+    生成主题深度播客（子题目3：基于指定主题生成有深度、引发思考的播客音频）
     
-    - **topic**: 播客主题
-    - **role_voice_urls**: 角色音色映射，键为角色名，值为云存储下载URL（必需）
-    - **num_characters**: 角色数量（1-3个）
-    - **depth_level**: 深度级别（深度/中等/浅层）
-    - **silence_interval**: 角色切换静音间隔（毫秒）
+    ## 功能说明
     
-    注意：本接口仅支持云存储URL，不再支持base64编码的音频文件
+    基于指定主题生成有深度、引发思考的播客音频。系统会从多个维度分析主题，提供全面视角，引用理论、数据、案例等支撑观点，并使用开放式结尾引导听众继续思考。
+    
+    ## 请求参数
+    
+    ### 必需参数
+    - **topic** (必需): 播客主题
+    - **role_voice_urls** (必需): 角色音色映射，键为角色名（"角色A"、"角色B"、"角色C"），值为云存储下载URL
+    
+    ### 可选参数
+    - **num_characters** (可选): 角色数量（1-3个），默认2
+    - **depth_level** (可选): 深度级别（"深度"、"中等"、"浅层"），默认"深度"
+    - **instruction** (可选): 指令内容（用于控制播客生成过程，如'生成1分钟播客'、'使用轻松风格'等）
+    - **silence_interval** (可选): 角色切换静音间隔（毫秒），默认800ms
+    - **category** (可选): 播客分类，用于背景音乐选择
+    - **background_volume** (可选): 背景音乐音量（0.0-1.0），默认0.3
+    - **job_id** (可选): 任务ID，用于前端轮询进度
+    
+    ## 响应格式
+    
+    成功时返回：
+    ```json
+    {
+        "success": true,
+        "message": "播客生成成功",
+        "data": {
+            "audio_base64": "base64编码的音频数据",
+            "audio_path": "音频文件路径",
+            "audio_url": "音频云存储URL（如果配置了云存储）",
+            "file_size_mb": 2.5,
+            "script": "生成的脚本内容",
+            "topic": "播客主题",
+            "depth_level": "深度"
+        }
+    }
+    ```
+    
+    ## 注意事项
+    
+    - 本接口仅支持云存储URL，不再支持base64编码的音频文件
+    - 需要为每个角色提供音色文件（角色名必须为"角色A"、"角色B"、"角色C"）
+    - 深度级别影响生成内容的深度和复杂度
+    - 系统会自动选择背景音乐，无需手动指定
+    - 生成过程可能需要几分钟，建议使用job_id轮询进度
     """
     # 立即创建初始进度，确保前端轮询时能立即获取到状态
     _update_progress(request.job_id, "queued", 1, "任务已提交，准备开始处理")

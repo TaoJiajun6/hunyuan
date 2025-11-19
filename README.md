@@ -93,7 +93,7 @@ SOULX_PODCAST_MODEL_DIR = "SoulX-Podcast/pretrained_models/SoulX-Podcast-1.7B"
 在`hunyuan_podcast/config.py`中配置API密钥:
 
 ```python
-SILICONFLOW_API_KEY = "your-api-key"  # 从 https://cloud.siliconflow.cn 获取
+SILICONFLOW_API_KEY = "your-api-key"  
 ```
 
 或使用环境变量:
@@ -458,6 +458,7 @@ AUDIO_SAMPLING_RATE = 22050   # 采样率(Hz)
 **文档地址**: https://github.com/your-username/hunyuan-podcast/wiki
 
 **演示地址**: (请填写演示地址)
+
 
 
 
