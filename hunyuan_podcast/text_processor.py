@@ -375,7 +375,13 @@ class TextProcessor:
                 'yd': '码',
                 'mi': '英里',
                 'lb': '磅',
-                'oz': '盎司'
+                'oz': '盎司',
+                # 存储单位（保持英文读音，不转换）
+                'gb': 'GB',
+                'mb': 'MB',
+                'kb': 'KB',
+                'tb': 'TB',
+                'pb': 'PB'
             }
             chinese_unit = unit_map.get(unit, unit)  # 如果找不到映射，使用原单位
             return f"{chinese_num}{chinese_unit}"
@@ -387,10 +393,11 @@ class TextProcessor:
         # 体积单位：ml(毫升)、l(升)等
         # 功率单位：w(瓦)、kw(千瓦)、mw(兆瓦)等
         # 频率单位：hz(赫兹)、khz(千赫兹)、mhz(兆赫兹)、ghz(千兆赫兹)等
+        # 存储单位：GB(GB)、MB(MB)、KB(KB)、TB(TB)、PB(PB)等（保持英文读音）
         # 其他单位：px(像素)、dpi(DPI)、inch(英寸)等
         # 注意：对于单字母单位(m、g、l、w、t)，需要确保后面不是字母，避免误匹配
         # 先匹配多字母单位，再匹配单字母单位（使用负向前瞻确保后面不是字母）
-        english_unit_pattern = r'(mm|cm|dm|km|kg|mg|ml|kw|mw|hz|khz|mhz|ghz|px|dpi|inch|ft|yd|mi|lb|oz|(?<![a-zA-Z])[mglwt](?![a-zA-Z]))'
+        english_unit_pattern = r'(mm|cm|dm|km|kg|mg|ml|kw|mw|hz|khz|mhz|ghz|px|dpi|inch|ft|yd|mi|lb|oz|gb|mb|kb|tb|pb|(?<![a-zA-Z])[mglwt](?![a-zA-Z]))'
         # 使用负向前瞻，确保单位后面不是字母（避免匹配到单词中间）
         text = re.sub(r'(\d+\.?\d*)' + english_unit_pattern, replace_number_with_english_unit, text, flags=re.IGNORECASE)
         
@@ -464,7 +471,7 @@ class TextProcessor:
                         return num_str
                     # 检查是否是已知的英文单位（mm、cm、km、kg等）
                     remaining_text_lower = text[end_pos:end_pos + 4].lower()  # 最多检查4个字符（如"mhz"）
-                    english_units = ['mm', 'cm', 'dm', 'km', 'kg', 'mg', 'ml', 'kw', 'mw', 'hz', 'khz', 'mhz', 'ghz', 'px', 'dpi', 'inch', 'ft', 'yd', 'mi', 'lb', 'oz']
+                    english_units = ['mm', 'cm', 'dm', 'km', 'kg', 'mg', 'ml', 'kw', 'mw', 'hz', 'khz', 'mhz', 'ghz', 'px', 'dpi', 'inch', 'ft', 'yd', 'mi', 'lb', 'oz', 'gb', 'mb', 'kb', 'tb', 'pb']
                     # 检查是否以英文单位开头（考虑大小写）
                     if any(remaining_text_lower.startswith(unit) for unit in english_units):
                         # 这是已知英文单位，应该已经被处理过了，跳过
@@ -516,6 +523,22 @@ class TextProcessor:
         
         # 先将数字转换为中文读音
         content = self.convert_numbers_to_chinese(content)
+        
+        # 处理斜杠 "/"：在数字+单位之间或数字之间时，转换为"或"
+        # 例如：12GB/16GB/20GB -> 十二GB或十六GB或二十GB
+        # 匹配模式：数字+单位/数字+单位 或 数字/数字
+        def replace_slash(match):
+            # 如果斜杠前后都是数字+单位或数字，则替换为"或"
+            return match.group(0).replace('/', '或')
+        
+        # 匹配：数字+单位/数字+单位 或 数字/数字（斜杠前后都有数字）
+        # 使用负向前瞻和负向后顾，确保斜杠前后都是数字或数字+单位
+        # 匹配模式：\d+[A-Za-z]*/\d+[A-Za-z]*（如 12GB/16GB、12/16）
+        content = re.sub(r'(\d+[A-Za-z]*)\s*/\s*(\d+[A-Za-z]*)', r'\1或\2', content)
+        # 处理多个连续的斜杠分隔（如 12GB/16GB/20GB）
+        # 使用递归替换，直到没有更多匹配
+        while re.search(r'(\d+[A-Za-z]*)\s*/\s*(\d+[A-Za-z]*)', content):
+            content = re.sub(r'(\d+[A-Za-z]*)\s*/\s*(\d+[A-Za-z]*)', r'\1或\2', content)
         
         # 移除省略号（...），因为会导致TTS输出错误
         # 将连续的多个点（2个或以上）替换为空字符串
