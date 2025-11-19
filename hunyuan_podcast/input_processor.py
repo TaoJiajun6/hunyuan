@@ -185,7 +185,7 @@ class InputProcessor:
                 for encoding in ['utf-8', 'gbk', 'gb2312', 'gb18030', 'big5']:
                     try:
                         response.encoding = encoding
-            html = response.text
+                        html = response.text
                         encoding_used = encoding
                         logger.info(f"使用编码 {encoding} 成功")
                         break
