@@ -90,7 +90,7 @@
 ### 后端（Python FastAPI）
 - **API服务**: FastAPI
 - **AI模型**: 混元大模型（tencent/Hunyuan-A13B-Instruct）
-- **TTS**: IndexTTS-2
+- **TTS**: SoulX-Podcast
 - **音频处理**: 音频合成和格式转换
 
 ## 数据流
@@ -98,7 +98,7 @@
 1. **用户输入** → 播客生成页面
 2. **文件选择** → FileUtils → base64编码
 3. **API请求** → PodcastService → 后端API
-4. **后端处理** → 混元大模型生成文本 → IndexTTS-2生成音频
+4. **后端处理** → 混元大模型生成文本 → SoulX-Podcast生成音频
 5. **API响应** → base64音频数据
 6. **结果展示** → AudioPlayer播放音频 → 显示脚本
 
@@ -106,7 +106,7 @@
 
 ### 后端配置
 1. 启动API服务: `python run_api_server.py --host 0.0.0.0 --port 8000`
-2. 确保IndexTTS-2模型文件已下载
+2. 确保SoulX-Podcast模型文件已下载
 3. 确保混元API密钥已配置
 
 ### 前端配置
@@ -195,6 +195,7 @@
 - ✅ 完整的文档说明
 
 APP已经可以正常使用，用户可以通过AI办公页面进入播客功能，选择不同的播客生成方式，输入内容并选择音色文件，生成播客音频并播放。
+
 
 
 

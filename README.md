@@ -255,7 +255,7 @@ export class PodcastConfig {
 2. 获取端口转发地址(格式: `https://${SPACE_KEY}--8000.${REGION}.cloudstudio.work`)
 3. 在APP中配置API地址
 
-详细说明请参考: [Cloud Studio部署指南](CLOUD_STUDIO_DEPLOYMENT.md)
+详细说明请参考: [部署说明.md](部署说明.md)
 
 #### 编译运行APP
 
@@ -331,8 +331,7 @@ AUDIO_SAMPLING_RATE = 22050   # 采样率(Hz)
 - [技术报告](技术报告.md) - 详细的技术报告,包含研究背景、方法论、实验设计等
 - [快速开始指南](QUICKSTART.md) - 快速开始指南
 - [API文档](API_QUICKSTART.md) - API使用文档
-- [工作流集成指南](WORKFLOW_INTEGRATION.md) - 工作流集成指南
-- [Cloud Studio部署指南](CLOUD_STUDIO_DEPLOYMENT.md) - Cloud Studio部署指南
+- [部署说明.md](部署说明.md) - 完整部署说明（包含Cloud Studio部署）
 - [鸿蒙APP使用说明](podcasters/PODCAST_README.md) - 鸿蒙APP使用说明
 - [故障排查指南](TROUBLESHOOTING.md) - 故障排查指南
 
@@ -458,6 +457,7 @@ AUDIO_SAMPLING_RATE = 22050   # 采样率(Hz)
 **文档地址**: https://github.com/your-username/hunyuan-podcast/wiki
 
 **演示地址**: (请填写演示地址)
+
 
 
 

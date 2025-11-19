@@ -29,7 +29,7 @@
 
    有时文件可能保存在：
    - 项目根目录：`D:\Develop\hunyuan\`
-   - IndexTTS-2 目录：`D:\Develop\hunyuan\index-tts\outputs\`
+   - SoulX-Podcast 目录：`SoulX-Podcast/outputs/`
    - 临时目录
 
 ### 解决方案
@@ -137,8 +137,9 @@ print(f"生成的文件: {output_path}")
 2. 检查所有依赖是否正确安装
 3. 确认模型文件已完整下载
 4. 查看相关文档：
-   - [USAGE_GUIDE.md](USAGE_GUIDE.md) - 使用指南
-   - [README_PODCAST.md](README_PODCAST.md) - 详细文档
+   - [使用说明.md](使用说明.md) - 使用指南
+   - [README.md](README.md) - 详细文档
+
 
 
 

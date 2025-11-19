@@ -1,5 +1,4 @@
 # 混元AI播客生成系统 - 额外依赖
-# 注意：IndexTTS-2的依赖需要通过uv安装，见README_PODCAST.md
 
 # WebUI依赖
 gradio>=5.45.0

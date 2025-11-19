@@ -1454,6 +1454,39 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """处理HTTP异常（400, 404等），记录详细的错误信息"""
+    error_detail = exc.detail if hasattr(exc, 'detail') else str(exc)
+    status_code = exc.status_code if hasattr(exc, 'status_code') else 500
+    
+    logger.error(f"HTTP异常 ({status_code}): {request.method} {request.url.path}")
+    logger.error(f"错误详情: {error_detail}")
+    
+    # 如果是POST请求，尝试记录请求体（用于调试）
+    if request.method == "POST":
+        try:
+            body = await request.body()
+            if body:
+                try:
+                    body_json = json.loads(body)
+                    logger.error(f"请求体内容: {json.dumps(body_json, ensure_ascii=False)}")
+                except:
+                    logger.error(f"请求体（非JSON）: {body[:500]}")  # 只记录前500字符
+        except Exception as e:
+            logger.debug(f"无法读取请求体: {str(e)}")
+    
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "success": False,
+            "message": error_detail if isinstance(error_detail, str) else "请求处理失败",
+            "error": error_detail if isinstance(error_detail, str) else str(error_detail),
+            "status_code": status_code
+        }
+    )
+
+
 @app.post("/api/v1/podcast/multi_role", response_model=ApiResponse)
 async def generate_multi_role_podcast(request: MultiRoleRequest, background_tasks: BackgroundTasks):
     """
@@ -1804,12 +1837,11 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                             "speaking_style": speaking_style.strip() if speaking_style else ""
                         }
                 
-                # 验证文本素材（提高阈值到100字符，确保有足够的内容生成播客）
-                if not text_content or len(text_content.strip()) < 100:
-                    preview = text_content[:100] if text_content and len(text_content) > 100 else text_content
+                # 验证文本素材（只检查是否为空，不限制长度）
+                if not text_content or not text_content.strip():
                     raise HTTPException(
                         status_code=400, 
-                        detail=f"文本素材为空或过短（{len(text_content)}字符，内容: \"{preview}...\"），无法生成播客。可能原因：1) 网页需要JavaScript渲染（如百度移动端、微博等）；2) 网页有反爬虫保护；3) 网页结构特殊。建议：1) 复制网页文本内容直接输入；2) 使用\"文字+指令\"类型；3) 或提供PC版网页URL"
+                        detail="文本素材不能为空，请提供有效的文本内容"
                     )
                 
                 logger.info(f"准备生成对话，文本素材长度: {len(text_content)} 字符，前100字符: {text_content[:100]}")

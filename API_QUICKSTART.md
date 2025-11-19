@@ -234,9 +234,9 @@ else:
 
 ## 更多信息
 
-- 详细文档: [WORKFLOW_INTEGRATION.md](WORKFLOW_INTEGRATION.md)
 - API文档: http://localhost:8000/docs
 - 项目仓库: [GitHub链接]
+
 
 
 

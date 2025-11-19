@@ -89,17 +89,7 @@ response = client.chat_completion(
 
 ## 测试方法
 
-### 方法1：使用测试脚本
-
-```bash
-# 需要先安装 requests
-pip install requests
-
-# 运行测试
-python test_hunyuan_api.py
-```
-
-### 方法2：在WebUI中测试
+### 方法1：在WebUI中测试（推荐）
 
 1. 打开 WebUI: http://localhost:7861
 2. 选择"自定义角色播客"或"主题深度播客"标签页
@@ -107,7 +97,7 @@ python test_hunyuan_api.py
 4. 点击"生成播客"
 5. 查看终端输出，应该能看到API调用日志
 
-### 方法3：直接调用
+### 方法2：使用Python代码直接调用
 
 ```python
 from hunyuan_podcast.api_client import get_client
@@ -181,6 +171,7 @@ print(result)
 - 支持思考模式等高级功能
 
 可以直接使用WebUI测试API功能！
+
 
 
 

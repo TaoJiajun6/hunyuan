@@ -1,102 +1,14 @@
-# 工具（AI）应用模板快速入门
+# AI播客生成鸿蒙应用
 
-## 目录
+基于混元大模型和SoulX-Podcast的AI播客生成HarmonyOS应用。
 
-- [功能介绍](#功能介绍)
-- [约束与限制](#约束与限制)
-- [快速入门](#快速入门)
-- [示例效果](#示例效果)
-- [开源许可协议](#开源许可协议)
+## 功能概述
 
-## 功能介绍
+本应用提供了三个主要的播客生成功能：
 
-您可以基于此模板直接定制应用，也可以挑选此模板中提供的多种组件使用，从而降低您的开发难度，提高您的开发效率。
-
-本模板为AI应用提供了常用功能的开发样例，模板主要分为AI对话、AI办公、和我的三大模块：
-
-- AI对话：基于大语言模型提供智能对话功能等智能交互。
-
-- AI办公：主要提供论文写作、AI总结等办公场景的AI能力。
-
-- 我的：提供用户个人信息管理、设置、意见反馈等功能。
-
-
-**【注意】**
-* 本模版提供的是模拟数据，所有服务跳转到的页面为本地mock页面，实际开发中请以具体业务为准。
-* 使用AI对话功能需要配置真实的API Key，请在ChatPage.ets中替换相应配置。
-* 各个模型的API Key会产生费用，费用由模型提供方进行收取，与本模板无关。
-
-本模板主要页面及核心功能如下所示：
-
-```ts
-AI办公模板
- |-- AI对话
- |    |-- 智能对话
- |    |-- 对话历史
- |    |-- 天气查询
- |    |-- 选项选择
- |-- AI办公
- |    |-- 论文写作
- |    |-- AI总结
- |    |-- 办公历史
- └-- 我的
-      |-- 个人信息
-      |-- 设置
-      |-- 意见反馈
-      └-- 关于
-```
-
-本模板工程代码结构如下所示：
-
-```ts
-AIOffice
-├──components                               // 公共组件
-│   ├──business_mine/src/main/ets           // 我的页面业务组件
-│   │  └──components                        // 业务组件（个人信息、设置等）
-│   │  └──Index.ets                         // 对外接口类
-│   ├──business_setting/src/main/ets        // 设置页面业务组件
-│   │  └──components                        // 设置相关组件
-│   │  └──Index.ets                         // 对外接口类
-│   ├──lib_account/src/main/ets             // 账号相关组件
-│   │  └──components                        // 账号管理组件
-│   │  └──Index.ets                         // 对外接口类
-│   ├──lib_api/src/main/ets                 // API接口组件
-│   │  └──apis                              // 接口定义
-│   │  └──Index.ets                         // 对外接口类
-│   ├──lib_common/src/main/ets              // 通用组件
-│   │  └──common                            // 公共常量和工具
-│   │  └──components                        // 基础组件
-│   │  └──utils                             // 工具类
-│   │  └──Index.ets                         // 对外接口类
-│   ├──lib_widget/src/main/ets              // UI组件库
-│   │  └──components                        // 通用UI组件
-│   │  └──Index.ets                         // 对外接口类
-│   ├──module_feedback/src/main/ets         // 意见反馈组件
-│   │  └──components                        // 反馈相关组件
-│   │  └──Index.ets                         // 对外接口类
-│   ├──module_imagepreview/src/main/ets     // 图片预览组件
-│   │  └──components                        // 预览相关组件
-│   │  └──Index.ets                         // 对外接口类
-├──products/phone/src/main                  // 手机产品
-│   ├──ets
-│   │  ├──entryability
-│   │  │  ├──EntryAbility.ets               // 应用程序入口
-│   │  ├──pages
-│   │  │  ├──Index.ets                      // 主入口页面
-│   │  │  ├──IndexPage.ets                  // 主页面
-│   │  │  ├──chat                           // AI对话相关页面
-│   │  │  │  ├──ChatPage.ets                // 对话页面
-│   │  │  │  ├──ChatHistoryPage.ets         // 对话历史页面
-│   │  │  │  └──action                      // 对话动作
-│   │  │  └──office                         // AI办公相关页面
-│   │  │     ├──OfficePage.ets              // 办公主页
-│   │  │     ├──PaperWritingPage.ets        // 论文写作页面
-│   │  │     ├──AISummaryPage.ets           // AI总结页面
-│   │  │     └──OfficeHistoryPage.ets       // 办公历史页面
-│   │  ├──viewmodels                        // 视图模型
-│   │  └──components                        // 页面组件
-```
-
+1. **多角色互动播客**：将文本素材转化为多角色自然互动的播客音频
+2. **自定义角色播客**：根据用户自定义的角色人设和音色生成契合风格的播客音频
+3. **主题深度播客**：基于指定主题生成有深度、引发思考的播客音频
 
 ## 约束与限制
 
@@ -109,53 +21,144 @@ AIOffice
 
 ### 权限
 
-* 网络权限：ohos.permission.INTERNET
-* 麦克风权限：ohos.permission.MICROPHONE
+* 网络权限：`ohos.permission.INTERNET`
+* 麦克风权限：`ohos.permission.MICROPHONE`（可选，用于录制音色）
+* 文件访问权限：用于选择音色文件
 
 ## 快速入门
 
 ### 配置工程
 
-在运行此模板前，需要完成以下配置：
+在运行此应用前，需要完成以下配置：
 
-1. 在AppGallery Connect创建应用，将包名配置到模板中。
+#### 1. 配置应用包名
 
-   - 参考[创建应用](https://developer.huawei.com/consumer/cn/doc/app/agc-help-create-atomic-service-0000002247795706)为应用创建APP ID，并将APP ID与应用进行关联。
+1. 在[AppGallery Connect](https://developer.huawei.com/consumer/cn/doc/app/agc-help-create-atomic-service-0000002247795706)创建应用
+2. 获取APP ID和包名
+3. 将模板工程根目录下`AppScope/app.json5`文件中的`bundleName`替换为创建应用的包名
 
-   - 返回应用列表页面，查看应用的包名。
+#### 2. 配置后端API地址
 
-   - 将模板工程根目录下AppScope/app.json5文件中的bundleName替换为创建应用的包名。
+在`components/lib_api/src/main/ets/services/PodcastService.ets`中配置后端API地址：
 
-2. 配置AI服务API Key。
+```typescript
+export class PodcastConfig {
+  // Cloud Studio部署（推荐）
+  static readonly API_BASE_URL: string = 'https://your-space-key--8000.your-region.cloudstudio.work';
+  
+  // 或本地/远程服务器
+  // static readonly API_BASE_URL: string = 'http://your-api-server:8000';
+  
+  static readonly API_TIMEOUT: number = 600000; // 10分钟超时
+  static readonly USE_CLOUD_FUNCTION: boolean = false; // 是否使用云函数
+}
+```
 
-   - 在products/phone/src/main/ets/pages/chat/ChatPage.ets文件中，将apiKey替换为真实的API Key。
+**推荐方式：使用Cloud Studio部署**
 
-   - 在products/phone/src/main/ets/pages/office/OfficeResultPage.ets文件中，将apiKey替换为真实的API Key。
+1. 在腾讯云Cloud Studio中部署后端API服务器（参考项目根目录的`部署说明.md`）
+2. 获取端口转发地址（格式：`https://${SPACE_KEY}--8000.${REGION}.cloudstudio.work`）
+3. 在APP中配置API地址
 
-   - 根据需要调整baseUrl和model配置。
+详细说明请参考：[PODCAST_README.md](PODCAST_README.md)
 
-3. 对应用进行[手工签名](https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-signing#section297715173233)。
+#### 3. 配置应用签名
+
+对应用进行[手工签名](https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-signing#section297715173233)。
 
 ### 运行调试工程
 
-1. 用USB线连接调试手机和PC。
+1. 用USB线连接调试手机和PC
+2. 点击"Run"，运行模板工程
 
-2. 点击"Run"，运行模板工程。
+## 使用流程
 
-## 示例效果
+### 多角色互动播客
 
-本模板提供了完整的AI办公功能展示，包括：
+1. 进入APP
+2. 点击"AI播客"卡片
+3. 选择"多角色互动播客"
+4. 输入播客文本（支持角色标记如`[角色A]你好 [角色B]你好啊`或普通文本）
+5. 为每个角色选择音色文件（WAV格式推荐）
+6. 点击"开始生成"按钮
+7. 等待生成完成后，可以播放音频和查看脚本
 
-- **AI对话**：智能对话界面，支持多轮对话和上下文理解
-- **AI办公**：论文写作和AI总结功能
-- **我的**：个人信息管理和设置功能
+### 自定义角色播客
 
-| AI对话                                                           | AI办公                                                           | 我的                                                     |
-|----------------------------------------------------------------|----------------------------------------------------------------|--------------------------------------------|
-| <img src="screenshot/screenshot_1.jpg" alt="AI对话" width="300"> | <img src="screenshot/screenshot_2.jpg" alt="AI办公" width="300"> | <img src="screenshot/screenshot_3.jpg" alt="我的" width="300"> |
+1. 进入"自定义角色播客"页面
+2. 输入播客主题（可选）
+3. 为每个角色配置：
+   - 角色名称
+   - 身份/职业（可选）
+   - 核心性格（可选）
+   - 说话风格（可选）
+   - 选择音色文件
+4. 点击"开始生成"按钮
 
-*注：由于涉及AI服务配置，实际效果图需要在配置完成API Key后运行查看*
+### 主题深度播客
 
-## 开源许可协议
+1. 进入"主题深度播客"页面
+2. 输入播客主题
+3. 选择角色数量（2个或3个）
+4. 选择深度级别（深度/中等/浅层）
+5. 为每个角色选择音色文件
+6. 点击"开始生成"按钮
 
-该代码经过[Apache 2.0 授权许可](http://www.apache.org/licenses/LICENSE-2.0)。
+## 音色文件要求
+
+- **推荐格式**：WAV格式
+- **文件大小**：最大10MB（APP会自动检查文件大小）
+- **音频质量**：清晰、无噪音的音频文件效果更好
+- **时长**：建议5-30秒的音频片段
+
+## 项目结构
+
+```
+podcasters/
+├── components/                     # 组件库
+│   ├── lib_api/                   # API服务组件
+│   │   └── src/main/ets/services/
+│   │       └── PodcastService.ets # 播客API服务
+│   ├── lib_common/                # 通用组件
+│   ├── lib_widget/                # UI组件库
+│   └── ...
+├── products/phone/src/main/       # 手机产品
+│   └── ets/
+│       ├── pages/
+│       │   ├── podcast/           # 播客相关页面
+│       │   │   ├── PodcastPage.ets          # 播客主页
+│       │   │   ├── PodcastMultiRolePage.ets # 多角色播客页面
+│       │   │   ├── PodcastCharacterPage.ets # 自定义角色播客页面
+│       │   │   ├── PodcastDeepPage.ets      # 主题深度播客页面
+│       │   │   └── PodcastResultPage.ets    # 播客结果页面
+│       │   └── office/
+│       │       └── OfficePage.ets # 办公主页（包含播客入口）
+│       ├── components/
+│       │   └── AudioPlayer.ets    # 音频播放器组件
+│       └── utils/
+│           └── FileUtils.ets      # 文件工具类
+└── ...
+```
+
+## API接口说明
+
+所有API接口定义在`components/lib_api/src/main/ets/services/PodcastService.ets`中：
+
+- `healthCheck()`: 健康检查
+- `generateMultiRolePodcast()`: 生成多角色播客
+- `generateCharacterPodcast()`: 生成自定义角色播客
+- `generateDeepPodcast()`: 生成主题深度播客
+
+## 注意事项
+
+1. **网络连接**：确保手机可以访问后端API服务器
+2. **生成时间**：播客生成可能需要较长时间（通常1-5分钟），请耐心等待
+3. **文件大小**：音色文件限制10MB，超过限制会提示错误
+4. **超时设置**：API超时时间设置为10分钟，如果生成时间较长可能需要等待
+
+## 相关文档
+
+- [详细使用说明](PODCAST_README.md) - 完整的使用说明和配置指南
+- [快速开始指南](QUICK_START.md) - 快速启动指南
+- [实现总结](IMPLEMENTATION_SUMMARY.md) - 技术实现总结
+- [项目根目录README](../README.md) - 项目总体说明

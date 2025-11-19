@@ -419,7 +419,7 @@ if (!result.success) {
 
 ## 参考资源
 
-- [Cloud Studio部署指南](../CLOUD_STUDIO_DEPLOYMENT.md)
+- [部署说明](../部署说明.md)
 - [API服务器文档](../hunyuan_podcast/api_server.py)
 - [HarmonyOS网络开发文档](https://developer.harmonyos.com/)
 
