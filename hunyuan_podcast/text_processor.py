@@ -343,6 +343,74 @@ class TextProcessor:
         # 匹配模式：数字 + (亿|万|千|百)? + (元|港元|港币|美元|人民币)
         text = re.sub(r'(\d+\.?\d*)([亿万千百]?)(元|港元|港币|美元|人民币)', replace_amount_with_unit, text)
         
+        # 2.6. 处理带英文单位缩写的数字（如 4.1mm、50.5cm、1.5km、5.2kg等），需要转换为中文读音
+        def replace_number_with_english_unit(match):
+            num_str = match.group(1)
+            unit = match.group(2).lower()  # 转换为小写以便统一处理
+            chinese_num = self.number_to_chinese(num_str)
+            # 英文单位到中文的映射
+            unit_map = {
+                'mm': '毫米',
+                'cm': '厘米',
+                'dm': '分米',
+                'm': '米',
+                'km': '千米',
+                'kg': '千克',
+                'g': '克',
+                't': '吨',
+                'mg': '毫克',
+                'ml': '毫升',
+                'l': '升',
+                'w': '瓦',
+                'kw': '千瓦',
+                'mw': '兆瓦',
+                'hz': '赫兹',
+                'khz': '千赫兹',
+                'mhz': '兆赫兹',
+                'ghz': '千兆赫兹',
+                'px': '像素',
+                'dpi': 'DPI',
+                'inch': '英寸',
+                'ft': '英尺',
+                'yd': '码',
+                'mi': '英里',
+                'lb': '磅',
+                'oz': '盎司'
+            }
+            chinese_unit = unit_map.get(unit, unit)  # 如果找不到映射，使用原单位
+            return f"{chinese_num}{chinese_unit}"
+        
+        # 匹配：数字 + 英文单位（长度、重量、时间、面积、体积等）
+        # 注意：使用负向前瞻确保单位后面不是字母，避免误匹配到单词中间
+        # 长度单位：mm(毫米)、cm(厘米)、dm(分米)、m(米)、km(千米)、inch(英寸)、ft(英尺)等
+        # 重量单位：kg(千克)、g(克)、t(吨)、mg(毫克)、lb(磅)、oz(盎司)等
+        # 体积单位：ml(毫升)、l(升)等
+        # 功率单位：w(瓦)、kw(千瓦)、mw(兆瓦)等
+        # 频率单位：hz(赫兹)、khz(千赫兹)、mhz(兆赫兹)、ghz(千兆赫兹)等
+        # 其他单位：px(像素)、dpi(DPI)、inch(英寸)等
+        # 注意：对于单字母单位(m、g、l、w、t)，需要确保后面不是字母，避免误匹配
+        # 先匹配多字母单位，再匹配单字母单位（使用负向前瞻确保后面不是字母）
+        english_unit_pattern = r'(mm|cm|dm|km|kg|mg|ml|kw|mw|hz|khz|mhz|ghz|px|dpi|inch|ft|yd|mi|lb|oz|(?<![a-zA-Z])[mglwt](?![a-zA-Z]))'
+        # 使用负向前瞻，确保单位后面不是字母（避免匹配到单词中间）
+        text = re.sub(r'(\d+\.?\d*)' + english_unit_pattern, replace_number_with_english_unit, text, flags=re.IGNORECASE)
+        
+        # 2.7. 处理带中文单位的数字（如 14.2英寸、50.5厘米、100.3毫米、1.5米、2.3千米、5.2千克、3.5小时等）
+        def replace_number_with_unit(match):
+            num_str = match.group(1)
+            unit = match.group(2)  # 各种单位
+            chinese_num = self.number_to_chinese(num_str)
+            return f"{chinese_num}{unit}"
+        
+        # 匹配：数字 + 中文单位（长度、重量、时间、面积、体积等）
+        # 长度单位：英寸、厘米、毫米、米、千米、公里、分米、公分、尺、寸
+        # 重量单位：千克、公斤、克、吨、斤、两
+        # 时间单位：小时、分钟、秒、天、年、月、周
+        # 面积单位：平方米、平方厘米、平方千米、平方公里、亩
+        # 体积单位：立方米、升、毫升
+        # 其他单位：瓦、千瓦、赫兹、MHz、GHz、像素、DPI等
+        unit_pattern = r'(英寸|厘米|毫米|米|千米|公里|分米|公分|尺|寸|千克|公斤|克|吨|斤|两|小时|分钟|秒|天|年|月|周|平方米|平方厘米|平方千米|平方公里|亩|立方米|升|毫升|瓦|千瓦|赫兹|MHz|GHz|像素|DPI|dpi)'
+        text = re.sub(r'(\d+\.?\d*)' + unit_pattern, replace_number_with_unit, text)
+        
         # 3. 处理百分比：如 50% -> 百分之五十，87% -> 百分之八十七
         # 使用更精确的正则表达式，确保匹配到百分比符号前的数字
         def replace_percent(match):
@@ -381,8 +449,37 @@ class TextProcessor:
                     return num_str
             if end_pos < len(text):
                 next_char = text[end_pos]
-                # 如果下一个字符是字母或点，可能是技术术语，跳过
-                if next_char.isalpha() or next_char == '.':
+                # 如果下一个字符是字母或点，可能是技术术语或单位，需要检查是否是已知的单位
+                if next_char.isalpha():
+                    # 检查是否是已知的中文单位（长度、重量、时间等）
+                    remaining_text = text[end_pos:end_pos + 5]  # 最多检查5个字符（如"平方米"）
+                    known_units = ['英寸', '厘米', '毫米', '米', '千米', '公里', '分米', '公分', '尺', '寸',
+                                  '千克', '公斤', '克', '吨', '斤', '两',
+                                  '小时', '分钟', '秒', '天', '年', '月', '周',
+                                  '平方米', '平方厘米', '平方千米', '平方公里', '亩',
+                                  '立方米', '升', '毫升',
+                                  '瓦', '千瓦', '赫兹', 'MHz', 'GHz', '像素', 'DPI', 'dpi']
+                    if any(remaining_text.startswith(unit) for unit in known_units):
+                        # 这是已知中文单位，应该已经被处理过了，跳过
+                        return num_str
+                    # 检查是否是已知的英文单位（mm、cm、km、kg等）
+                    remaining_text_lower = text[end_pos:end_pos + 4].lower()  # 最多检查4个字符（如"mhz"）
+                    english_units = ['mm', 'cm', 'dm', 'km', 'kg', 'mg', 'ml', 'kw', 'mw', 'hz', 'khz', 'mhz', 'ghz', 'px', 'dpi', 'inch', 'ft', 'yd', 'mi', 'lb', 'oz']
+                    # 检查是否以英文单位开头（考虑大小写）
+                    if any(remaining_text_lower.startswith(unit) for unit in english_units):
+                        # 这是已知英文单位，应该已经被处理过了，跳过
+                        return num_str
+                    # 检查单独的 'm'、'g'、'l'、'w'、't'（需要确保后面不是字母，避免误匹配）
+                    if next_char.lower() in ['m', 'g', 'l', 'w', 't']:
+                        # 检查后面是否还有字母（如果是，可能是英文单位的一部分）
+                        if end_pos + 1 < len(text) and text[end_pos + 1].isalpha():
+                            # 可能是 mm、cm、kg、ml、kw 等，应该已经被处理过了，跳过
+                            return num_str
+                        # 单独的 m、g、l、w、t 后面没有字母，可能是单位，跳过
+                        return num_str
+                    # 其他字母可能是技术术语，跳过
+                    return num_str
+                if next_char == '.':
                     return num_str
                 if next_char in '年月日¥$元块%':
                     return num_str
@@ -1339,7 +1436,7 @@ class TextProcessor:
 {chr(10) + f"[角色B]我是{role_virtual_names[1]}。今天我们要聊一个很有意思的话题：{topic if topic else '[本期主题]'}。" if num_characters >= 2 else ""}
 [角色A]没错！说到这个话题，我最近发现...[自然引入主题]
 
-[讨论主体 - 必须严格按照文本素材的内容展开，包含文本素材中提到的具体事实、数据、事件、观点等，不能偏离文本素材的主题。如果文本素材是书籍，选择最核心的情节、角色或主题进行讨论。时长根据用户指令确定：如果指令要求"1分钟"或"一分钟以内"，则只讨论最核心的内容，对话总字数控制在400-600字；如果指令要求"5分钟"或更长，则可以更详细地展开讨论。]
+[讨论主体 - 必须严格按照文本素材的内容展开，包含文本素材中提到的具体事实、数据、事件、观点等，不能偏离文本素材的主题。如果文本素材是书籍，选择最核心的情节、角色或主题进行讨论。时长根据用户指令确定：如果指令要求"1分钟"或"一分钟以内"，则只讨论最核心的内容，对话总字数控制在400-600字；如果指令要求"5分钟"或更长，则可以更详细地展开讨论；**如果没有指定时长，默认生成5-7分钟的对话内容，对话总字数约2500-3500字，每个角色发言10-12次，总共约{num_characters * 13}段对话**。]
 
 {chr(10) + f"[角色C]好了，今天关于{topic if topic else '[本期主题]'}的讨论就到这里。" if num_characters >= 3 else ""}
 [角色A]感谢大家的收听！如果有什么想法，欢迎在评论区留言。
