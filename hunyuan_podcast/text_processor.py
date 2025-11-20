@@ -690,6 +690,18 @@ class TextProcessor:
         # 按行分割文本
         lines = text.split('\n')
         
+        def flush_current_role():
+            nonlocal current_role, current_content
+            if current_role and current_content:
+                full_content = ''.join(current_content).replace('...', '…')
+                # 合并被分断的数字（如"1...." + "37" -> "1.37"）
+                full_content = re.sub(r'(\d+)[\.。…]+\s*(\d+)', r'\1.\2', full_content)
+                full_content = full_content.strip()
+                if full_content:
+                    dialogues.append((current_role, full_content))
+            if current_content is not None:
+                current_content = []
+        
         for line in lines:
             line = line.strip()
             if not line:
@@ -718,14 +730,7 @@ class TextProcessor:
                 
                 # 如果角色改变，保存之前的对话
                 if current_role and current_role != role_name:
-                    if current_content:
-                        full_content = ' '.join(current_content)
-                        # 根据标点拆分对话，增强断句效果
-                        sentences = self.split_dialogue_by_punctuation(full_content)
-                        for sentence in sentences:
-                            if sentence.strip():
-                                dialogues.append((current_role, sentence.strip()))
-                        current_content = []
+                    flush_current_role()
                 
                 # 更新当前角色和内容
                 current_role = role_name
@@ -752,14 +757,7 @@ class TextProcessor:
                 
                 # 如果角色改变，保存之前的对话
                 if current_role and current_role != role_name:
-                    if current_content:
-                        full_content = ' '.join(current_content)
-                        # 根据标点拆分对话，增强断句效果
-                        sentences = self.split_dialogue_by_punctuation(full_content)
-                        for sentence in sentences:
-                            if sentence.strip():
-                                dialogues.append((current_role, sentence.strip()))
-                        current_content = []
+                    flush_current_role()
                 
                 # 更新当前角色和内容（动作描述会被跳过，不包含在内容中）
                 current_role = role_name
@@ -823,14 +821,7 @@ class TextProcessor:
                 
                 # 如果角色改变，保存之前的对话
                 if current_role and current_role != role_name:
-                    if current_content:
-                        full_content = ' '.join(current_content)
-                        # 根据标点拆分对话，增强断句效果
-                        sentences = self.split_dialogue_by_punctuation(full_content)
-                        for sentence in sentences:
-                            if sentence.strip():
-                                dialogues.append((current_role, sentence.strip()))
-                        current_content = []
+                    flush_current_role()
                 
                 # 更新当前角色
                 current_role = role_name
@@ -845,11 +836,7 @@ class TextProcessor:
                 if content_after:
                     current_content.append(content_after)
         
-        # 保存最后一个角色整段对话（不再按标点分割，避免同一角色被拆成多段）
-        if current_role and current_content:
-            full_content = ' '.join(current_content).strip()
-            if full_content:
-                dialogues.append((current_role, full_content))
+        flush_current_role()
         
         return dialogues
     
