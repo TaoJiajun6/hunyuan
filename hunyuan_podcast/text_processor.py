@@ -54,7 +54,7 @@ class TextProcessor:
                 integer_part = self._number_to_chinese_integer(parts[0]) if parts[0] else '零'
                 # 小数部分逐位转换为中文数字
                 decimal_part = ''.join([self.DIGIT_TO_CHINESE.get(d, d) for d in parts[1] if d.isdigit()])
-                joiner = '\u2060'  # Word Joiner，避免朗读停顿
+                joiner = '\u200D'  # Word Joiner，避免朗读停顿
                 if decimal_part:
                     return f"{integer_part}{joiner}点{joiner}{decimal_part}"
                 else:
@@ -489,6 +489,12 @@ class TextProcessor:
                     return num_str
             if end_pos < len(text):
                 next_char = text[end_pos]
+                # 如果是小数且紧跟特定中文单位（如 亿、万、项、吨 等），保持原样（让TTS按数字读）
+                if has_decimal_point:
+                    decimal_keep_units = ['亿', '万', '千', '百', '项', '次', '吨', '公里', '米', '车次', '亿元', '万人次']
+                    remaining_dec_text = text[end_pos:end_pos + 3]
+                    if any(remaining_dec_text.startswith(unit) for unit in decimal_keep_units):
+                        return num_str
                 # 如果下一个字符是字母或点，可能是技术术语或单位，需要检查是否是已知的单位
                 if next_char.isalpha():
                     is_ascii_alpha = next_char.isascii()
