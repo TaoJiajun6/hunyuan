@@ -845,14 +845,11 @@ class TextProcessor:
                 if content_after:
                     current_content.append(content_after)
         
-        # 保存最后一个角色的对话
+        # 保存最后一个角色整段对话（不再按标点分割，避免同一角色被拆成多段）
         if current_role and current_content:
-            full_content = ' '.join(current_content)
-            # 根据标点拆分对话，增强断句效果
-            sentences = self.split_dialogue_by_punctuation(full_content)
-            for sentence in sentences:
-                if sentence.strip():
-                    dialogues.append((current_role, sentence.strip()))
+            full_content = ' '.join(current_content).strip()
+            if full_content:
+                dialogues.append((current_role, full_content))
         
         return dialogues
     
