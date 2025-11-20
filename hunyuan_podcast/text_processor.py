@@ -436,6 +436,7 @@ class TextProcessor:
         # 但排除已经在日期、价格、百分比中的数字
         def replace_number(match):
             num_str = match.group(0)
+            has_decimal_point = '.' in num_str
             start_pos = match.start()
             end_pos = match.end()
             
@@ -450,14 +451,15 @@ class TextProcessor:
             if start_pos > 0:
                 prev_char = text[start_pos - 1]
                 # 如果前一个字符是字母，可能是技术术语（如 USB2.0），跳过
-                if prev_char.isalpha():
+                # 但当数字中包含小数点时，强制朗读小数，避免被跳过
+                if prev_char.isalpha() and not has_decimal_point:
                     return num_str
                 if prev_char in '年月日¥$元块%':
                     return num_str
             if end_pos < len(text):
                 next_char = text[end_pos]
                 # 如果下一个字符是字母或点，可能是技术术语或单位，需要检查是否是已知的单位
-                if next_char.isalpha():
+                if next_char.isalpha() and not has_decimal_point:
                     # 检查是否是已知的中文单位（长度、重量、时间等）
                     remaining_text = text[end_pos:end_pos + 5]  # 最多检查5个字符（如"平方米"）
                     known_units = ['英寸', '厘米', '毫米', '米', '千米', '公里', '分米', '公分', '尺', '寸',
@@ -486,7 +488,7 @@ class TextProcessor:
                         return num_str
                     # 其他字母可能是技术术语，跳过
                     return num_str
-                if next_char == '.':
+                if next_char == '.' and not has_decimal_point:
                     return num_str
                 if next_char in '年月日¥$元块%':
                     return num_str
@@ -1093,7 +1095,7 @@ class TextProcessor:
    - 情绪标注示例：兴奋地、疑惑地、严肃地、开玩笑地、激动地、冷静地、思考状、惊讶地、恍然大悟地等
    - 每行一个角色的发言，角色之间建议有空行间隔，让对话更清晰
    - **角色名称必须严格使用**：{role_list}（不能使用其他名称，如数字、字母等）
-   - **禁止使用**：不能使用纯数字（如[1]、[2]）、单个字母（如[J]、[A]）或其他非标准角色名
+   - **禁止使用**：不能使用纯数字（如[1]、[2]）、单个字母（如[J]、[A]）或其他未指定的角色名
    - **角色间隔**：角色对话之间要有自然的间隔，每个角色发言后要有适当的停顿，让对话节奏更舒缓
 
 **6. 对话要求**：
@@ -1168,51 +1170,27 @@ class TextProcessor:
         if len(text) > 2000:
             text_preview += "..."
         
-        role_names = ["角色A", "角色B", "角色C"][:num_characters]
-        role_list = "、".join(role_names)
+        default_role_names = ["角色A", "角色B", "角色C"]
+        role_names = default_role_names[:num_characters]
         
-        # 提取角色名字，如果没有提供则让混元大模型生成随机名字
-        role_virtual_names = []
-        need_generate_names = False
-        
+        # 先尝试使用前端传入的名字；如果没有则稍后生成
+        role_virtual_names: List[Optional[str]] = [None] * num_characters
         if character_descriptions:
-            for i, role_key in enumerate(role_names):
-                # 从角色描述中提取名字，优先使用角色描述中的name字段
-                if role_key in character_descriptions:
-                    role_desc = character_descriptions[role_key]
-                    if isinstance(role_desc, dict):
-                        virtual_name = role_desc.get("name", "")
-                        if virtual_name and virtual_name.strip():
-                            role_virtual_names.append(virtual_name.strip())
-                        else:
-                            # 如果没有提供名字，标记需要生成
-                            need_generate_names = True
-                            role_virtual_names.append(None)  # 占位符，稍后生成
-                    else:
-                        need_generate_names = True
-                        role_virtual_names.append(None)
-                else:
-                    # 如果角色描述中没有对应的键，尝试按顺序获取
-                    desc_list = list(character_descriptions.values())
-                    if i < len(desc_list):
-                        role_desc = desc_list[i]
-                        if isinstance(role_desc, dict):
-                            virtual_name = role_desc.get("name", "")
-                            if virtual_name and virtual_name.strip():
-                                role_virtual_names.append(virtual_name.strip())
-                            else:
-                                need_generate_names = True
-                                role_virtual_names.append(None)
-                        else:
-                            need_generate_names = True
-                            role_virtual_names.append(None)
-                    else:
-                        need_generate_names = True
-                        role_virtual_names.append(None)
-        else:
-            # 如果没有角色描述，需要生成随机名字
+            desc_items = list(character_descriptions.items())
+            for i in range(min(num_characters, len(desc_items))):
+                role_key, role_desc = desc_items[i]
+                candidate_name = ""
+                if isinstance(role_desc, dict):
+                    candidate_name = (role_desc.get("name") or "").strip()
+                if not candidate_name:
+                    candidate_name = role_key.strip()
+                if candidate_name:
+                    role_names[i] = candidate_name
+                    role_virtual_names[i] = candidate_name
+        
+        need_generate_names = any((name is None) or (not str(name).strip()) for name in role_virtual_names)
+        if not character_descriptions:
             need_generate_names = True
-            role_virtual_names = [None] * num_characters
         
         # 如果需要生成名字，调用混元大模型生成随机名字
         if need_generate_names:
@@ -1259,8 +1237,9 @@ class TextProcessor:
                 # 填充到role_virtual_names中
                 name_idx = 0
                 for i in range(len(role_virtual_names)):
-                    if role_virtual_names[i] is None:
+                    if not role_virtual_names[i]:
                         role_virtual_names[i] = generated_names[name_idx]
+                        role_names[i] = role_virtual_names[i]
                         name_idx += 1
                 
             except Exception as e:
@@ -1269,8 +1248,19 @@ class TextProcessor:
                 logger = logging.getLogger(__name__)
                 logger.warning(f"生成随机名字失败: {e}，使用默认名字")
                 for i in range(len(role_virtual_names)):
-                    if role_virtual_names[i] is None:
-                        role_virtual_names[i] = f"主持人{chr(65+i)}"
+                    if not role_virtual_names[i]:
+                        fallback_name = f"主持人{chr(65+i)}"
+                        role_virtual_names[i] = fallback_name
+                        role_names[i] = fallback_name
+        
+        # 确保角色名字与虚拟名字保持一致
+        for i in range(num_characters):
+            if not role_virtual_names[i]:
+                role_virtual_names[i] = role_names[i]
+            else:
+                role_names[i] = role_virtual_names[i]
+        
+        role_list = "、".join(role_names)
         
         # 构建播客基本信息部分
         podcast_info = ""
@@ -1285,7 +1275,7 @@ class TextProcessor:
         character_info = ""
         if character_descriptions:
             character_info = "\n2. 角色设定（2-4个角色）\n\n"
-            character_info += f"**重要说明**：以下角色名称仅用于描述角色特征，但在对话标记中必须使用标准角色名（{role_list}），不能使用文本素材中的人名或其他名称。\n\n"
+            character_info += f"**重要说明**：以下列出的角色名称将直接用于对话标记（方括号），必须严格按照 {role_list} 使用，不能替换成其他名称，也不能使用文本素材中的原始人名。\n\n"
             for i, (role, desc) in enumerate(character_descriptions.items(), 1):
                 if i > num_characters:
                     break
@@ -1303,7 +1293,7 @@ class TextProcessor:
             character_info += "- **姓名与身份**：为每个角色设定具体的姓名和身份\n"
             character_info += "- **核心性格**：定义每个角色的核心性格特征\n"
             character_info += "- **说话风格**：定义每个角色的说话风格和习惯\n"
-            character_info += f"\n**重要**：即使文本素材中有人名，也必须使用标准角色名（{role_list}）作为对话标记，不能使用文本素材中的人名。\n"
+            character_info += f"\n**重要**：无论文本素材中出现什么人名，对话标记都必须使用 {role_list}，不得临时更改。\n"
         
         # 构建场景类型要求
         scene_requirements = ""
@@ -1416,9 +1406,9 @@ class TextProcessor:
 - 文本素材是唯一的内容来源，必须严格遵守，违反此规则会导致生成失败
 
 **角色名称使用规则**：
-- 对话标记中必须使用标准角色名：{role_list}
-- **绝对禁止**使用文本素材中出现的任何人名、角色名、实体名称或其他非标准角色名
-- 无论文本素材中出现了什么人名、角色名、实体名称，都必须映射到标准角色名（{role_list}）进行对话标记
+- 对话标记中必须使用指定的角色名：{role_list}
+- **绝对禁止**临时使用文本素材中的人名、角色名、实体名称或任何自创名称
+- 无论文本素材中出现了什么人名、角色名、实体名称，都必须严格按照{role_list}进行对话标记
 - 文本素材中的人名、角色名仅用于理解内容，不能直接用作对话标记
 - 违反此规则会导致生成失败，请务必严格遵守
 
@@ -1455,20 +1445,20 @@ class TextProcessor:
 {chr(10).join([f"- {role_names[i]}的虚拟名字：{role_virtual_names[i]}" for i in range(num_characters)])}
 
 开场示例：
-[角色A]大家好，欢迎收听《{podcast_name if podcast_name else "本期播客"}》！我是{role_virtual_names[0]}。
-{chr(10) + f"[角色B]我是{role_virtual_names[1]}。今天我们要聊一个很有意思的话题：{topic if topic else '[本期主题]'}。" if num_characters >= 2 else ""}
-[角色A]没错！说到这个话题，我最近发现...[自然引入主题]
+[{role_names[0]}]大家好，欢迎收听《{podcast_name if podcast_name else "本期播客"}》！我是{role_virtual_names[0]}。
+{chr(10) + f"[{role_names[1]}]我是{role_virtual_names[1]}。今天我们要聊一个很有意思的话题：{topic if topic else '[本期主题]'}。" if num_characters >= 2 else ""}
+[{role_names[0]}]没错！说到这个话题，我最近发现...[自然引入主题]
 
 [讨论主体 - 必须严格按照文本素材的内容展开，包含文本素材中提到的具体事实、数据、事件、观点等，不能偏离文本素材的主题。如果文本素材是书籍，选择最核心的情节、角色或主题进行讨论。时长根据用户指令确定：如果指令要求"1分钟"或"一分钟以内"，则只讨论最核心的内容，对话总字数控制在400-600字；如果指令要求"5分钟"或更长，则可以更详细地展开讨论；**如果没有指定时长，默认生成5-7分钟的对话内容，对话总字数约2500-3500字，每个角色发言10-12次，总共约{num_characters * 13}段对话**。]
 
-{chr(10) + f"[角色C]好了，今天关于{topic if topic else '[本期主题]'}的讨论就到这里。" if num_characters >= 3 else ""}
-[角色A]感谢大家的收听！如果有什么想法，欢迎在评论区留言。
-{chr(10) + "[角色B]我们下期再见！" if num_characters >= 2 else ""}
+{chr(10) + f"[{role_names[2]}]好了，今天关于{topic if topic else '[本期主题]'}的讨论就到这里。" if num_characters >= 3 else ""}
+[{role_names[0]}]感谢大家的收听！如果有什么想法，欢迎在评论区留言。
+{chr(10) + f"[{role_names[1]}]我们下期再见！" if num_characters >= 2 else ""}
 
 **关键要求**：
 - 在开场自我介绍时，必须使用上述虚拟名字（{role_virtual_names[0]}{f"、{role_virtual_names[1]}" if num_characters >= 2 else ""}{f"、{role_virtual_names[2]}" if num_characters >= 3 else ""}）
 - 不能使用占位符如"[角色A名字]"或"[角色B名字]"，必须直接使用实际的虚拟名字
-- 对话标记仍然使用标准角色名（{role_list}），但自我介绍时要说虚拟名字
+- 对话标记必须使用 {role_list}，自我介绍内容里要说出对应的虚拟名字
 
 二、对话质量要求
 
@@ -1490,8 +1480,8 @@ class TextProcessor:
 - 重要：不要使用冒号，直接写对话内容
 - **角色名称必须严格使用**：{role_list}
 - **禁止使用**：
-  - 不能使用纯数字（如[1]、[2]）、单个字母（如[J]、[A]）或其他非标准角色名
-  - **绝对不能使用文本素材中的任何人名、角色名、实体名称**，无论文本素材中出现了什么名称，都必须使用标准角色名
+  - 不能使用纯数字（如[1]、[2]）、单个字母（如[J]、[A]）或任何未指定的角色名
+  - **绝对不能使用文本素材中的任何人名、角色名、实体名称**，无论文本素材中出现了什么名称，都必须使用{role_list}
   - 文本素材中的人名、角色名、实体名称仅用于理解内容背景，不能直接用作对话标记
   - 只能使用{role_list}中指定的角色名
 - **关键要求**：无论文本素材中出现了什么人名、角色名、实体名称，对话标记都必须使用{role_list}，这是硬性要求，违反会导致生成失败
@@ -1518,27 +1508,27 @@ class TextProcessor:
 
 四、输出示例
 
-**注意**：以下示例中的"角色A"、"角色B"是标准角色名，必须严格按照此格式使用，不能替换为文本素材中的人名。
+**注意**：以下示例仅演示格式。实际生成时请把`角色A/角色B`替换为{role_list}中的真实名字。
 
 ```
-[角色A]嘿，听众朋友们，欢迎回到我们的频道！今天咱们可有个大话题要聊。
+[{role_names[0]}]嘿，听众朋友们，欢迎回到我们的频道！今天咱们可有个大话题要聊。
 
-[角色B]没错，是关于AI能否真正理解人类的幽默。你说，它能听懂咱们的梗吗？
+[{role_names[1]}]没错，是关于AI能否真正理解人类的幽默。你说，它能听懂咱们的梗吗？
 
-[角色A]好家伙，上来就挑战高难度！我觉得吧，它现在可能还在学习为什么"香蕉滑倒了"是个笑话。
+[{role_names[0]}]好家伙，上来就挑战高难度！我觉得吧，它现在可能还在学习为什么"香蕉滑倒了"是个笑话。
 
-[角色B]嗯...这个问题确实很有意思。从技术角度看，AI理解幽默的关键在于...
+[{role_names[1]}]嗯...这个问题确实很有意思。从技术角度看，AI理解幽默的关键在于...
 ```
 
 【最后提醒】
 在生成对话时，请务必：
-1. **⚠️ 必须严格按照文本素材的内容生成**：对话内容必须基于文本素材中提到的主题、事件、事实、数据，绝对不能偏离或添加素材中没有的内容
-2. 使用标准角色名（{role_list}）作为所有对话标记
-3. 绝对不要使用文本素材中出现的任何人名、角色名、实体名称或其他非标准名称
-4. 文本素材中的人名、角色名、实体名称仅用于理解内容，必须映射到标准角色名（{role_list}）进行对话标记
+1. ** 必须严格按照文本素材的内容生成**：对话内容必须基于文本素材中提到的主题、事件、事实、数据，绝对不能偏离或添加素材中没有的内容
+2. 对话标记必须使用指定角色名（{role_list}），不得使用其他名称
+3. 绝对不要使用文本素材中出现的任何人名、角色名、实体名称或其他未授权名称
+4. 文本素材中的人名、角色名、实体名称仅用于理解内容，必须映射到指定角色名（{role_list}）
 5. 无论文本素材中出现什么名称，对话标记都必须使用{role_list}，这是硬性要求，违反会导致生成失败
-6. **⚠️ 严禁在对话内容中使用方括号**：对话内容中绝对不要使用 `[xxx]` 格式（除非是角色标记）。如果需要在对话中提到物品名、人名等，直接使用文字描述，不要加方括号。例如：不要说"这个[地雷]很危险"，而要说"这个地雷很危险"。
-7. **⚠️ 严禁重复内容**：绝对禁止重复相同或相似的内容、观点、例子。每个话题、观点、例子只能出现一次。如果发现开始重复，必须立即转换到全新的角度或话题。
+6. ** 严禁在对话内容中使用方括号**：对话内容中绝对不要使用 `[xxx]` 格式（除非是角色标记）。如果需要在对话中提到物品名、人名等，直接使用文字描述，不要加方括号。例如：不要说"这个[地雷]很危险"，而要说"这个地雷很危险"。
+7. ** 严禁重复内容**：绝对禁止重复相同或相似的内容、观点、例子。每个话题、观点、例子只能出现一次。如果发现开始重复，必须立即转换到全新的角度或话题。
 
 现在请开始生成，直接输出对话内容，不要添加任何其他说明、注释或解释。"""
         return prompt
@@ -1739,7 +1729,7 @@ class TextProcessor:
    - 情绪标注示例：思考状、严肃地、疑惑地、激动地、冷静地等
    - 每行一个角色的发言，角色之间建议有空行间隔，让对话更清晰
    - **角色名称必须严格使用**：{role_list}（不能使用其他名称，如数字、字母等）
-   - **禁止使用**：不能使用纯数字（如[1]、[2]）、单个字母（如[J]、[A]）或其他非标准角色名
+   - **禁止使用**：不能使用纯数字（如[1]、[2]）、单个字母（如[J]、[A]）或其他未指定的角色名
    - {dialogue_count_text}，确保播客时长约{req["duration"]}
    - {req["content_length"]}
    - **角色间隔**：角色对话之间要有自然的间隔，每个角色发言后要有适当的停顿，让对话节奏更舒缓
