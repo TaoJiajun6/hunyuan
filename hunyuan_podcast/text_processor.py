@@ -47,20 +47,18 @@ class TextProcessor:
         if not num_str:
             return num_str
         
-        # 处理小数：确保小数点被正确读作"点"，且连贯不停顿
+        # 处理小数：确保小数点被正确读作"点"并保持连贯
         if '.' in num_str:
             parts = num_str.split('.')
             if len(parts) == 2:
                 integer_part = self._number_to_chinese_integer(parts[0]) if parts[0] else '零'
                 # 小数部分逐位转换为中文数字
                 decimal_part = ''.join([self.DIGIT_TO_CHINESE.get(d, d) for d in parts[1] if d.isdigit()])
-                # 使用零宽连接符（U+200D）确保"点"字前后连贯，TTS不会停顿
-                # 格式：整数部分 + 零宽连接符 + "点" + 零宽连接符 + 小数部分
-                zwj = '\u200D'  # Zero Width Joiner
+                joiner = '\u2060'  # Word Joiner，避免朗读停顿
                 if decimal_part:
-                    return f"{integer_part}{zwj}点{zwj}{decimal_part}"
+                    return f"{integer_part}{joiner}点{joiner}{decimal_part}"
                 else:
-                    return f"{integer_part}{zwj}点"
+                    return f"{integer_part}{joiner}点"
         
         # 处理整数
         return self._number_to_chinese_integer(num_str)
@@ -250,9 +248,8 @@ class TextProcessor:
             num1_chinese = self.number_to_chinese(num1)
             # 小数点后的数字逐位转换
             num2_chinese = ''.join([self.DIGIT_TO_CHINESE.get(d, d) for d in num2])
-            # 使用零宽连接符确保"点"字连贯不停顿
-            zwj = '\u200D'  # Zero Width Joiner
-            return f"{letters}{num1_chinese}{zwj}点{zwj}{num2_chinese}"
+            joiner = '\u2060'  # Word Joiner
+            return f"{letters}{num1_chinese}{joiner}点{joiner}{num2_chinese}"
         
         # 匹配：字母+数字+点+数字（如 USB2.0, HDMI2.1, USB3.0）
         text = re.sub(r'([A-Za-z]+)(\d+)\.(\d+)', replace_tech_term_with_dot, text)
@@ -317,6 +314,27 @@ class TextProcessor:
         text = re.sub(r'(\d{4})年(\d{1,2})月(\d{1,2})日', 
                      lambda m: f"{''.join([self.DIGIT_TO_CHINESE.get(d, d) for d in m.group(1)])}年{self.number_to_chinese(m.group(2))}月{self.number_to_chinese(m.group(3))}日", 
                      text)
+        
+        # 1.5 处理仅包含年份的场景（如 "2024年"）
+        def replace_year_only(match):
+            year = match.group(1)
+            year_chinese = ''.join([self.DIGIT_TO_CHINESE.get(d, d) for d in year])
+            return f"{year_chinese}年"
+        
+        text = re.sub(r'(\d{3,4})\s*年(?!\d)', replace_year_only, text)
+        
+        # 1.6 处理简单分数（如 1/6 -> 六分之一）
+        def replace_fraction(match):
+            numerator = match.group(1)
+            denominator = match.group(2)
+            # 避免分母为0
+            if denominator == '0':
+                return match.group(0)
+            numerator_cn = self.number_to_chinese(numerator)
+            denominator_cn = self.number_to_chinese(denominator)
+            return f"{denominator_cn}分之{numerator_cn}"
+        
+        text = re.sub(r'(?<![0-9A-Za-z%])(\d+)\s*/\s*(\d+)(?![0-9A-Za-z%])', replace_fraction, text)
         
         # 2. 处理价格格式（在日期之后，避免冲突）
         # 匹配：¥100、$100、100元、100.50元、100块、100.99元等
