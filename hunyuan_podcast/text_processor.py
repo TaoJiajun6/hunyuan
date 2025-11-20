@@ -336,6 +336,18 @@ class TextProcessor:
         
         text = re.sub(r'(?<![0-9A-Za-z%])(\d+)\s*/\s*(\d+)(?![0-9A-Za-z%])', replace_fraction, text)
         
+        # 1.7 处理数值区间（如 500-600、500至600、500~600）
+        def replace_number_range(match):
+            num1 = match.group(1)
+            connector = match.group(2)
+            num2 = match.group(3)
+            cn1 = self.number_to_chinese(num1)
+            cn2 = self.number_to_chinese(num2)
+            connector_text = connector if connector in ['至', '到'] else '至'
+            return f"{cn1}{connector_text}{cn2}"
+        
+        text = re.sub(r'(\d+)\s*([\-—–~～至到])\s*(\d+)', replace_number_range, text)
+        
         # 2. 处理价格格式（在日期之后，避免冲突）
         # 匹配：¥100、$100、100元、100.50元、100块、100.99元等
         def replace_price(match):
