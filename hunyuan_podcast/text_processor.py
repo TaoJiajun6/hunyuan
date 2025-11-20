@@ -413,6 +413,7 @@ class TextProcessor:
                 'tb': 'TB',
                 'pb': 'PB'
             }
+            # 对特殊单位进行数值缩放：吨 -> 千克
             chinese_unit = unit_map.get(unit, unit)  # 如果找不到映射，使用原单位
             return f"{chinese_num}{chinese_unit}"
         
