@@ -49,12 +49,22 @@ class TextProcessor:
         
         # 处理小数：保持数字形式，仅插入零宽连接符，确保朗读连贯
         if '.' in num_str:
-            parts = num_str.split('.')
-            if len(parts) == 2:
-                integer_part = parts[0] if parts[0] not in ['', '-'] else ('0' if parts[0] == '' else '-0')
-                decimal_part = parts[1]
-                joiner = '\u2060'  # Word Joiner，避免朗读停顿
-                return f"{integer_part}{joiner}.{joiner}{decimal_part}"
+            parts = num_str.split('.', 1)
+            integer_raw, decimal_raw = parts
+            
+            # 处理整数部分：保留符号，其余位置用中文数字
+            sign = ''
+            if integer_raw.startswith('-'):
+                sign = '负'
+                integer_raw = integer_raw[1:]
+            
+            integer_part = self._number_to_chinese_integer(integer_raw) if integer_raw else '零'
+            decimal_part = ''.join([self.DIGIT_TO_CHINESE.get(d, d) for d in decimal_raw if d.isdigit()])
+            
+            if decimal_part:
+                return f"{sign}{integer_part}点{decimal_part}"
+            else:
+                return f"{sign}{integer_part}点"
         
         # 处理整数
         return self._number_to_chinese_integer(num_str)
