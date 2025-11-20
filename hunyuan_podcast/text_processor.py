@@ -490,7 +490,7 @@ class TextProcessor:
             if end_pos < len(text):
                 next_char = text[end_pos]
                 # 如果下一个字符是字母或点，可能是技术术语或单位，需要检查是否是已知的单位
-                if next_char.isalpha() and not has_decimal_point:
+                if next_char.isalpha():
                     is_ascii_alpha = next_char.isascii()
                     # 检查是否是已知的中文单位（长度、重量、时间等）
                     remaining_text = text[end_pos:end_pos + 5]  # 最多检查5个字符（如"平方米"）
@@ -518,8 +518,11 @@ class TextProcessor:
                             return num_str
                         # 单独的 m、g、l、w、t 后面没有字母，可能是单位，跳过
                         return num_str
-                    # 其他ASCII字母可能是技术术语，跳过；中文字母则继续转换
+                    # ASCII 字母：若不是小数，按技术术语跳过；若是小数（如2.1A），继续转换
                     if is_ascii_alpha:
+                        if not has_decimal_point:
+                            return num_str
+                    else:
                         return num_str
                 if next_char == '.' and not has_decimal_point:
                     return num_str
