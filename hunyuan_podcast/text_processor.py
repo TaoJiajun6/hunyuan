@@ -47,18 +47,14 @@ class TextProcessor:
         if not num_str:
             return num_str
         
-        # 处理小数：确保小数点被正确读作"点"并保持连贯
+        # 处理小数：保持数字形式，仅插入零宽连接符，确保朗读连贯
         if '.' in num_str:
             parts = num_str.split('.')
             if len(parts) == 2:
-                integer_part = self._number_to_chinese_integer(parts[0]) if parts[0] else '零'
-                # 小数部分逐位转换为中文数字
-                decimal_part = ''.join([self.DIGIT_TO_CHINESE.get(d, d) for d in parts[1] if d.isdigit()])
-                joiner = '\u200D'  # Word Joiner，避免朗读停顿
-                if decimal_part:
-                    return f"{integer_part}{joiner}点{joiner}{decimal_part}"
-                else:
-                    return f"{integer_part}{joiner}点"
+                integer_part = parts[0] if parts[0] not in ['', '-'] else ('0' if parts[0] == '' else '-0')
+                decimal_part = parts[1]
+                joiner = '\u2060'  # Word Joiner，避免朗读停顿
+                return f"{integer_part}{joiner}.{joiner}{decimal_part}"
         
         # 处理整数
         return self._number_to_chinese_integer(num_str)
@@ -112,7 +108,10 @@ class TextProcessor:
         if num < 10000:
             thousands = num // 1000
             remainder = num % 1000
-            result = self.DIGIT_TO_CHINESE[str(thousands)] + '千'
+            thousands_digit = self.DIGIT_TO_CHINESE[str(thousands)]
+            if thousands == 2:
+                thousands_digit = '两'
+            result = thousands_digit + '千'
             if remainder > 0:
                 if remainder < 100:
                     # 如果余数小于100，需要特殊处理10-19的情况
