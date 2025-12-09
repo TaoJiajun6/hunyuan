@@ -3325,56 +3325,66 @@ async def generate_deep_podcast_streaming(request: DeepPodcastRequest):
                 segment_count = 0
                 accumulated_audio = []
                 
-                for segment_index, role_name, audio_segment, is_final in gen.generate_from_text_streaming(
-                    text=cleaned_text,
-                    role_voices=role_voices,
-                    silence_interval=request.silence_interval,
-                    background_music=background_music_path,  # 支持背景音乐混合
-                    background_volume=request.background_volume,
-                    background_mode="single",
-                    verbose=True
-                ):
-                    # 将音频张量转换为numpy数组
-                    if audio_segment.shape[1] > 0:  # 确保不是空音频
-                        audio_np = audio_segment.cpu().squeeze(0).numpy()
-                        
-                        # 将音频片段保存到内存中的WAV文件
-                        audio_buffer = io.BytesIO()
-                        sf.write(audio_buffer, audio_np, 22050, format='WAV')
-                        audio_buffer.seek(0)
-                        
-                        # 编码为base64
-                        audio_base64 = base64.b64encode(audio_buffer.read()).decode('utf-8')
-                        
-                        # 发送音频片段
-                        segment_data = {
-                            'type': 'audio_segment',
-                            'segment_index': segment_index,
-                            'role_name': role_name,
-                            'audio_base64': audio_base64,
-                            'is_final': is_final,
-                            'sample_rate': 22050
-                        }
-                        yield f"data: {json.dumps(segment_data, ensure_ascii=False)}\n\n"
-                        
-                        segment_count += 1
-                        
-                        # 更新进度（根据已生成的片段数估算）
-                        # 假设总共有约30-60段对话
-                        estimated_total = max(30, len(processor.parse_role_text(cleaned_text)) * 2)  # 每段对话可能产生2个片段（音频+静音）
-                        progress_percent = min(90, 30 + int((segment_count / estimated_total) * 60))
-                        _update_progress(request.job_id, "generating_audio", progress_percent, f"已生成 {segment_count} 个音频片段...")
-                        yield f"data: {json.dumps({'type': 'progress', 'status': 'generating_audio', 'percent': progress_percent, 'message': f'已生成 {segment_count} 个音频片段...'}, ensure_ascii=False)}\n\n"
-                        
-                        # 同时保存到累积列表（用于最终文件）
-                        accumulated_audio.append(audio_np)
-                
-                # 生成完成
-                _update_progress(request.job_id, "completed", 100, "播客生成完成")
-                yield f"data: {json.dumps({'type': 'progress', 'status': 'completed', 'percent': 100, 'message': '播客生成完成'}, ensure_ascii=False)}\n\n"
-                
-                # 发送完成信号
-                yield f"data: {json.dumps({'type': 'done', 'total_segments': segment_count}, ensure_ascii=False)}\n\n"
+                try:
+                    for segment_index, role_name, audio_segment, is_final in gen.generate_from_text_streaming(
+                        text=cleaned_text,
+                        role_voices=role_voices,
+                        silence_interval=request.silence_interval,
+                        background_music=background_music_path,  # 支持背景音乐混合
+                        background_volume=request.background_volume,
+                        background_mode="single",
+                        verbose=True
+                    ):
+                        # 将音频张量转换为numpy数组
+                        if audio_segment.shape[1] > 0:  # 确保不是空音频
+                            audio_np = audio_segment.cpu().squeeze(0).numpy()
+                            
+                            # 将音频片段保存到内存中的WAV文件
+                            audio_buffer = io.BytesIO()
+                            sf.write(audio_buffer, audio_np, 22050, format='WAV')
+                            audio_buffer.seek(0)
+                            
+                            # 编码为base64
+                            audio_base64 = base64.b64encode(audio_buffer.read()).decode('utf-8')
+                            
+                            # 发送音频片段
+                            segment_data = {
+                                'type': 'audio_segment',
+                                'segment_index': segment_index,
+                                'role_name': role_name,
+                                'audio_base64': audio_base64,
+                                'is_final': is_final,
+                                'sample_rate': 22050
+                            }
+                            yield f"data: {json.dumps(segment_data, ensure_ascii=False)}\n\n"
+                            
+                            segment_count += 1
+                            
+                            # 更新进度（根据已生成的片段数估算）
+                            # 假设总共有约30-60段对话
+                            estimated_total = max(30, len(processor.parse_role_text(cleaned_text)) * 2)  # 每段对话可能产生2个片段（音频+静音）
+                            progress_percent = min(90, 30 + int((segment_count / estimated_total) * 60))
+                            _update_progress(request.job_id, "generating_audio", progress_percent, f"已生成 {segment_count} 个音频片段...")
+                            yield f"data: {json.dumps({'type': 'progress', 'status': 'generating_audio', 'percent': progress_percent, 'message': f'已生成 {segment_count} 个音频片段...'}, ensure_ascii=False)}\n\n"
+                            
+                            # 同时保存到累积列表（用于最终文件）
+                            accumulated_audio.append(audio_np)
+                    
+                    # 生成完成
+                    _update_progress(request.job_id, "completed", 100, "播客生成完成")
+                    yield f"data: {json.dumps({'type': 'progress', 'status': 'completed', 'percent': 100, 'message': '播客生成完成'}, ensure_ascii=False)}\n\n"
+                    
+                    # 发送完成信号
+                    yield f"data: {json.dumps({'type': 'done', 'total_segments': segment_count}, ensure_ascii=False)}\n\n"
+                except GeneratorExit:
+                    # 客户端断开连接，正常退出
+                    logger.info(f"客户端断开连接，job_id={request.job_id}")
+                    raise
+                except Exception as e:
+                    logger.error(f"生成音频片段时出错: {e}", exc_info=True)
+                    error_msg = f"生成音频片段失败: {str(e)}"
+                    yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
+                    _update_progress(request.job_id, "failed", 0, error_msg)
                 
             finally:
                 # 清理临时文件
@@ -3385,11 +3395,20 @@ async def generate_deep_podcast_streaming(request: DeepPodcastRequest):
                     except Exception as e:
                         logger.warning(f"清理临时文件失败: {str(e)}")
                         
+        except asyncio.CancelledError:
+            # 客户端断开连接，正常退出
+            logger.info(f"流式生成被取消，job_id={request.job_id}")
+        except GeneratorExit:
+            # 客户端断开连接，正常退出
+            logger.info(f"生成器退出，job_id={request.job_id}")
         except Exception as e:
             logger.error(f"流式生成播客失败: {e}", exc_info=True)
-            error_msg = f"生成失败: {str(e)}"
-            yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
-            _update_progress(request.job_id, "failed", 0, error_msg)
+            try:
+                error_msg = f"生成失败: {str(e)}"
+                yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
+                _update_progress(request.job_id, "failed", 0, error_msg)
+            except:
+                pass  # 如果yield失败，说明连接已断开，忽略错误
     
     return StreamingResponse(
         event_generator(),
@@ -3410,6 +3429,7 @@ async def generate_multi_role_podcast_streaming(request: MultiRoleRequest):
     使用 Server-Sent Events (SSE) 实时推送音频片段，支持边生成边播放
     """
     async def event_generator():
+        temp_files = []
         try:
             # 初始化进度
             _update_progress(request.job_id, "queued", 1, "任务已提交，准备开始处理")
@@ -3455,7 +3475,6 @@ async def generate_multi_role_podcast_streaming(request: MultiRoleRequest):
             _update_progress(request.job_id, "downloading_voices", 20, "正在下载角色音色文件")
             yield f"data: {json.dumps({'type': 'progress', 'status': 'downloading_voices', 'percent': 20, 'message': '正在下载角色音色文件'}, ensure_ascii=False)}\n\n"
             
-            temp_files = []
             role_voices = {}
             
             try:
@@ -3494,44 +3513,54 @@ async def generate_multi_role_podcast_streaming(request: MultiRoleRequest):
                 
                 segment_count = 0
                 
-                for segment_index, role_name, audio_segment, is_final in gen.generate_from_text_streaming(
-                    text=cleaned_text,
-                    role_voices=role_voices,
-                    silence_interval=request.silence_interval or 800,
-                    background_music=background_music_path,
-                    background_volume=request.background_volume or 0.3,
-                    background_mode="single",
-                    verbose=True
-                ):
-                    if audio_segment.shape[1] > 0:
-                        audio_np = audio_segment.cpu().squeeze(0).numpy()
-                        
-                        audio_buffer = io.BytesIO()
-                        sf.write(audio_buffer, audio_np, 22050, format='WAV')
-                        audio_buffer.seek(0)
-                        
-                        audio_base64 = base64.b64encode(audio_buffer.read()).decode('utf-8')
-                        
-                        segment_data = {
-                            'type': 'audio_segment',
-                            'segment_index': segment_index,
-                            'role_name': role_name,
-                            'audio_base64': audio_base64,
-                            'is_final': is_final,
-                            'sample_rate': 22050
-                        }
-                        yield f"data: {json.dumps(segment_data, ensure_ascii=False)}\n\n"
-                        
-                        segment_count += 1
-                        
-                        estimated_total = max(30, len(processor.parse_role_text(cleaned_text)) * 2)
-                        progress_percent = min(90, 40 + int((segment_count / estimated_total) * 50))
-                        _update_progress(request.job_id, "generating_audio", progress_percent, f"已生成 {segment_count} 个音频片段...")
-                        yield f"data: {json.dumps({'type': 'progress', 'status': 'generating_audio', 'percent': progress_percent, 'message': f'已生成 {segment_count} 个音频片段...'}, ensure_ascii=False)}\n\n"
-                
-                _update_progress(request.job_id, "completed", 100, "播客生成完成")
-                yield f"data: {json.dumps({'type': 'progress', 'status': 'completed', 'percent': 100, 'message': '播客生成完成'}, ensure_ascii=False)}\n\n"
-                yield f"data: {json.dumps({'type': 'done', 'total_segments': segment_count}, ensure_ascii=False)}\n\n"
+                try:
+                    for segment_index, role_name, audio_segment, is_final in gen.generate_from_text_streaming(
+                        text=cleaned_text,
+                        role_voices=role_voices,
+                        silence_interval=request.silence_interval or 800,
+                        background_music=background_music_path,
+                        background_volume=request.background_volume or 0.3,
+                        background_mode="single",
+                        verbose=True
+                    ):
+                        if audio_segment.shape[1] > 0:
+                            audio_np = audio_segment.cpu().squeeze(0).numpy()
+                            
+                            audio_buffer = io.BytesIO()
+                            sf.write(audio_buffer, audio_np, 22050, format='WAV')
+                            audio_buffer.seek(0)
+                            
+                            audio_base64 = base64.b64encode(audio_buffer.read()).decode('utf-8')
+                            
+                            segment_data = {
+                                'type': 'audio_segment',
+                                'segment_index': segment_index,
+                                'role_name': role_name,
+                                'audio_base64': audio_base64,
+                                'is_final': is_final,
+                                'sample_rate': 22050
+                            }
+                            yield f"data: {json.dumps(segment_data, ensure_ascii=False)}\n\n"
+                            
+                            segment_count += 1
+                            
+                            estimated_total = max(30, len(processor.parse_role_text(cleaned_text)) * 2)
+                            progress_percent = min(90, 40 + int((segment_count / estimated_total) * 50))
+                            _update_progress(request.job_id, "generating_audio", progress_percent, f"已生成 {segment_count} 个音频片段...")
+                            yield f"data: {json.dumps({'type': 'progress', 'status': 'generating_audio', 'percent': progress_percent, 'message': f'已生成 {segment_count} 个音频片段...'}, ensure_ascii=False)}\n\n"
+                    
+                    _update_progress(request.job_id, "completed", 100, "播客生成完成")
+                    yield f"data: {json.dumps({'type': 'progress', 'status': 'completed', 'percent': 100, 'message': '播客生成完成'}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'done', 'total_segments': segment_count}, ensure_ascii=False)}\n\n"
+                except GeneratorExit:
+                    # 客户端断开连接，正常退出
+                    logger.info(f"客户端断开连接，job_id={request.job_id}")
+                    raise
+                except Exception as e:
+                    logger.error(f"生成音频片段时出错: {e}", exc_info=True)
+                    error_msg = f"生成音频片段失败: {str(e)}"
+                    yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
+                    _update_progress(request.job_id, "failed", 0, error_msg)
                 
             finally:
                 # 清理临时文件
@@ -3542,11 +3571,20 @@ async def generate_multi_role_podcast_streaming(request: MultiRoleRequest):
                     except Exception as e:
                         logger.warning(f"清理临时文件失败: {str(e)}")
                         
+        except asyncio.CancelledError:
+            # 客户端断开连接，正常退出
+            logger.info(f"流式生成被取消，job_id={request.job_id}")
+        except GeneratorExit:
+            # 客户端断开连接，正常退出
+            logger.info(f"生成器退出，job_id={request.job_id}")
         except Exception as e:
             logger.error(f"流式生成多角色播客失败: {e}", exc_info=True)
-            error_msg = f"生成失败: {str(e)}"
-            yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
-            _update_progress(request.job_id, "failed", 0, error_msg)
+            try:
+                error_msg = f"生成失败: {str(e)}"
+                yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
+                _update_progress(request.job_id, "failed", 0, error_msg)
+            except:
+                pass  # 如果yield失败，说明连接已断开，忽略错误
     
     return StreamingResponse(
         event_generator(),
@@ -3567,6 +3605,7 @@ async def generate_character_podcast_streaming(request: CharacterRequest):
     使用 Server-Sent Events (SSE) 实时推送音频片段，支持边生成边播放
     """
     async def event_generator():
+        temp_files = []
         try:
             # 初始化进度
             _update_progress(request.job_id, "queued", 1, "任务已提交，准备开始处理")
@@ -3593,7 +3632,6 @@ async def generate_character_podcast_streaming(request: CharacterRequest):
             _update_progress(request.job_id, "downloading_voices", 10, "正在下载角色音色文件")
             yield f"data: {json.dumps({'type': 'progress', 'status': 'downloading_voices', 'percent': 10, 'message': '正在下载角色音色文件'}, ensure_ascii=False)}\n\n"
             
-            temp_files = []
             role_voices = {}
             character_descriptions = {}
             
@@ -3674,44 +3712,54 @@ async def generate_character_podcast_streaming(request: CharacterRequest):
                 
                 segment_count = 0
                 
-                for segment_index, role_name, audio_segment, is_final in gen.generate_from_text_streaming(
-                    text=cleaned_text,
-                    role_voices=role_voices,
-                    silence_interval=request.silence_interval or 800,
-                    background_music=background_music_path,
-                    background_volume=request.background_volume or 0.3,
-                    background_mode="single",
-                    verbose=True
-                ):
-                    if audio_segment.shape[1] > 0:
-                        audio_np = audio_segment.cpu().squeeze(0).numpy()
-                        
-                        audio_buffer = io.BytesIO()
-                        sf.write(audio_buffer, audio_np, 22050, format='WAV')
-                        audio_buffer.seek(0)
-                        
-                        audio_base64 = base64.b64encode(audio_buffer.read()).decode('utf-8')
-                        
-                        segment_data = {
-                            'type': 'audio_segment',
-                            'segment_index': segment_index,
-                            'role_name': role_name,
-                            'audio_base64': audio_base64,
-                            'is_final': is_final,
-                            'sample_rate': 22050
-                        }
-                        yield f"data: {json.dumps(segment_data, ensure_ascii=False)}\n\n"
-                        
-                        segment_count += 1
-                        
-                        estimated_total = max(30, len(processor.parse_role_text(cleaned_text)) * 2)
-                        progress_percent = min(90, 40 + int((segment_count / estimated_total) * 50))
-                        _update_progress(request.job_id, "generating_audio", progress_percent, f"已生成 {segment_count} 个音频片段...")
-                        yield f"data: {json.dumps({'type': 'progress', 'status': 'generating_audio', 'percent': progress_percent, 'message': f'已生成 {segment_count} 个音频片段...'}, ensure_ascii=False)}\n\n"
-                
-                _update_progress(request.job_id, "completed", 100, "播客生成完成")
-                yield f"data: {json.dumps({'type': 'progress', 'status': 'completed', 'percent': 100, 'message': '播客生成完成'}, ensure_ascii=False)}\n\n"
-                yield f"data: {json.dumps({'type': 'done', 'total_segments': segment_count}, ensure_ascii=False)}\n\n"
+                try:
+                    for segment_index, role_name, audio_segment, is_final in gen.generate_from_text_streaming(
+                        text=cleaned_text,
+                        role_voices=role_voices,
+                        silence_interval=request.silence_interval or 800,
+                        background_music=background_music_path,
+                        background_volume=request.background_volume or 0.3,
+                        background_mode="single",
+                        verbose=True
+                    ):
+                        if audio_segment.shape[1] > 0:
+                            audio_np = audio_segment.cpu().squeeze(0).numpy()
+                            
+                            audio_buffer = io.BytesIO()
+                            sf.write(audio_buffer, audio_np, 22050, format='WAV')
+                            audio_buffer.seek(0)
+                            
+                            audio_base64 = base64.b64encode(audio_buffer.read()).decode('utf-8')
+                            
+                            segment_data = {
+                                'type': 'audio_segment',
+                                'segment_index': segment_index,
+                                'role_name': role_name,
+                                'audio_base64': audio_base64,
+                                'is_final': is_final,
+                                'sample_rate': 22050
+                            }
+                            yield f"data: {json.dumps(segment_data, ensure_ascii=False)}\n\n"
+                            
+                            segment_count += 1
+                            
+                            estimated_total = max(30, len(processor.parse_role_text(cleaned_text)) * 2)
+                            progress_percent = min(90, 40 + int((segment_count / estimated_total) * 50))
+                            _update_progress(request.job_id, "generating_audio", progress_percent, f"已生成 {segment_count} 个音频片段...")
+                            yield f"data: {json.dumps({'type': 'progress', 'status': 'generating_audio', 'percent': progress_percent, 'message': f'已生成 {segment_count} 个音频片段...'}, ensure_ascii=False)}\n\n"
+                    
+                    _update_progress(request.job_id, "completed", 100, "播客生成完成")
+                    yield f"data: {json.dumps({'type': 'progress', 'status': 'completed', 'percent': 100, 'message': '播客生成完成'}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'done', 'total_segments': segment_count}, ensure_ascii=False)}\n\n"
+                except GeneratorExit:
+                    # 客户端断开连接，正常退出
+                    logger.info(f"客户端断开连接，job_id={request.job_id}")
+                    raise
+                except Exception as e:
+                    logger.error(f"生成音频片段时出错: {e}", exc_info=True)
+                    error_msg = f"生成音频片段失败: {str(e)}"
+                    yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
+                    _update_progress(request.job_id, "failed", 0, error_msg)
                 
             finally:
                 # 清理临时文件
