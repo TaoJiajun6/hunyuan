@@ -29,5 +29,6 @@ export {
   PodcastResult,
   ProgressStatus,
   AnalyzeTextRequest,
-  AnalyzeTextResult
+  AnalyzeTextResult,
+  AudioSegment
 } from './src/main/ets/services/PodcastService'

@@ -1,6 +1,6 @@
 import { WindowModel } from 'lib_common';
 import { NavHeaderBar } from 'lib_widget';
-import { podcastService, CharacterRequest, CharacterInfo, PodcastResult, ProgressStatus } from 'lib_api';
+import { podcastService, CharacterRequest, CharacterInfo, PodcastResult, ProgressStatus, AudioSegment } from 'lib_api';
 import { FileUtils } from '../../utils/FileUtils';
 import { AudioRecorderUtils } from '../../utils/AudioRecorderUtils';
 import { promptAction, AppStorageV2 } from '@kit.ArkUI';
@@ -8,6 +8,9 @@ import { common } from '@kit.AbilityKit';
 import { MediaService, SongItem } from 'module_musicplay';
 import { CloudStorageMusicUtils, CloudAudioFile } from '../../common/CloudStorageMusicUtils';
 import { Logger } from 'lib_common';
+import { media } from '@kit.MediaKit';
+import fs from '@ohos.file.fs';
+import { BusinessError } from '@kit.BasicServicesKit';
 
 @Builder
 export function PodcastCharacterPageBuilder() {
@@ -39,6 +42,137 @@ export struct PodcastCharacterPage {
   @Local recordingDuration: number = 0; // 录音时长（秒）
   @Local recordingTimer: number = 0; // 录音计时器
   @Local savedScript: string = ''; // 保存的对话内容
+  
+  // 流式播放相关
+  private audioSegmentQueue: AudioSegment[] = [];
+  private isPlayingStreaming: boolean = false;
+  private currentStreamingAudio?: media.AVPlayer;
+  private streamingTempFiles: string[] = [];
+
+  /**
+   * 音频片段回调
+   */
+  private async onAudioSegment(segment: AudioSegment): Promise<void> {
+    this.audioSegmentQueue.push(segment);
+    
+    if (!this.isPlayingStreaming && this.audioSegmentQueue.length > 0) {
+      this.isPlayingStreaming = true;
+      this.isLoading = false;
+      await this.playNextAudioSegment();
+    }
+  }
+
+  /**
+   * 脚本回调
+   */
+  private onScript(script: string): void {
+    this.savedScript = script;
+  }
+
+  /**
+   * 播放下一个音频片段
+   */
+  private async playNextAudioSegment(): Promise<void> {
+    if (this.audioSegmentQueue.length === 0) {
+      if (this.currentStreamingAudio) {
+        this.isPlayingStreaming = false;
+        this.currentStreamingAudio = undefined;
+      }
+      return;
+    }
+
+    const segment: AudioSegment = this.audioSegmentQueue.shift()!;
+    
+    try {
+      const tempFilePath = await this.saveBase64ToTempFile(segment.audioBase64);
+      this.streamingTempFiles.push(tempFilePath);
+      
+      const avPlayer = await media.createAVPlayer();
+      avPlayer.url = tempFilePath;
+      
+      avPlayer.on('stateChange', async (state: string) => {
+        if (state === 'idle' || state === 'released') {
+          await this.cleanupAudioPlayer(avPlayer, tempFilePath);
+          await this.playNextAudioSegment();
+        }
+      });
+
+      avPlayer.on('endOfStream', async () => {
+        await this.cleanupAudioPlayer(avPlayer, tempFilePath);
+        await this.playNextAudioSegment();
+      });
+
+      avPlayer.on('error', async (error: BusinessError) => {
+        Logger.error('PodcastCharacterPage', `播放音频片段失败: ${JSON.stringify(error)}`);
+        await this.cleanupAudioPlayer(avPlayer, tempFilePath);
+        await this.playNextAudioSegment();
+      });
+
+      await avPlayer.prepare();
+      await avPlayer.play();
+      
+      this.currentStreamingAudio = avPlayer;
+      
+    } catch (error) {
+      Logger.error('PodcastCharacterPage', `播放音频片段失败: ${error}`);
+      await this.playNextAudioSegment();
+    }
+  }
+
+  /**
+   * 清理音频播放器和临时文件
+   */
+  private async cleanupAudioPlayer(avPlayer: media.AVPlayer, tempFilePath: string): Promise<void> {
+    try {
+      if (avPlayer) {
+        avPlayer.release();
+      }
+      
+      setTimeout(async () => {
+        try {
+          await fs.unlink(tempFilePath);
+          const index = this.streamingTempFiles.indexOf(tempFilePath);
+          if (index > -1) {
+            this.streamingTempFiles.splice(index, 1);
+          }
+        } catch (e) {
+          Logger.warn('PodcastCharacterPage', `删除临时文件失败: ${tempFilePath}, 错误: ${e}`);
+        }
+      }, 1000);
+    } catch (error) {
+      Logger.warn('PodcastCharacterPage', `清理音频播放器失败: ${error}`);
+    }
+  }
+
+  /**
+   * 将base64音频保存为临时文件
+   */
+  private async saveBase64ToTempFile(base64: string): Promise<string> {
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    const tempDir = context.filesDir;
+    const fileName = `audio_segment_${Date.now()}_${Math.random().toString(36).substring(7)}.wav`;
+    const filePath = `${tempDir}/${fileName}`;
+    
+    try {
+      const binaryData = FileUtils.base64ToUint8Array(base64);
+      
+      if (binaryData.length === 0) {
+        throw new Error('Base64解码失败，数据为空');
+      }
+      
+      const file: fs.File = fs.openSync(filePath, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
+      fs.writeSync(file.fd, binaryData);
+      fs.closeSync(file.fd);
+      
+      Logger.info('PodcastCharacterPage', `临时文件已保存: ${filePath}, 大小: ${binaryData.length} bytes`);
+      return filePath;
+    } catch (error) {
+      Logger.error('PodcastCharacterPage', `保存临时文件失败: ${error}`);
+      const err = error instanceof Error ? error : new Error(String(error));
+      throw err;
+    }
+  }
+  
   // 播客分类选项列表
   private readonly categoryOptions: SelectOption[] = [
     { value: '社会文化与历史' },
@@ -487,22 +621,19 @@ export struct PodcastCharacterPage {
         request.category = this.category; // 播客分类
       }
 
-      const response = await podcastService.generateCharacterPodcast(request, this.jobId, onProgress);
+      // 使用流式生成（边生成边播放）
+      this.audioSegmentQueue = [];
+      this.isPlayingStreaming = false;
 
-      if (response.success && response.data) {
-        // 保存 script，以便在播放时使用
-        if (response.data.script) {
-          this.savedScript = response.data.script;
-        }
-        // 确保进度条到达100%
-        this.targetProgress = 100;
-        this.startProgressAnimation();
-        // 等待一小段时间确保文件已上传到云存储，然后获取最新音频并播放
-        setTimeout(() => {
-          this.getLatestAudioAndPlay(response.data!.audio_url);
-          this.savedScript = '';
-        }, 1000);
-      } else {
+      const response = await podcastService.generateCharacterPodcastStreaming(
+        request,
+        onProgress,
+        this.onAudioSegment.bind(this),
+        this.onScript.bind(this)
+      );
+
+      if (!response.success) {
+        this.isLoading = false;
         promptAction.showToast({
           message: response.error || response.message || '生成失败',
           duration: 3000

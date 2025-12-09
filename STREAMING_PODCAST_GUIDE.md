@@ -16,14 +16,44 @@
 
 流式生成主题深度播客，支持边生成边播放。
 
+### POST `/api/v1/podcast/multi_role/stream`
+
+流式生成多角色互动播客，支持边生成边播放。
+
+### POST `/api/v1/podcast/character/stream`
+
+流式生成自定义角色播客，支持边生成边播放。
+
 #### 请求参数
 
-与 `/api/v1/podcast/deep` 相同，包括：
+**深度播客 (`/api/v1/podcast/deep/stream`):**
 - `topic`: 播客主题（必需）
 - `role_voice_urls`: 角色音色映射（必需）
 - `num_characters`: 角色数量（可选，默认2）
 - `depth_level`: 深度级别（可选，默认"深度"）
 - `silence_interval`: 静音间隔（可选，默认800ms）
+- `category`: 播客分类（可选）
+- `background_volume`: 背景音乐音量（可选，默认0.3）
+- `job_id`: 任务ID（可选）
+
+**多角色播客 (`/api/v1/podcast/multi_role/stream`):**
+- `text`: 播客文本（可选，如果使用text_file_url或input_url，此字段可为空）
+- `text_file_url`: 文本文件云存储URL（可选）
+- `input_url`: 输入URL（可选）
+- `input_type`: 输入类型（可选）
+- `role_voice_urls`: 角色音色映射（必需）
+- `silence_interval`: 静音间隔（可选，默认800ms）
+- `category`: 播客分类（可选）
+- `background_volume`: 背景音乐音量（可选，默认0.3）
+- `job_id`: 任务ID（可选）
+
+**自定义角色播客 (`/api/v1/podcast/character/stream`):**
+- `characters`: 角色列表（必需，至少2个）
+- `text`: 文本素材（必需）
+- `topic`: 播客主题（可选）
+- `silence_interval`: 静音间隔（可选，默认800ms）
+- `category`: 播客分类（可选）
+- `background_volume`: 背景音乐音量（可选，默认0.3）
 - `job_id`: 任务ID（可选）
 
 #### 响应格式
@@ -210,10 +240,37 @@ function base64ToArrayBuffer(base64) {
 - 传输协议：Server-Sent Events (SSE)
 - 编码方式：JSON
 
+## 鸿蒙前端适配
+
+由于鸿蒙的 `http` 模块不支持 Server-Sent Events (SSE) 流式读取，需要特殊处理。详细适配指南请参考：[HARMONYOS_STREAMING_GUIDE.md](./HARMONYOS_STREAMING_GUIDE.md)
+
+### 主要适配点
+
+1. **流式数据读取**：使用 HTTP 请求的完整响应，然后解析 SSE 格式数据
+2. **音频片段播放**：实现音频片段队列管理，使用 `media.AVPlayer` 连续播放
+3. **Base64 转换**：将接收到的 Base64 音频数据转换为临时文件后播放
+
+### 关键代码示例
+
+```typescript
+// 在 PodcastService 中添加流式生成方法
+async generateDeepPodcastStreaming(
+  request: DeepPodcastRequest,
+  onProgress?: (progress: ProgressStatus) => void,
+  onAudioSegment?: (segment: AudioSegment) => void,
+  onScript?: (script: string) => void
+): Promise<ApiResponse<void>>
+
+// 在页面中实现音频片段队列播放
+private audioSegmentQueue: AudioSegment[] = [];
+private async playNextAudioSegment(): Promise<void>
+```
+
 ## 后续优化方向
 
 1. ✅ 支持背景音乐的流式混合（已实现）
 2. 优化音频片段大小，减少传输延迟
 3. 支持音频压缩（如 MP3）以减少传输数据量
 4. 添加音频缓冲机制，确保播放流畅
+5. 完善鸿蒙前端的流式读取支持（如果鸿蒙API更新）
 

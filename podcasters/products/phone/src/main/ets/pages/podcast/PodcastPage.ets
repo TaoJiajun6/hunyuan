@@ -1,8 +1,8 @@
 import { RouterMap, RouterUtils } from 'lib_common';
 import { NavHeaderBar } from 'lib_widget';
 import { MusicPlayController } from 'module_musicplay';
-import { CloudStorageMusicUtils } from '../../common/CloudStorageMusicUtils';
-import { MediaService, getMusicModel } from 'module_musicplay';
+import { CloudStorageMusicUtils, CloudAudioFile } from '../../common/CloudStorageMusicUtils';
+import { MediaService, getMusicModel, SongItem, MusicModel } from 'module_musicplay';
 import { promptAction } from '@kit.ArkUI';
 import { FileUtils } from '../../utils/FileUtils';
 import { picker } from '@kit.CoreFileKit';
@@ -19,14 +19,16 @@ export struct PodcastPage {
   @Local isLoading: boolean = false;
   @Local isUploadingMusic: boolean = false;
   @Local hasAutoImported: boolean = false; // 标记是否已自动导入过
+  @Local recentPodcasts: SongItem[] = []; // 最近播客列表
+  @Local isRefreshing: boolean = false; // 是否正在刷新
+  @Local musicModel: MusicModel = getMusicModel(); // 音乐模型
 
   /**
    * 页面加载时自动导入播放列表（如果为空）
    */
   async aboutToAppear(): Promise<void> {
     // 检查播放列表是否为空，如果为空则自动导入
-    const musicModel = getMusicModel();
-    const songList = musicModel.getSongList();
+    const songList = this.musicModel.getSongList();
     
     if (songList.length === 0 && !this.hasAutoImported) {
       Logger.info('PodcastPage', '播放列表为空，自动从云存储导入音频');
@@ -34,6 +36,17 @@ export struct PodcastPage {
       // 静默导入，不显示加载提示（避免影响用户体验）
       await this.importAudioFromCloudSilently();
     }
+    
+    // 加载最近播客列表
+    await this.loadRecentPodcasts();
+  }
+
+  /**
+   * 监听播放列表变化，自动更新最近播客列表
+   */
+  @Monitor('musicModel.songList')
+  onSongListChanged() {
+    this.loadRecentPodcasts();
   }
 
   /**
@@ -170,6 +183,9 @@ export struct PodcastPage {
         message: `成功导入 ${songItems.length} 个音频文件`,
         duration: 2000
       });
+      
+      // 刷新最近播客列表
+      await this.loadRecentPodcasts();
     } catch (error) {
       promptAction.showToast({
         message: `导入失败: ${error}`,
@@ -180,150 +196,191 @@ export struct PodcastPage {
     }
   }
 
+  /**
+   * 加载最近播客列表
+   */
+  async loadRecentPodcasts(): Promise<void> {
+    try {
+      this.isRefreshing = true;
+      const songList = this.musicModel.getSongList();
+      
+      if (songList.length === 0) {
+        this.recentPodcasts = [];
+        return;
+      }
+      
+      // 按时间排序，最新的在前（假设id包含时间戳）
+      const sortedList = [...songList].sort((a, b) => {
+        const getTimestamp = (id: string): number => {
+          const match = id.match(/(\d+)/);
+          return match ? parseInt(match[1]) : 0;
+        };
+        return getTimestamp(b.id) - getTimestamp(a.id);
+      });
+      
+      // 只显示最近20个
+      this.recentPodcasts = sortedList.slice(0, 20);
+    } catch (error) {
+      Logger.error('PodcastPage', `加载最近播客失败: ${error}`);
+    } finally {
+      this.isRefreshing = false;
+    }
+  }
+
+  /**
+   * 格式化日期显示
+   */
+  formatDate(timestamp: number): string {
+    const date = new Date(timestamp);
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    return `${month}月${day}日`;
+  }
+
+  /**
+   * 从文件名或ID提取时间戳
+   */
+  extractTimestamp(song: SongItem): number {
+    const match = song.id.match(/(\d+)/);
+    if (match) {
+      return parseInt(match[1]) * 1000; // 转换为毫秒
+    }
+    return Date.now();
+  }
+
+  /**
+   * 播放播客
+   */
+  playPodcast(song: SongItem): void {
+    MediaService.getInstance().playSong(song);
+  }
+
   build() {
     NavDestination() {
       Column() {
+        // 顶部标题栏，带右侧操作按钮
         NavHeaderBar({
           title: 'AI播客',
           isSubTitle: false,
-          showBackBtn: false
+          showBackBtn: false,
+          rightPartBuilder: this.headerRightBuilder
         })
 
         Scroll() {
-          Column({ space: 16 }) {
-            // 多角色互动播客
-            Row() {
-              Column({ space: 8 }) {
-                Text('多角色互动播客')
-                  .fontSize($r('sys.float.Title_M'))
+          Column({ space: 20 }) {
+            // 播客功能卡片区域（横向滚动）
+            Column({ space: 12 }) {
+              Row() {
+                Text('播客功能')
+                  .fontSize(20)
                   .fontColor($r('sys.color.font_primary'))
                   .fontWeight(FontWeight.Bold)
-
-                Text('将文本素材转化为多角色自然互动的播客音频')
-                  .fontSize($r('sys.float.Body_M'))
+                Blank()
+                Text('更多>')
+                  .fontSize(14)
                   .fontColor($r('sys.color.font_secondary'))
-                  .maxLines(2)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .onClick(() => {
+                    // 可以跳转到功能详情页
+                  })
               }
-              .alignItems(HorizontalAlign.Start)
-              .layoutWeight(1)
+              .width('100%')
+              .padding({ left: 16, right: 16 })
+
+              Scroll() {
+                Row({ space: 12 }) {
+                  // 多角色互动播客卡片
+                  this.podcastFunctionCard(
+                    '多角色互动播客',
+                    '将文本素材转化为多角色自然互动的播客音频',
+                    () => {
+                      RouterUtils.pushPathByName(RouterMap.PODCAST_MULTI_ROLE_PAGE)
+                    }
+                  )
+
+                  // 自定义角色播客卡片
+                  this.podcastFunctionCard(
+                    '自定义角色播客',
+                    '根据用户自定义的角色人设和音色生成契合风格的播客音频',
+                    () => {
+                      RouterUtils.pushPathByName(RouterMap.PODCAST_CHARACTER_PAGE)
+                    }
+                  )
+
+                  // 主题深度播客卡片
+                  this.podcastFunctionCard(
+                    '主题深度播客',
+                    '基于指定主题生成有深度、引发思考的播客音频',
+                    () => {
+                      RouterUtils.pushPathByName(RouterMap.PODCAST_DEEP_PAGE)
+                    }
+                  )
+
+                  // 上传背景音乐卡片
+                  this.podcastFunctionCard(
+                    '上传背景音乐',
+                    '将本地背景音乐文件上传到云存储',
+                    () => {
+                      this.uploadBackgroundMusic();
+                    },
+                    this.isUploadingMusic
+                  )
+
+                  // 导入音频卡片
+                  this.podcastFunctionCard(
+                    '导入音频',
+                    '从云存储中导入已生成的播客音频',
+                    () => {
+                      this.importAudioFromCloud();
+                    },
+                    this.isLoading
+                  )
+                }
+                .padding({ left: 16, right: 16 })
+              }
+              .scrollable(ScrollDirection.Horizontal)
+              .scrollBar(BarState.Auto)
             }
             .width('100%')
-            .padding(16)
-            .borderRadius(12)
-            .backgroundColor($r('sys.color.comp_background_tertiary'))
-            .onClick(() => {
-              RouterUtils.pushPathByName(RouterMap.PODCAST_MULTI_ROLE_PAGE)
-            })
+            .padding({ top: 16, bottom: 8 })
 
-            // 自定义角色播客
-            Row() {
-              Column({ space: 8 }) {
-                Text('自定义角色播客')
-                  .fontSize($r('sys.float.Title_M'))
+            // 最近播客列表区域
+            Column({ space: 12 }) {
+              Row() {
+                Text('最近播客')
+                  .fontSize(20)
                   .fontColor($r('sys.color.font_primary'))
                   .fontWeight(FontWeight.Bold)
-
-                Text('根据用户自定义的角色人设和音色生成契合风格的播客音频')
-                  .fontSize($r('sys.float.Body_M'))
-                  .fontColor($r('sys.color.font_secondary'))
-                  .maxLines(2)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                Blank()
               }
-              .alignItems(HorizontalAlign.Start)
-              .layoutWeight(1)
+              .width('100%')
+              .padding({ left: 16, right: 16 })
+
+              if (this.recentPodcasts.length === 0) {
+                Column() {
+                  Text('暂无播客内容')
+                    .fontSize(14)
+                    .fontColor($r('sys.color.font_secondary'))
+                    .margin({ top: 40, bottom: 40 })
+                }
+                .width('100%')
+              } else {
+                Column({ space: 0 }) {
+                  ForEach(this.recentPodcasts, (song: SongItem, index: number) => {
+                    this.podcastListItem(song, index)
+                  }, (song: SongItem) => song.id)
+                }
+                .width('100%')
+                .padding({ left: 16, right: 16 })
+              }
             }
             .width('100%')
-            .padding(16)
-            .borderRadius(12)
-            .backgroundColor($r('sys.color.comp_background_tertiary'))
-            .onClick(() => {
-              RouterUtils.pushPathByName(RouterMap.PODCAST_CHARACTER_PAGE)
-            })
-
-            // 主题深度播客
-            Row() {
-              Column({ space: 8 }) {
-                Text('主题深度播客')
-                  .fontSize($r('sys.float.Title_M'))
-                  .fontColor($r('sys.color.font_primary'))
-                  .fontWeight(FontWeight.Bold)
-
-                Text('基于指定主题生成有深度、引发思考的播客音频')
-                  .fontSize($r('sys.float.Body_M'))
-                  .fontColor($r('sys.color.font_secondary'))
-                  .maxLines(2)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-              }
-              .alignItems(HorizontalAlign.Start)
-              .layoutWeight(1)
-            }
-            .width('100%')
-            .padding(16)
-            .borderRadius(12)
-            .backgroundColor($r('sys.color.comp_background_tertiary'))
-            .onClick(() => {
-              RouterUtils.pushPathByName(RouterMap.PODCAST_DEEP_PAGE)
-            })
-
-            // 上传背景音乐到云存储
-            Row() {
-              Column({ space: 8 }) {
-                Text('上传背景音乐')
-                  .fontSize($r('sys.float.Title_M'))
-                  .fontColor($r('sys.color.font_primary'))
-                  .fontWeight(FontWeight.Bold)
-
-                Text('将本地背景音乐文件上传到云存储 music/ 目录')
-                  .fontSize($r('sys.float.Body_M'))
-                  .fontColor($r('sys.color.font_secondary'))
-                  .maxLines(2)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-              }
-              .alignItems(HorizontalAlign.Start)
-              .layoutWeight(1)
-            }
-            .width('100%')
-            .padding(16)
-            .borderRadius(12)
-            .backgroundColor($r('sys.color.comp_background_tertiary'))
-            .opacity(this.isUploadingMusic ? 0.6 : 1)
-            .enabled(!this.isUploadingMusic)
-            .onClick(() => {
-              this.uploadBackgroundMusic();
-            })
-
-            // 从云存储导入音频
-            Row() {
-              Column({ space: 8 }) {
-                Text('从云存储导入音频')
-                  .fontSize($r('sys.float.Title_M'))
-                  .fontColor($r('sys.color.font_primary'))
-                  .fontWeight(FontWeight.Bold)
-
-                Text('从云存储中导入已生成的播客音频到播放列表')
-                  .fontSize($r('sys.float.Body_M'))
-                  .fontColor($r('sys.color.font_secondary'))
-                  .maxLines(2)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-              }
-              .alignItems(HorizontalAlign.Start)
-              .layoutWeight(1)
-            }
-            .width('100%')
-            .padding(16)
-            .borderRadius(12)
-            .backgroundColor($r('sys.color.comp_background_tertiary'))
-            .opacity(this.isLoading ? 0.6 : 1)
-            .enabled(!this.isLoading)
-            .onClick(() => {
-              this.importAudioFromCloud();
-            })
+            .padding({ top: 8, bottom: 16 })
           }
           .width('100%')
-          .padding({ left: 16, right: 16, top: 16, bottom: 16 })
         }
         .layoutWeight(1)
+        .scrollBar(BarState.Auto)
+        
         // 播放器组件 - 放在底部导航栏上方
         MusicPlayController()
       }
@@ -332,6 +389,168 @@ export struct PodcastPage {
       .backgroundColor($r('sys.color.background_primary'))
     }
     .hideTitleBar(true)
+  }
+
+  /**
+   * 标题栏右侧按钮构建器
+   */
+  @Builder
+  headerRightBuilder() {
+    Row({ space: 12 }) {
+      // 搜索按钮
+      Button() {
+        SymbolGlyph($r('sys.symbol.magnifyingglass'))
+          .fontSize(18)
+          .fontColor([$r('sys.color.font_primary')])
+      }
+      .type(ButtonType.Normal)
+      .backgroundColor(Color.Transparent)
+      .borderRadius(20)
+      .width(40)
+      .height(40)
+      .onClick(() => {
+        // 搜索功能
+        promptAction.showToast({ message: '搜索功能开发中', duration: 2000 });
+      })
+
+      // 更多选项按钮
+      Button() {
+        SymbolGlyph($r('sys.symbol.list_bullet'))
+          .fontSize(18)
+          .fontColor([$r('sys.color.font_primary')])
+      }
+      .type(ButtonType.Normal)
+      .backgroundColor(Color.Transparent)
+      .borderRadius(20)
+      .width(40)
+      .height(40)
+      .onClick(() => {
+        // 更多选项
+        promptAction.showToast({ message: '更多选项开发中', duration: 2000 });
+      })
+    }
+  }
+
+  /**
+   * 播客功能卡片
+   */
+  @Builder
+  podcastFunctionCard(title: string, description: string, onClick: () => void, disabled: boolean = false) {
+    Column({ space: 8 }) {
+      // 图标区域
+      Column() {
+        Image($r('app.media.ic_music_icon'))
+          .width(40)
+          .height(40)
+          .fillColor($r('sys.color.icon_emphasize'))
+      }
+      .width(60)
+      .height(60)
+      .borderRadius(12)
+      .backgroundColor($r('sys.color.comp_background_tertiary'))
+      .justifyContent(FlexAlign.Center)
+
+      // 标题
+      Text(title)
+        .fontSize(14)
+        .fontColor($r('sys.color.font_primary'))
+        .fontWeight(FontWeight.Medium)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .width(120)
+        .textAlign(TextAlign.Center)
+
+      // 描述
+      Text(description)
+        .fontSize(12)
+        .fontColor($r('sys.color.font_secondary'))
+        .maxLines(2)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .width(120)
+        .textAlign(TextAlign.Center)
+    }
+    .width(140)
+    .padding(12)
+    .borderRadius(16)
+    .backgroundColor($r('sys.color.comp_background_primary'))
+    .opacity(disabled ? 0.6 : 1)
+    .enabled(!disabled)
+    .onClick(() => {
+      if (!disabled) {
+        onClick();
+      }
+    })
+  }
+
+  /**
+   * 播客列表项
+   */
+  @Builder
+  podcastListItem(song: SongItem, index: number) {
+    Row({ space: 12 }) {
+      // 左侧图标
+      Column() {
+        Image(song.label)
+          .width(48)
+          .height(48)
+          .borderRadius(8)
+      }
+      .width(48)
+      .height(48)
+      .borderRadius(8)
+      .backgroundColor($r('sys.color.comp_background_tertiary'))
+      .justifyContent(FlexAlign.Center)
+
+      // 中间内容
+      Column({ space: 4 }) {
+        Text(song.title || '未知播客')
+          .fontSize(16)
+          .fontColor($r('sys.color.font_primary'))
+          .fontWeight(FontWeight.Medium)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .width('100%')
+
+        if (song.singer) {
+          Text(song.singer)
+            .fontSize(12)
+            .fontColor($r('sys.color.font_secondary'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%')
+        }
+
+        Row({ space: 8 }) {
+          Text('播客')
+            .fontSize(11)
+            .fontColor($r('sys.color.font_secondary'))
+            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+            .borderRadius(4)
+            .backgroundColor($r('sys.color.comp_background_tertiary'))
+        }
+        .margin({ top: 4 })
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+      .justifyContent(FlexAlign.Center)
+
+      // 右侧日期
+      Column() {
+        Text(this.formatDate(this.extractTimestamp(song)))
+          .fontSize(12)
+          .fontColor($r('sys.color.font_secondary'))
+      }
+      .alignItems(HorizontalAlign.End)
+      .justifyContent(FlexAlign.Center)
+    }
+    .width('100%')
+    .padding(12)
+    .borderRadius(12)
+    .backgroundColor($r('sys.color.comp_background_primary'))
+    .margin({ bottom: index < this.recentPodcasts.length - 1 ? 8 : 0 })
+    .onClick(() => {
+      this.playPodcast(song);
+    })
   }
 }
 

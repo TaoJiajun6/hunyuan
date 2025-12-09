@@ -1,6 +1,7 @@
 import { http } from '@kit.NetworkKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { Logger } from 'lib_common';
+import { util } from '@kit.ArkTS';
 
 const TAG = '[PodcastService]';
 
@@ -25,7 +26,7 @@ export class PodcastConfig {
   // 5. 直连服务器IP（推荐，避免网关超时）：设置为服务器的公网/内网IP和端口
   //    例如：'http://9.165.4.87:8000' 或 'http://192.168.1.100:8000'
   //    注意：确保服务器防火墙允许8000端口访问
-  static readonly API_BASE_URL: string = 'http://43.136.111.208:8000/'; // 请替换为实际的服务器IP地址
+  static readonly API_BASE_URL: string = 'http://123.207.14.127:8000/'; // 请替换为实际的服务器IP地址
   static readonly API_TIMEOUT: number = 600000; // 10分钟超时（考虑大文件上传和播客生成时间）
 
   
@@ -142,6 +143,17 @@ export interface AnalyzeTextResult {
 }
 
 /**
+ * 音频片段
+ */
+export interface AudioSegment {
+  segmentIndex: number;
+  roleName: string | null;
+  audioBase64: string;
+  isFinal: boolean;
+  sampleRate: number;
+}
+
+/**
  * 进度状态
  */
 export interface ProgressStatus {
@@ -154,6 +166,32 @@ export interface ProgressStatus {
   ts?: number;
   // 新增：云存储URL（生成完成时返回）
   audio_url?: string;
+}
+
+/**
+ * SSE事件数据
+ */
+interface SSEEventData {
+  type: string;
+  job_id?: string;
+  status?: string;
+  percent?: number;
+  message?: string;
+  segment_index?: number;
+  role_name?: string;
+  audio_base64?: string;
+  is_final?: boolean;
+  sample_rate?: number;
+  script?: string;
+  total_segments?: number;
+}
+
+/**
+ * HTTP数据接收进度
+ */
+interface HttpProgressData {
+  receiveSize: number;
+  totalSize: number;
 }
 
 /**
@@ -1116,6 +1154,637 @@ export class PodcastService {
           success: false,
           message: '播客生成失败',
           error: errorMessage,
+        });
+      }
+    });
+  }
+
+  /**
+   * 流式生成主题深度播客（边生成边播放）
+   * 使用 requestInStream() 方法实现真正的流式读取
+   * @param request 播客生成请求
+   * @param onProgress 进度回调
+   * @param onAudioSegment 音频片段回调
+   * @param onScript 脚本回调
+   * @returns Promise<void>
+   */
+  async generateDeepPodcastStreaming(
+    request: DeepPodcastRequest,
+    onProgress?: (progress: ProgressStatus) => void,
+    onAudioSegment?: (segment: AudioSegment) => void,
+    onScript?: (script: string) => void
+  ): Promise<ApiResponse<void>> {
+    return new Promise<ApiResponse<void>>((resolve) => {
+      try {
+        // 验证请求参数
+        if (!request.topic || request.topic.trim().length === 0) {
+          resolve({
+            success: false,
+            message: '播客主题不能为空',
+            error: '主题为空',
+          });
+          return;
+        }
+
+        const numCharacters = request.num_characters || 2;
+        if (numCharacters < 1 || numCharacters > 3) {
+          resolve({
+            success: false,
+            message: '角色数量必须在1-3个之间',
+            error: '角色数量无效',
+          });
+          return;
+        }
+
+        const depthLevel = request.depth_level || '深度';
+        if (!['深度', '中等', '浅层'].includes(depthLevel)) {
+          resolve({
+            success: false,
+            message: '深度级别必须是：深度、中等或浅层',
+            error: '深度级别无效',
+          });
+          return;
+        }
+
+        // 验证音色数据
+        const roleVoiceUrls = request.role_voice_urls;
+        const roleNames = ['角色A', '角色B', '角色C'].slice(0, numCharacters);
+        
+        if (!roleVoiceUrls || Object.keys(roleVoiceUrls).length !== numCharacters) {
+          resolve({
+            success: false,
+            message: `角色音色URL数量必须与角色数量(${numCharacters})一致`,
+            error: '角色音色URL数量不匹配',
+          });
+          return;
+        }
+
+        for (const roleName of roleNames) {
+          if (!roleVoiceUrls[roleName]) {
+            resolve({
+              success: false,
+              message: `缺少角色 ${roleName} 的音色文件URL`,
+              error: '角色音色URL缺失',
+            });
+            return;
+          }
+        }
+
+        const requestBody = new DeepPodcastRequestBody(
+          request.topic,
+          undefined, // role_voices已废弃
+          roleVoiceUrls, // 使用云存储URL
+          numCharacters,
+          depthLevel,
+          request.silence_interval || 300
+        );
+
+        Logger.info(TAG, `开始流式生成主题深度播客: 主题=${request.topic}`);
+
+        const httpRequest = http.createHttp();
+        const requestData = JSON.stringify(requestBody);
+        
+        const apiUrl = PodcastConfig.USE_CLOUD_FUNCTION
+          ? this.baseUrl
+          : this.buildApiUrl('/api/v1/podcast/deep/stream');
+
+        Logger.info(TAG, `流式请求URL: ${apiUrl}`);
+
+        // 用于累积接收到的数据（类级别变量，在闭包中使用）
+        let sseBuffer = '';
+
+        // 订阅响应头事件
+        httpRequest.on('headersReceive', (header: Object) => {
+          Logger.info(TAG, `收到响应头: ${JSON.stringify(header)}`);
+        });
+
+        // 订阅数据接收事件（流式接收）
+        httpRequest.on('dataReceive', (data: ArrayBuffer) => {
+          try {
+            // 将 ArrayBuffer 转换为字符串
+            const textDecoder = util.TextDecoder.create('utf-8', { ignoreBOM: true });
+            const uint8Array = new Uint8Array(data);
+            const chunk = textDecoder.decodeToString(uint8Array, { stream: true });
+            
+            // 累积数据到缓冲区
+            sseBuffer += chunk;
+            
+            // 处理缓冲区中的完整行（SSE格式），返回剩余的不完整数据
+            sseBuffer = this.processSSEChunk(sseBuffer, onProgress, onAudioSegment, onScript, false);
+          } catch (error) {
+            Logger.error(TAG, `处理数据块失败: ${JSON.stringify(error)}`);
+          }
+        });
+
+        // 订阅数据接收进度事件
+        httpRequest.on('dataReceiveProgress', (progress: HttpProgressData) => {
+          Logger.debug(TAG, `数据接收进度: ${progress.receiveSize}/${progress.totalSize}`);
+        });
+
+        // 订阅数据接收结束事件
+        httpRequest.on('dataEnd', () => {
+          Logger.info(TAG, '数据接收完成');
+          
+          // 处理剩余的缓冲区数据
+          if (sseBuffer.trim().length > 0) {
+            this.processSSEChunk(sseBuffer, onProgress, onAudioSegment, onScript, true);
+            sseBuffer = '';
+          }
+          
+          // 清理事件监听
+          httpRequest.off('headersReceive');
+          httpRequest.off('dataReceive');
+          httpRequest.off('dataReceiveProgress');
+          httpRequest.off('dataEnd');
+          
+          httpRequest.destroy();
+          
+          resolve({
+            success: true,
+            message: '流式生成完成',
+          });
+        });
+
+        // 发起流式请求
+        httpRequest.requestInStream(apiUrl, {
+          method: http.RequestMethod.POST,
+          header: {
+            'Content-Type': 'application/json',
+            'Accept': 'text/event-stream',
+          },
+          extraData: requestData,
+          connectTimeout: PodcastConfig.API_TIMEOUT,
+          readTimeout: PodcastConfig.API_TIMEOUT,
+        }).then(() => {
+          Logger.info(TAG, '流式请求发起成功');
+        }).catch((err: BusinessError) => {
+          Logger.error(TAG, `流式请求失败: ${JSON.stringify(err)}`);
+          
+          // 清理事件监听
+          httpRequest.off('headersReceive');
+          httpRequest.off('dataReceive');
+          httpRequest.off('dataReceiveProgress');
+          httpRequest.off('dataEnd');
+          
+          httpRequest.destroy();
+          
+          resolve({
+            success: false,
+            message: '流式生成失败',
+            error: err.message || String(err),
+          });
+        });
+
+      } catch (error) {
+        Logger.error(TAG, `流式生成异常: ${JSON.stringify(error)}`);
+        resolve({
+          success: false,
+          message: '播客生成失败',
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    });
+  }
+
+  /**
+   * 处理SSE数据块（流式处理）
+   * @param buffer 数据缓冲区
+   * @param onProgress 进度回调
+   * @param onAudioSegment 音频片段回调
+   * @param onScript 脚本回调
+   * @param isFinal 是否为最后一块数据
+   * @returns 剩余的不完整数据（需要保留到下次处理）
+   */
+  private processSSEChunk(
+    buffer: string,
+    onProgress?: (progress: ProgressStatus) => void,
+    onAudioSegment?: (segment: AudioSegment) => void,
+    onScript?: (script: string) => void,
+    isFinal: boolean = false
+  ): string {
+    if (!buffer || buffer.length === 0) {
+      return '';
+    }
+
+    const lines = buffer.split('\n');
+    let remainingBuffer = '';
+    let processedLines = 0;
+
+    // 处理完整的行（保留最后一行，可能是未完成的数据）
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      
+      // 如果是最后一行且不是最终数据，保留到缓冲区
+      if (i === lines.length - 1 && !isFinal) {
+        // 检查是否是完整行（以换行符结尾，或者split后最后一个是空字符串）
+        // 如果最后一行不为空，说明可能是不完整的数据
+        if (line.length > 0) {
+          remainingBuffer = line;
+        }
+        break;
+      }
+
+      processedLines++;
+
+      // 处理空行（SSE事件分隔符）
+      if (line.trim() === '') {
+        continue;
+      }
+
+      // 处理 data: 开头的行
+      if (line.startsWith('data: ')) {
+        try {
+          const jsonStr = line.slice(6); // 移除 'data: ' 前缀
+          const eventData = JSON.parse(jsonStr) as SSEEventData;
+          this.handleSSEEvent(eventData, onProgress, onAudioSegment, onScript);
+        } catch (e) {
+          Logger.warn(TAG, `解析SSE数据失败: ${line.substring(0, 100)}..., 错误: ${JSON.stringify(e)}`);
+        }
+      } else if (line.startsWith(':')) {
+        // 忽略注释行（心跳等）
+        continue;
+      } else if (line.startsWith('event: ')) {
+        // 忽略事件类型行
+        continue;
+      } else if (line.startsWith('id: ')) {
+        // 忽略事件ID行
+        continue;
+      } else {
+        // 其他未知格式，记录日志但不中断处理
+        Logger.debug(TAG, `未知的SSE行格式: ${line.substring(0, 50)}`);
+      }
+    }
+
+    return remainingBuffer;
+  }
+
+
+  /**
+   * 处理SSE事件
+   */
+  private handleSSEEvent(
+    eventData: SSEEventData,
+    onProgress?: (progress: ProgressStatus) => void,
+    onAudioSegment?: (segment: AudioSegment) => void,
+    onScript?: (script: string) => void
+  ): void {
+    switch (eventData.type) {
+      case 'progress':
+        if (onProgress) {
+          onProgress({
+            job_id: eventData.job_id || '',
+            phase: eventData.status || 'processing',
+            percent: eventData.percent || 0,
+            message: eventData.message || '',
+            done: eventData.status === 'completed' || eventData.status === 'failed',
+            error: eventData.status === 'failed' ? eventData.message : undefined,
+          } as ProgressStatus);
+        }
+        break;
+
+      case 'audio_segment':
+        if (onAudioSegment) {
+          onAudioSegment({
+            segmentIndex: eventData.segment_index || 0,
+            roleName: eventData.role_name || null,
+            audioBase64: eventData.audio_base64 || '',
+            isFinal: eventData.is_final || false,
+            sampleRate: eventData.sample_rate || 22050,
+          });
+        }
+        break;
+
+      case 'script':
+        if (onScript) {
+          onScript(eventData.script || '');
+        }
+        break;
+
+      case 'done':
+        Logger.info(TAG, `流式生成完成，共 ${eventData.total_segments || 0} 个片段`);
+        break;
+
+      case 'error':
+        Logger.error(TAG, `流式生成错误: ${eventData.message || '未知错误'}`);
+        break;
+
+      default:
+        Logger.debug(TAG, `未知的SSE事件类型: ${eventData.type}`);
+    }
+  }
+
+  /**
+   * 流式生成多角色互动播客（边生成边播放）
+   * @param request 播客生成请求
+   * @param onProgress 进度回调
+   * @param onAudioSegment 音频片段回调
+   * @param onScript 脚本回调
+   * @returns Promise<void>
+   */
+  async generateMultiRolePodcastStreaming(
+    request: MultiRoleRequest,
+    onProgress?: (progress: ProgressStatus) => void,
+    onAudioSegment?: (segment: AudioSegment) => void,
+    onScript?: (script: string) => void
+  ): Promise<ApiResponse<void>> {
+    return new Promise<ApiResponse<void>>((resolve) => {
+      try {
+        // 验证请求参数
+        const hasText = request.text && request.text.trim().length > 0;
+        const hasTextFile = request.text_file_url && (
+          Array.isArray(request.text_file_url) 
+            ? request.text_file_url.length > 0 && request.text_file_url.some(url => url && url.trim().length > 0)
+            : request.text_file_url.trim().length > 0
+        );
+        const hasInputUrl = request.input_url && request.input_url.trim().length > 0;
+        
+        if (!hasText && !hasTextFile && !hasInputUrl) {
+          resolve({
+            success: false,
+            message: '播客文本不能为空，请上传文本文件、输入文本或提供输入URL',
+            error: '文本内容为空',
+          });
+          return;
+        }
+
+        const roleVoiceUrls = request.role_voice_urls;
+        if (!roleVoiceUrls || Object.keys(roleVoiceUrls).length === 0) {
+          resolve({
+            success: false,
+            message: '至少需要一个角色的音色文件URL',
+            error: '角色音色URL为空',
+          });
+          return;
+        }
+
+        const requestBody = new MultiRoleRequestBody(
+          request.text,
+          request.text_file_url,
+          request.input_type,
+          request.input_url,
+          request.instruction,
+          undefined,
+          roleVoiceUrls,
+          request.silence_interval || 300,
+          request.podcast_name,
+          request.topic,
+          request.character_1_name,
+          request.character_1_personality,
+          request.character_1_speaking_style,
+          request.character_2_name,
+          request.character_2_personality,
+          request.character_2_speaking_style,
+          request.character_3_name,
+          request.character_3_personality,
+          request.character_3_speaking_style,
+          request.scene_types,
+          request.category,
+          request.job_id
+        );
+
+        Logger.info(TAG, `开始流式生成多角色播客: 角色数=${Object.keys(roleVoiceUrls).length}`);
+
+        const httpRequest = http.createHttp();
+        const requestData = JSON.stringify(requestBody);
+        
+        const apiUrl = PodcastConfig.USE_CLOUD_FUNCTION
+          ? this.baseUrl
+          : this.buildApiUrl('/api/v1/podcast/multi_role/stream');
+
+        Logger.info(TAG, `流式请求URL: ${apiUrl}`);
+
+        let sseBuffer = '';
+
+        httpRequest.on('headersReceive', (header: Object) => {
+          Logger.info(TAG, `收到响应头: ${JSON.stringify(header)}`);
+        });
+
+        httpRequest.on('dataReceive', (data: ArrayBuffer) => {
+          try {
+            const textDecoder = util.TextDecoder.create('utf-8', { ignoreBOM: true });
+            const uint8Array = new Uint8Array(data);
+            const chunk = textDecoder.decodeToString(uint8Array, { stream: true });
+            sseBuffer += chunk;
+            sseBuffer = this.processSSEChunk(sseBuffer, onProgress, onAudioSegment, onScript, false);
+          } catch (error) {
+            Logger.error(TAG, `处理数据块失败: ${JSON.stringify(error)}`);
+          }
+        });
+
+        httpRequest.on('dataReceiveProgress', (progress: HttpProgressData) => {
+          Logger.debug(TAG, `数据接收进度: ${progress.receiveSize}/${progress.totalSize}`);
+        });
+
+        httpRequest.on('dataEnd', () => {
+          Logger.info(TAG, '数据接收完成');
+          
+          if (sseBuffer.trim().length > 0) {
+            this.processSSEChunk(sseBuffer, onProgress, onAudioSegment, onScript, true);
+            sseBuffer = '';
+          }
+          
+          httpRequest.off('headersReceive');
+          httpRequest.off('dataReceive');
+          httpRequest.off('dataReceiveProgress');
+          httpRequest.off('dataEnd');
+          
+          httpRequest.destroy();
+          
+          resolve({
+            success: true,
+            message: '流式生成完成',
+          });
+        });
+
+        httpRequest.requestInStream(apiUrl, {
+          method: http.RequestMethod.POST,
+          header: {
+            'Content-Type': 'application/json',
+            'Accept': 'text/event-stream',
+          },
+          extraData: requestData,
+          connectTimeout: PodcastConfig.API_TIMEOUT,
+          readTimeout: PodcastConfig.API_TIMEOUT,
+        }).then(() => {
+          Logger.info(TAG, '流式请求发起成功');
+        }).catch((err: BusinessError) => {
+          Logger.error(TAG, `流式请求失败: ${JSON.stringify(err)}`);
+          
+          httpRequest.off('headersReceive');
+          httpRequest.off('dataReceive');
+          httpRequest.off('dataReceiveProgress');
+          httpRequest.off('dataEnd');
+          
+          httpRequest.destroy();
+          
+          resolve({
+            success: false,
+            message: '流式生成失败',
+            error: err.message || String(err),
+          });
+        });
+
+      } catch (error) {
+        Logger.error(TAG, `流式生成异常: ${JSON.stringify(error)}`);
+        resolve({
+          success: false,
+          message: '播客生成失败',
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    });
+  }
+
+  /**
+   * 流式生成自定义角色播客（边生成边播放）
+   * @param request 播客生成请求
+   * @param onProgress 进度回调
+   * @param onAudioSegment 音频片段回调
+   * @param onScript 脚本回调
+   * @returns Promise<void>
+   */
+  async generateCharacterPodcastStreaming(
+    request: CharacterRequest,
+    onProgress?: (progress: ProgressStatus) => void,
+    onAudioSegment?: (segment: AudioSegment) => void,
+    onScript?: (script: string) => void
+  ): Promise<ApiResponse<void>> {
+    return new Promise<ApiResponse<void>>((resolve) => {
+      try {
+        // 验证请求参数
+        if (!request.characters || request.characters.length < 2) {
+          resolve({
+            success: false,
+            message: '至少需要2个角色',
+            error: '角色数量不足',
+          });
+          return;
+        }
+
+        if (request.characters.length > 4) {
+          resolve({
+            success: false,
+            message: '最多支持4个角色',
+            error: '角色数量过多',
+          });
+          return;
+        }
+
+        if (!request.text || request.text.trim().length === 0) {
+          resolve({
+            success: false,
+            message: '文本素材不能为空',
+            error: '文本素材缺失',
+          });
+          return;
+        }
+
+        for (const char of request.characters) {
+          if (!char.name || !char.voice_url) {
+            resolve({
+              success: false,
+              message: `角色 ${char.name || '未知'} 的信息不完整`,
+              error: '角色信息不完整',
+            });
+            return;
+          }
+        }
+
+        const requestBody = new CharacterRequestBody(
+          request.characters,
+          request.text,
+          request.topic,
+          request.silence_interval || 300
+        );
+
+        Logger.info(TAG, `开始流式生成自定义角色播客: 角色数=${request.characters.length}`);
+
+        const httpRequest = http.createHttp();
+        const requestData = JSON.stringify(requestBody);
+        
+        const apiUrl = PodcastConfig.USE_CLOUD_FUNCTION
+          ? this.baseUrl
+          : this.buildApiUrl('/api/v1/podcast/character/stream');
+
+        Logger.info(TAG, `流式请求URL: ${apiUrl}`);
+
+        let sseBuffer = '';
+
+        httpRequest.on('headersReceive', (header: Object) => {
+          Logger.info(TAG, `收到响应头: ${JSON.stringify(header)}`);
+        });
+
+        httpRequest.on('dataReceive', (data: ArrayBuffer) => {
+          try {
+            const textDecoder = util.TextDecoder.create('utf-8', { ignoreBOM: true });
+            const uint8Array = new Uint8Array(data);
+            const chunk = textDecoder.decodeToString(uint8Array, { stream: true });
+            sseBuffer += chunk;
+            sseBuffer = this.processSSEChunk(sseBuffer, onProgress, onAudioSegment, onScript, false);
+          } catch (error) {
+            Logger.error(TAG, `处理数据块失败: ${JSON.stringify(error)}`);
+          }
+        });
+
+        httpRequest.on('dataReceiveProgress', (progress: HttpProgressData) => {
+          Logger.debug(TAG, `数据接收进度: ${progress.receiveSize}/${progress.totalSize}`);
+        });
+
+        httpRequest.on('dataEnd', () => {
+          Logger.info(TAG, '数据接收完成');
+          
+          if (sseBuffer.trim().length > 0) {
+            this.processSSEChunk(sseBuffer, onProgress, onAudioSegment, onScript, true);
+            sseBuffer = '';
+          }
+          
+          httpRequest.off('headersReceive');
+          httpRequest.off('dataReceive');
+          httpRequest.off('dataReceiveProgress');
+          httpRequest.off('dataEnd');
+          
+          httpRequest.destroy();
+          
+          resolve({
+            success: true,
+            message: '流式生成完成',
+          });
+        });
+
+        httpRequest.requestInStream(apiUrl, {
+          method: http.RequestMethod.POST,
+          header: {
+            'Content-Type': 'application/json',
+            'Accept': 'text/event-stream',
+          },
+          extraData: requestData,
+          connectTimeout: PodcastConfig.API_TIMEOUT,
+          readTimeout: PodcastConfig.API_TIMEOUT,
+        }).then(() => {
+          Logger.info(TAG, '流式请求发起成功');
+        }).catch((err: BusinessError) => {
+          Logger.error(TAG, `流式请求失败: ${JSON.stringify(err)}`);
+          
+          httpRequest.off('headersReceive');
+          httpRequest.off('dataReceive');
+          httpRequest.off('dataReceiveProgress');
+          httpRequest.off('dataEnd');
+          
+          httpRequest.destroy();
+          
+          resolve({
+            success: false,
+            message: '流式生成失败',
+            error: err.message || String(err),
+          });
+        });
+
+      } catch (error) {
+        Logger.error(TAG, `流式生成异常: ${JSON.stringify(error)}`);
+        resolve({
+          success: false,
+          message: '播客生成失败',
+          error: error instanceof Error ? error.message : String(error),
         });
       }
     });
