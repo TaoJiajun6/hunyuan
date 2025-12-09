@@ -631,6 +631,33 @@ def get_generator() -> PodcastGenerator:
 
 # 请求日志中间件
 @app.middleware("http")
+async def handle_streaming_errors(request: Request, call_next):
+    """处理流式响应中的客户端断开连接错误"""
+    try:
+        response = await call_next(request)
+        return response
+    except RuntimeError as e:
+        error_msg = str(e)
+        # 忽略流式响应中的客户端断开连接错误
+        if "Unexpected message received: http.request" in error_msg:
+            logger.debug(f"客户端断开连接（流式响应中间件）: {request.url}")
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "success": False,
+                    "message": "客户端断开连接",
+                    "error": "连接已断开"
+                }
+            )
+        # 其他运行时错误继续抛出
+        raise
+    except Exception as e:
+        # 捕获其他可能的异常
+        logger.error(f"中间件捕获异常: {str(e)}", exc_info=True)
+        raise
+
+
+@app.middleware("http")
 async def log_requests(request: Request, call_next):
     """记录请求日志"""
     start_time = time.time()
@@ -1450,6 +1477,35 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             "message": "请求参数验证失败",
             "error": "请求参数不符合API要求",
             "details": error_details
+        }
+    )
+
+
+@app.exception_handler(RuntimeError)
+async def runtime_error_handler(request: Request, exc: RuntimeError):
+    """处理运行时错误，特别是流式响应中的客户端断开连接错误"""
+    error_msg = str(exc)
+    
+    # 忽略流式响应中的客户端断开连接错误
+    if "Unexpected message received: http.request" in error_msg:
+        logger.debug(f"客户端断开连接（流式响应）: {request.url}")
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": False,
+                "message": "客户端断开连接",
+                "error": "连接已断开"
+            }
+        )
+    
+    # 其他运行时错误正常处理
+    logger.error(f"运行时错误: {error_msg}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "success": False,
+            "message": "服务器内部错误",
+            "error": error_msg
         }
     )
 
