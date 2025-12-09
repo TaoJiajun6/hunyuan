@@ -326,7 +326,7 @@ class SoulXTTS:
         verbose: bool = False
     ):
         """
-        流式生成多角色播客音频（生成器）
+        流式生成多角色播客音频（逐段yield音频片段）
         
         Args:
             speakers: 说话人信息字典，格式为 {角色名: {"prompt_audio": 路径, "prompt_text": 文本}}
@@ -335,11 +335,11 @@ class SoulXTTS:
             verbose: 是否输出详细信息
         
         Yields:
-            (segment_index, role_name, audio_segment, is_final): 
-                - segment_index: 片段索引（从0开始）
-                - role_name: 角色名（静音片段为None）
-                - audio_segment: 音频张量 (1, samples)，采样率24000
-                - is_final: 是否为最后一个片段
+            Tuple[int, torch.Tensor, bool, str]: (segment_index, audio_tensor, is_silence, role_name)
+                - segment_index: 片段索引
+                - audio_tensor: 音频张量 (1, samples)
+                - is_silence: 是否为静音片段
+                - role_name: 角色名称（静音片段为None）
         """
         # 确保模型已加载
         self._ensure_model_loaded()
@@ -388,27 +388,49 @@ class SoulXTTS:
         sr = 24000
         silence_interval_ms = silence_interval if silence_interval is not None else 400
         
-        # 获取模型内部数据，以便逐段生成
+        # 使用自定义的流式生成方法
+        yield from self._stream_audio_generation(data, dialogues, sr, silence_interval_ms, verbose)
+    
+    def _stream_audio_generation(
+        self,
+        data: Dict,
+        dialogues: List[tuple],
+        sr: int,
+        silence_interval_ms: int,
+        verbose: bool
+    ):
+        """
+        内部方法：流式生成音频
+        
+        Yields:
+            Tuple[int, torch.Tensor, bool, str]: (segment_index, audio_tensor, is_silence, role_name)
+        """
+        import time
         from itertools import chain
         from transformers import DynamicCache
         from soulxpodcast.config import AutoPretrainedConfig
         
+        # 提取数据
         prompt_mels_for_llm = data['prompt_mels_for_llm']
         prompt_mels_lens_for_llm = data['prompt_mels_lens_for_llm']
         prompt_text_tokens_for_llm = data['prompt_text_tokens_for_llm']
         text_tokens_for_llm = data['text_tokens_for_llm']
         prompt_mels_for_flow_ori = data['prompt_mels_for_flow_ori']
         spk_emb_for_flow = data['spk_emb_for_flow']
-        sampling_params = data['sampling_params']
         spk_ids = data['spk_ids']
+        sampling_params = data.get('sampling_params', None)
         use_dialect_prompt = data.get('use_dialect_prompt', False)
         dialect_prompt_text_tokens_for_llm = data.get('dialect_prompt_text_tokens_for_llm', None)
         dialect_prefix = data.get('dialect_prefix', None)
         
-        # 准备 prompt inputs（与 forward_longform 相同）
+        # 如果没有提供sampling_params，使用默认值
+        if sampling_params is None:
+            from soulxpodcast.config import SamplingParams
+            sampling_params = SamplingParams()
+        
         prompt_size, turn_size = len(prompt_mels_for_llm), len(text_tokens_for_llm)
         
-        # Audio tokenization
+        # Audio tokenization (与forward_longform相同)
         prompt_speech_tokens_ori, prompt_speech_tokens_lens_ori = self.model.audio_tokenizer.quantize(
             prompt_mels_for_llm.cuda(), prompt_mels_lens_for_llm.cuda()
         )
@@ -447,20 +469,19 @@ class SoulXTTS:
                 prompt_inputs.append(dialect_prefix[i+1]+dialect_prompt_text_tokens_for_llm[i] + prompt_input)
                 history_inputs.append(dialect_prefix[i+1]+dialect_prompt_text_tokens_for_llm[i] + prompt_input)
             else:
-                prompt_inputs.append(prompt_text_tokens_for_llm[i] + speech_tokens_i )
-                history_inputs.append(prompt_text_tokens_for_llm[i] + speech_tokens_i )
+                prompt_inputs.append(prompt_text_tokens_for_llm[i] + speech_tokens_i)
+                history_inputs.append(prompt_text_tokens_for_llm[i] + speech_tokens_i)
         
-        # LLM generation - 逐段生成并 yield
+        # LLM generation (流式)
         inputs = list(chain.from_iterable(prompt_inputs))
         cache_config = AutoPretrainedConfig().from_dataclass(self.model.llm.config.hf_config)
         past_key_values = DynamicCache(config=cache_config)
         valid_turn_size = prompt_size
         
-        # 反向映射：从 spk_id 到角色名
-        spk_id_to_role = {v: k for k, v in role_mapping.items()}
+        segment_index = 0
         
         for i in range(turn_size):
-            # 检查是否需要重置缓存
+            # Cache management (与forward_longform相同)
             if valid_turn_size > self.model.config.max_turn_size or len(inputs)>self.model.config.turn_tokens_threshold:
                 assert self.model.config.max_turn_size >= self.model.config.prompt_context + self.model.config.history_context, "Invalid Long history size setting"
                 prompt_text_bound = max(self.model.config.prompt_context, len(history_inputs)-self.model.config.history_text_context-self.model.config.history_context)
@@ -474,11 +495,12 @@ class SoulXTTS:
             valid_turn_size += 1
             
             inputs.extend(text_tokens_for_llm[i])
+            start_time = time.time()
             llm_outputs = self.model.llm.generate(inputs, sampling_params, past_key_values=past_key_values)
             
             inputs.extend(llm_outputs['token_ids'])
             prompt_inputs.append(text_tokens_for_llm[i]+llm_outputs['token_ids'])
-            history_inputs.append(text_tokens_for_llm[i][:-1])  # remove the <|audio_start|>
+            history_inputs.append(text_tokens_for_llm[i][:-1])
             
             # Prepare Flow inputs
             turn_spk = spk_ids[i]
@@ -505,24 +527,30 @@ class SoulXTTS:
             mel = generated_mels[:, :, prompt_mels_lens[0].item():generated_mels_lens[0].item()]
             wav, _ = self.model.hift(speech_feat=mel)
             
-            # 处理音频格式
+            # 处理音频片段
             if wav.dim() == 1:
                 wav = wav.unsqueeze(0)
             elif wav.dim() > 1 and wav.shape[0] > 1:
                 wav = torch.mean(wav, dim=0, keepdim=True)
+            
             wav = wav.clone()
+            device = wav.device
             
             # 获取角色名
-            spk_id = f"S{turn_spk + 1}"
-            role_name = spk_id_to_role.get(spk_id, f"角色{turn_spk + 1}")
+            role_name = dialogues[i][0] if i < len(dialogues) else None
             
-            # Yield 音频片段
-            is_final = (i == turn_size - 1)
-            yield i, role_name, wav, is_final
+            # Yield音频片段
+            yield (segment_index, wav, False, role_name)
+            segment_index += 1
             
             # 如果不是最后一个片段，添加静音间隔
-            if not is_final:
+            if i < turn_size - 1:
                 silence_samples = int(sr * silence_interval_ms / 1000.0)
-                silence = torch.zeros(1, silence_samples, device=wav.device)
-                yield i, None, silence, False  # None 表示这是静音片段
+                silence = torch.zeros(1, silence_samples, device=device)
+                yield (segment_index, silence, True, None)
+                segment_index += 1
+            
+            if verbose:
+                elapsed = time.time() - start_time
+                print(f"[INFO] 已生成第 {i+1}/{turn_size} 段对话，耗时: {elapsed:.2f}秒")
 

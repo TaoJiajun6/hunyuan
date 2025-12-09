@@ -1,15 +1,12 @@
 import { WindowModel } from 'lib_common';
 import { NavHeaderBar } from 'lib_widget';
-import { podcastService, DeepPodcastRequest, PodcastResult, ProgressStatus, AudioSegment } from 'lib_api';
+import { podcastService, DeepPodcastRequest, PodcastResult, ProgressStatus } from 'lib_api';
 import { FileUtils } from '../../utils/FileUtils';
 import { promptAction, AppStorageV2 } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { MediaService, SongItem } from 'module_musicplay';
 import { CloudStorageMusicUtils, CloudAudioFile } from '../../common/CloudStorageMusicUtils';
 import { Logger } from 'lib_common';
-import { media } from '@kit.MediaKit';
-import fs from '@ohos.file.fs';
-import { BusinessError } from '@kit.BasicServicesKit';
 
 // Select 选项类型定义
 interface SelectOption {
@@ -36,12 +33,6 @@ export struct PodcastDeepPage {
   private progressAnimationTimer: number = 0; // 进度条动画定时器
   @Local savedScript: string = ''; // 保存的对话内容
   @Local windowModel: WindowModel = AppStorageV2.connect(WindowModel, () => new WindowModel())!;
-  
-  // 流式播放相关
-  private audioSegmentQueue: AudioSegment[] = [];
-  private isPlayingStreaming: boolean = false;
-  private currentStreamingAudio?: media.AVPlayer;
-  private streamingTempFiles: string[] = []; // 临时文件列表，用于清理
 
   readonly depthLevels: string[] = ['深度', '中等', '浅层'];
   readonly roleNames: string[] = ['角色A', '角色B', '角色C'];
@@ -271,173 +262,34 @@ export struct PodcastDeepPage {
         request.category = this.category; // 播客分类
       }
 
-      // 使用流式生成（边生成边播放）
-      const response = await podcastService.generateDeepPodcastStreaming(
-        request,
-        onProgress,
-        this.onAudioSegment.bind(this),
-        this.onScript.bind(this)
-      );
+      const response = await podcastService.generateDeepPodcast(request, this.jobId, onProgress);
 
-      if (!response.success) {
-        this.isLoading = false;
+      if (response.success && response.data) {
+        // 保存 script，以便在播放时使用
+        if (response.data.script) {
+          this.savedScript = response.data.script;
+        }
+        // 确保进度条到达100%
+        this.targetProgress = 100;
+        this.startProgressAnimation();
+        // 等待一小段时间确保文件已上传到云存储，然后获取最新音频并播放
+        setTimeout(() => {
+          this.getLatestAudioAndPlay(response.data!.audio_url);
+          this.savedScript = '';
+        }, 1000);
+      } else {
         promptAction.showToast({
           message: response.error || response.message || '生成失败',
           duration: 3000
         });
       }
-      // 流式生成会在回调中处理，这里不需要额外处理
     } catch (error) {
-      this.isLoading = false;
       promptAction.showToast({
         message: `生成失败: ${error}`,
         duration: 3000
       });
-    }
-  }
-
-  /**
-   * 音频片段回调
-   */
-  private async onAudioSegment(segment: AudioSegment): Promise<void> {
-    // 将音频片段加入队列
-    this.audioSegmentQueue.push(segment);
-    
-    // 如果还没有开始播放，开始播放第一个片段
-    if (!this.isPlayingStreaming && this.audioSegmentQueue.length > 0) {
-      this.isPlayingStreaming = true;
-      this.isLoading = false; // 开始播放后，隐藏加载状态
-      await this.playNextAudioSegment();
-    }
-  }
-
-  /**
-   * 脚本回调
-   */
-  private onScript(script: string): void {
-    this.savedScript = script;
-  }
-
-  /**
-   * 播放下一个音频片段
-   */
-  private async playNextAudioSegment(): Promise<void> {
-    if (this.audioSegmentQueue.length === 0) {
-      // 队列为空，等待更多片段
-      // 如果最后一个片段已经播放完成，停止播放
-      if (this.currentStreamingAudio) {
-        this.isPlayingStreaming = false;
-        this.currentStreamingAudio = undefined;
-      }
-      return;
-    }
-
-    const segment: AudioSegment = this.audioSegmentQueue.shift()!;
-    
-    try {
-      // 将base64转换为临时文件
-      const tempFilePath = await this.saveBase64ToTempFile(segment.audioBase64);
-      this.streamingTempFiles.push(tempFilePath); // 记录临时文件，稍后清理
-      
-      // 创建新的AVPlayer播放片段
-      const avPlayer = await media.createAVPlayer();
-      
-      avPlayer.url = tempFilePath;
-      
-      // 监听播放完成事件
-      avPlayer.on('stateChange', async (state: string) => {
-        if (state === 'idle' || state === 'released') {
-          // 播放完成，播放下一段
-          await this.cleanupAudioPlayer(avPlayer, tempFilePath);
-          await this.playNextAudioSegment();
-        }
-      });
-
-      // 监听播放结束
-      avPlayer.on('endOfStream', async () => {
-        await this.cleanupAudioPlayer(avPlayer, tempFilePath);
-        await this.playNextAudioSegment();
-      });
-
-      // 监听错误
-      avPlayer.on('error', async (error: BusinessError) => {
-        Logger.error('PodcastDeepPage', `播放音频片段失败: ${JSON.stringify(error)}`);
-        await this.cleanupAudioPlayer(avPlayer, tempFilePath);
-        // 继续播放下一段
-        await this.playNextAudioSegment();
-      });
-
-      // 开始播放
-      await avPlayer.prepare();
-      await avPlayer.play();
-      
-      this.currentStreamingAudio = avPlayer;
-      
-      Logger.info('PodcastDeepPage', `开始播放音频片段 ${segment.segmentIndex}, 角色: ${segment.roleName || '静音'}`);
-      
-    } catch (error) {
-      Logger.error('PodcastDeepPage', `播放音频片段失败: ${error}`);
-      // 继续播放下一段
-      await this.playNextAudioSegment();
-    }
-  }
-
-  /**
-   * 清理音频播放器和临时文件
-   */
-  private async cleanupAudioPlayer(avPlayer: media.AVPlayer, tempFilePath: string): Promise<void> {
-    try {
-      // 释放播放器
-      if (avPlayer) {
-        avPlayer.release();
-      }
-      
-      // 删除临时文件（延迟删除，确保文件已关闭）
-      setTimeout(async () => {
-        try {
-          await fs.unlink(tempFilePath);
-          // 从临时文件列表中移除
-          const index = this.streamingTempFiles.indexOf(tempFilePath);
-          if (index > -1) {
-            this.streamingTempFiles.splice(index, 1);
-          }
-        } catch (e) {
-          Logger.warn('PodcastDeepPage', `删除临时文件失败: ${tempFilePath}, 错误: ${e}`);
-        }
-      }, 1000);
-    } catch (error) {
-      Logger.warn('PodcastDeepPage', `清理音频播放器失败: ${error}`);
-    }
-  }
-
-  /**
-   * 将base64音频保存为临时文件
-   */
-  private async saveBase64ToTempFile(base64: string): Promise<string> {
-    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-    const tempDir = context.filesDir;
-    const fileName = `audio_segment_${Date.now()}_${Math.random().toString(36).substring(7)}.wav`;
-    const filePath = `${tempDir}/${fileName}`;
-    
-    try {
-      // 使用 FileUtils 的 Base64 解码方法
-      const binaryData = FileUtils.base64ToUint8Array(base64);
-      
-      if (binaryData.length === 0) {
-        throw new Error('Base64解码失败，数据为空');
-      }
-      
-      // 写入文件
-      const file: fs.File = fs.openSync(filePath, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
-      fs.writeSync(file.fd, binaryData);
-      fs.closeSync(file.fd);
-      
-      Logger.info('PodcastDeepPage', `临时文件已保存: ${filePath}, 大小: ${binaryData.length} bytes`);
-      return filePath;
-    } catch (error) {
-      Logger.error('PodcastDeepPage', `保存临时文件失败: ${error}`);
-      const err = error instanceof Error ? error : new Error(String(error));
-      throw err;
+    } finally {
+      this.isLoading = false;
     }
   }
 

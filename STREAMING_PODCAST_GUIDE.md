@@ -1,276 +1,272 @@
-# 流式播客生成功能说明
+# 流式播客生成与播放指南
 
-## 功能概述
+## 概述
 
-实现了边生成边播放的流式播客生成功能，可以大幅减少用户等待时间。当第一段音频生成完成后，用户就可以开始播放，而不需要等待整个播客生成完成。
+本功能实现了**边生成边播放**的流式播客生成，大幅减少用户等待时间。系统会在生成每一段对话音频后立即推送给前端，前端可以实时解码并播放，实现"边加载边听"的流畅体验。
 
-## 实现原理
+## 技术实现
 
-1. **流式音频生成**：修改了 `soulx_tts.py`，添加了 `infer_multi_speaker_streaming` 方法，使用生成器逐段返回音频片段
-2. **流式处理**：在 `podcast_generator.py` 中添加了 `generate_from_text_streaming` 方法，支持流式处理音频片段
-3. **实时传输**：在 API 服务器中添加了 `/api/v1/podcast/deep/stream` 端点，使用 Server-Sent Events (SSE) 实时推送音频片段
+### 后端实现
 
-## API 端点
+1. **流式TTS生成** (`hunyuan_podcast/soulx_tts.py`)
+   - 新增 `infer_multi_speaker_streaming()` 方法
+   - 逐段生成音频并yield音频片段
+   - 支持静音间隔插入
 
-### POST `/api/v1/podcast/deep/stream`
+2. **流式播客生成器** (`hunyuan_podcast/podcast_generator.py`)
+   - 新增 `generate_from_text_streaming()` 方法
+   - 封装流式TTS调用，提供统一的流式接口
 
-流式生成主题深度播客，支持边生成边播放。
+3. **流式API端点** (`hunyuan_podcast/api_server.py`)
+   - 新增 `/api/v1/podcast/stream` 端点
+   - 使用 Server-Sent Events (SSE) 推送音频流
+   - 每个音频片段以base64编码的WAV格式推送
 
-### POST `/api/v1/podcast/multi_role/stream`
+### 前端实现
 
-流式生成多角色互动播客，支持边生成边播放。
+- 使用 Fetch API 的流式读取功能接收SSE数据
+- 使用 Web Audio API 解码和播放音频
+- 实现音频队列管理，确保连续播放
+- 支持暂停、继续、停止等控制功能
 
-### POST `/api/v1/podcast/character/stream`
+## API 使用说明
 
-流式生成自定义角色播客，支持边生成边播放。
+### 端点
 
-#### 请求参数
+```
+POST /api/v1/podcast/stream
+```
 
-**深度播客 (`/api/v1/podcast/deep/stream`):**
-- `topic`: 播客主题（必需）
-- `role_voice_urls`: 角色音色映射（必需）
-- `num_characters`: 角色数量（可选，默认2）
-- `depth_level`: 深度级别（可选，默认"深度"）
-- `silence_interval`: 静音间隔（可选，默认800ms）
-- `category`: 播客分类（可选）
-- `background_volume`: 背景音乐音量（可选，默认0.3）
-- `job_id`: 任务ID（可选）
+### 请求参数
 
-**多角色播客 (`/api/v1/podcast/multi_role/stream`):**
-- `text`: 播客文本（可选，如果使用text_file_url或input_url，此字段可为空）
-- `text_file_url`: 文本文件云存储URL（可选）
-- `input_url`: 输入URL（可选）
-- `input_type`: 输入类型（可选）
-- `role_voice_urls`: 角色音色映射（必需）
-- `silence_interval`: 静音间隔（可选，默认800ms）
-- `category`: 播客分类（可选）
-- `background_volume`: 背景音乐音量（可选，默认0.3）
-- `job_id`: 任务ID（可选）
+与 `/api/v1/podcast/multi_role` 接口相同：
 
-**自定义角色播客 (`/api/v1/podcast/character/stream`):**
-- `characters`: 角色列表（必需，至少2个）
-- `text`: 文本素材（必需）
-- `topic`: 播客主题（可选）
-- `silence_interval`: 静音间隔（可选，默认800ms）
-- `category`: 播客分类（可选）
-- `background_volume`: 背景音乐音量（可选，默认0.3）
-- `job_id`: 任务ID（可选）
-
-#### 响应格式
-
-使用 SSE 格式，每行以 `data: ` 开头，JSON 格式的数据。
-
-**事件类型：**
-
-1. **progress** - 进度更新
 ```json
 {
-  "type": "progress",
-  "status": "generating_audio",
-  "percent": 50,
-  "message": "已生成 15 个音频片段..."
+    "text": "播客文本内容（支持角色标记）",
+    "role_voice_urls": {
+        "角色A": "https://example.com/voice1.wav",
+        "角色B": "https://example.com/voice2.wav"
+    },
+    "silence_interval": 800,
+    "input_type": "文字",
+    "instruction": "可选指令"
 }
 ```
 
-2. **audio_segment** - 音频片段
+### 响应格式（SSE流）
+
+每个事件包含一个JSON对象：
+
 ```json
 {
-  "type": "audio_segment",
-  "segment_index": 0,
-  "role_name": "角色A",
-  "audio_base64": "base64编码的音频数据",
-  "is_final": false,
-  "sample_rate": 22050
+    "type": "audio_segment" | "progress" | "error" | "complete",
+    "segment_index": 0,
+    "audio_base64": "base64编码的WAV音频数据",
+    "is_silence": false,
+    "role_name": "角色A",
+    "progress": 50,
+    "message": "正在生成第3段对话...",
+    "error": "错误信息"
 }
 ```
 
-3. **script** - 生成的脚本
-```json
-{
-  "type": "script",
-  "script": "生成的完整脚本内容"
-}
-```
+### 事件类型说明
 
-4. **done** - 生成完成
-```json
-{
-  "type": "done",
-  "total_segments": 30
-}
-```
+- **audio_segment**: 音频片段数据
+  - `segment_index`: 片段索引
+  - `audio_base64`: base64编码的WAV音频（24000Hz采样率，单声道）
+  - `is_silence`: 是否为静音片段
+  - `role_name`: 角色名称（静音片段为null）
 
-5. **error** - 错误信息
-```json
-{
-  "type": "error",
-  "message": "错误描述"
-}
-```
+- **progress**: 进度更新
+  - `progress`: 进度百分比（0-100）
+  - `message`: 进度消息
 
-## 前端使用示例
+- **error**: 错误信息
+  - `error`: 错误描述
 
-### JavaScript (使用 fetch API)
+- **complete**: 生成完成
+  - `message`: 完成消息
+
+## 前端集成示例
+
+### 使用 Fetch API + Web Audio API
 
 ```javascript
-async function streamPodcast(requestData) {
-    const response = await fetch('/api/v1/podcast/deep/stream', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestData)
-    });
+// 初始化AudioContext
+const audioContext = new AudioContext();
+let audioQueue = [];
+let isPlaying = false;
+
+// 发送请求并处理流
+const response = await fetch('/api/v1/podcast/stream', {
+    method: 'POST',
+    headers: {
+        'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+        text: "播客文本",
+        role_voice_urls: {
+            "角色A": "https://...",
+            "角色B": "https://..."
+        }
+    })
+});
+
+const reader = response.body.getReader();
+const decoder = new TextDecoder();
+let buffer = '';
+
+while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
     
-    if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-    }
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
     
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    const audioQueue = []; // 音频片段队列
-    
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
-        
-        for (const line of lines) {
-            if (line.startsWith('data: ')) {
-                try {
-                    const data = JSON.parse(line.slice(6));
-                    
-                    switch (data.type) {
-                        case 'progress':
-                            // 更新进度条
-                            updateProgressBar(data.percent, data.message);
-                            break;
-                            
-                        case 'audio_segment':
-                            // 将音频片段加入播放队列
-                            audioQueue.push({
-                                base64: data.audio_base64,
-                                role: data.role_name,
-                                isFinal: data.is_final
-                            });
-                            
-                            // 如果播放器空闲，开始播放
-                            if (audioPlayer.paused) {
-                                playNextSegment();
-                            }
-                            break;
-                            
-                        case 'script':
-                            // 显示脚本
-                            displayScript(data.script);
-                            break;
-                            
-                        case 'done':
-                            // 生成完成
-                            console.log(`生成完成，共 ${data.total_segments} 个片段`);
-                            break;
-                            
-                        case 'error':
-                            // 错误处理
-                            console.error('生成错误:', data.message);
-                            break;
-                    }
-                } catch (e) {
-                    console.error('解析数据失败:', e);
+    for (const line of lines) {
+        if (line.startsWith('data: ')) {
+            const data = JSON.parse(line.slice(6));
+            
+            if (data.type === 'audio_segment') {
+                // 解码base64音频
+                const audioData = atob(data.audio_base64);
+                const arrayBuffer = new ArrayBuffer(audioData.length);
+                const view = new Uint8Array(arrayBuffer);
+                for (let i = 0; i < audioData.length; i++) {
+                    view[i] = audioData.charCodeAt(i);
+                }
+                
+                // 解码音频并添加到队列
+                const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                audioQueue.push(audioBuffer);
+                
+                // 如果当前没有播放，开始播放
+                if (!isPlaying) {
+                    playAudioQueue();
                 }
             }
         }
     }
 }
 
-// 播放音频片段
-function playNextSegment() {
-    if (audioQueue.length === 0) return;
-    
-    const segment = audioQueue.shift();
-    const audioData = base64ToArrayBuffer(segment.base64);
-    
-    // 创建音频对象并播放
-    const audio = new Audio();
-    audio.src = URL.createObjectURL(new Blob([audioData], { type: 'audio/wav' }));
-    
-    audio.onended = () => {
-        // 播放下一段
-        if (audioQueue.length > 0) {
-            playNextSegment();
-        }
-    };
-    
-    audio.play();
-}
-
-// Base64 转 ArrayBuffer
-function base64ToArrayBuffer(base64) {
-    const binaryString = atob(base64);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
+// 播放音频队列
+async function playAudioQueue() {
+    if (audioQueue.length === 0) {
+        isPlaying = false;
+        return;
     }
-    return bytes.buffer;
+    
+    isPlaying = true;
+    const audioBuffer = audioQueue.shift();
+    const source = audioContext.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(audioContext.destination);
+    source.onended = () => playAudioQueue();
+    source.start();
 }
 ```
+
+### 使用 EventSource（仅GET请求）
+
+如果后端支持GET请求，可以使用EventSource：
+
+```javascript
+const eventSource = new EventSource('/api/v1/podcast/stream?text=...');
+eventSource.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    // 处理数据...
+};
+```
+
+## 完整示例
+
+查看 `streaming_audio_example.html` 获取完整的前端示例代码，包括：
+- 表单输入
+- 流式数据接收
+- 音频队列管理
+- 播放控制（播放/暂停/停止）
+- 进度显示
+- 错误处理
 
 ## 优势
 
-1. **减少等待时间**：用户可以在第一段音频生成后立即开始播放，无需等待整个播客生成完成
-2. **更好的用户体验**：实时反馈生成进度，用户可以随时了解生成状态
-3. **资源利用**：可以边生成边播放，充分利用时间
+1. **大幅减少等待时间**
+   - 传统方式：需要等待完整音频生成（可能5-10分钟）
+   - 流式方式：第一段音频生成后即可开始播放（通常10-30秒）
+
+2. **更好的用户体验**
+   - 用户可以立即听到播客内容
+   - 实时反馈生成进度
+   - 支持暂停、继续等控制
+
+3. **资源利用优化**
+   - 音频片段可以边生成边播放边清理
+   - 减少内存占用
+   - 支持长时间播客生成
 
 ## 注意事项
 
-1. **背景音乐**：流式模式下已支持背景音乐混合，包括：
-   - Intro阶段（5秒）：背景音乐淡入，正常音量
-   - 对话阶段：背景音乐压低（ducking效果，降低到15%音量）
-   - Outro阶段（5秒）：背景音乐淡出
-2. **网络要求**：需要稳定的网络连接，确保音频片段能够及时传输
-3. **播放器实现**：前端需要实现音频片段队列管理，确保连续播放
+1. **音频格式**
+   - 采样率：24000Hz
+   - 声道：单声道
+   - 格式：WAV（PCM编码）
+   - 每个片段独立编码，需要前端拼接播放
 
-## 技术细节
+2. **网络要求**
+   - 需要稳定的网络连接
+   - 建议使用HTTPS
+   - 支持断线重连（需要前端实现）
 
-- 音频采样率：22050 Hz
-- 音频格式：WAV
-- 传输格式：Base64 编码的 WAV 数据
-- 传输协议：Server-Sent Events (SSE)
-- 编码方式：JSON
+3. **浏览器兼容性**
+   - 需要支持 Fetch API 和 Web Audio API
+   - 现代浏览器（Chrome、Firefox、Safari、Edge）均支持
 
-## 鸿蒙前端适配
+4. **性能考虑**
+   - 音频解码需要CPU资源
+   - 建议限制并发播放的音频数量
+   - 长时间播客建议实现音频缓存机制
 
-由于鸿蒙的 `http` 模块不支持 Server-Sent Events (SSE) 流式读取，需要特殊处理。详细适配指南请参考：[HARMONYOS_STREAMING_GUIDE.md](./HARMONYOS_STREAMING_GUIDE.md)
+## 故障排查
 
-### 主要适配点
+### 问题：音频播放不连续
 
-1. **流式数据读取**：使用 HTTP 请求的完整响应，然后解析 SSE 格式数据
-2. **音频片段播放**：实现音频片段队列管理，使用 `media.AVPlayer` 连续播放
-3. **Base64 转换**：将接收到的 Base64 音频数据转换为临时文件后播放
+**解决方案**：
+- 确保音频队列管理正确
+- 检查AudioContext状态（可能需要用户交互后激活）
+- 增加音频缓冲区大小
 
-### 关键代码示例
+### 问题：SSE连接断开
 
-```typescript
-// 在 PodcastService 中添加流式生成方法
-async generateDeepPodcastStreaming(
-  request: DeepPodcastRequest,
-  onProgress?: (progress: ProgressStatus) => void,
-  onAudioSegment?: (segment: AudioSegment) => void,
-  onScript?: (script: string) => void
-): Promise<ApiResponse<void>>
+**解决方案**：
+- 实现自动重连机制
+- 检查服务器超时设置
+- 使用心跳保持连接
 
-// 在页面中实现音频片段队列播放
-private audioSegmentQueue: AudioSegment[] = [];
-private async playNextAudioSegment(): Promise<void>
-```
+### 问题：音频解码失败
 
-## 后续优化方向
+**解决方案**：
+- 检查base64编码是否正确
+- 验证WAV格式是否有效
+- 检查浏览器Web Audio API支持
 
-1. ✅ 支持背景音乐的流式混合（已实现）
-2. 优化音频片段大小，减少传输延迟
-3. 支持音频压缩（如 MP3）以减少传输数据量
-4. 添加音频缓冲机制，确保播放流畅
-5. 完善鸿蒙前端的流式读取支持（如果鸿蒙API更新）
+## 未来改进
+
+1. **支持HLS/HTTP-FLV流式传输**
+   - 更标准的流式音频协议
+   - 更好的浏览器兼容性
+
+2. **音频压缩**
+   - 使用MP3或AAC格式减少传输量
+   - 自适应码率
+
+3. **断点续传**
+   - 支持从断点继续生成
+   - 缓存已生成的音频片段
+
+4. **多客户端同步**
+   - 支持多个客户端同步播放
+   - 实时协作功能
 
