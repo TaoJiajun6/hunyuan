@@ -1,13 +1,14 @@
 import { useState, useRef, useEffect } from 'react';
-import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Download } from 'lucide-react';
 
 interface AudioPlayerProps {
   src?: string;
   title?: string;
   onClose?: () => void;
+  onDownload?: () => void;
 }
 
-export default function AudioPlayer({ src, title, onClose }: AudioPlayerProps) {
+export default function AudioPlayer({ src, title, onClose, onDownload }: AudioPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -74,6 +75,20 @@ export default function AudioPlayer({ src, title, onClose }: AudioPlayerProps) {
 
   const toggleMute = () => {
     setIsMuted(!isMuted);
+  };
+
+  const handleDownload = () => {
+    if (onDownload) {
+      onDownload();
+    } else if (src) {
+      // 默认下载行为：从src创建下载链接
+      const link = document.createElement('a');
+      link.href = src;
+      link.download = title ? `${title}.wav` : 'podcast.wav';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
   };
 
   const formatTime = (seconds: number) => {
@@ -150,6 +165,17 @@ export default function AudioPlayer({ src, title, onClose }: AudioPlayerProps) {
             onChange={handleVolumeChange}
             className="w-20 h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary-600"
           />
+        </div>
+
+        {/* 下载按钮 */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleDownload}
+            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            title="下载音频"
+          >
+            <Download className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+          </button>
         </div>
       </div>
     </div>

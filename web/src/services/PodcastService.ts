@@ -72,6 +72,11 @@ export interface ProgressStatus {
   error?: string;
   ts?: number;
   audio_url?: string;
+  audio_base64?: string;
+  script?: string;
+  roles?: string[];
+  characters?: string[];
+  topic?: string;
 }
 
 export interface PodcastResult {
@@ -91,6 +96,15 @@ export interface ApiResponse<T = any> {
   message: string;
   data?: T;
   error?: string;
+}
+
+export interface StreamingScriptRequest {
+  text_material: string;
+  instruction?: string;
+}
+
+export interface StreamingScriptResult {
+  script: string;
 }
 
 export interface AnalyzeTextRequest {
@@ -460,6 +474,36 @@ class PodcastService {
       return {
         success: false,
         message: '主题深度播客生成失败',
+        error: error.response?.data?.error || error.message || '未知错误',
+      };
+    }
+  }
+
+  /**
+   * 生成流式播客脚本
+   */
+  async generateStreamingScript(
+    request: StreamingScriptRequest
+  ): Promise<ApiResponse<StreamingScriptResult>> {
+    try {
+      if (!request.text_material || request.text_material.trim().length === 0) {
+        return {
+          success: false,
+          message: '输入内容不能为空',
+          error: 'text_material为空',
+        };
+      }
+
+      const response = await this.axiosInstance.post<ApiResponse<StreamingScriptResult>>(
+        '/api/v1/podcast/streaming_script',
+        request
+      );
+
+      return response.data;
+    } catch (error: any) {
+      return {
+        success: false,
+        message: '流式播客脚本生成失败',
         error: error.response?.data?.error || error.message || '未知错误',
       };
     }

@@ -506,7 +506,7 @@ def get_task_manager() -> PodcastTaskManager:
 def _progress_path(job_id: str) -> str:
     return os.path.join(_PROGRESS_DIR, f"{job_id}.json")
 
-def _update_progress(job_id: Optional[str], phase: str, percent: int, message: str, done: bool = False, error: Optional[str] = None, audio_url: Optional[str] = None):
+def _update_progress(job_id: Optional[str], phase: str, percent: int, message: str, done: bool = False, error: Optional[str] = None, audio_url: Optional[str] = None, audio_base64: Optional[str] = None):
     """更新任务进度
     
     Args:
@@ -517,6 +517,7 @@ def _update_progress(job_id: Optional[str], phase: str, percent: int, message: s
         done: 是否完成
         error: 错误信息（可选）
         audio_url: 音频云存储URL（可选，生成完成后提供）
+        audio_base64: 音频base64编码（可选，web端生成完成后提供）
     """
     if not job_id:
         return
@@ -532,6 +533,9 @@ def _update_progress(job_id: Optional[str], phase: str, percent: int, message: s
     # 如果提供了 audio_url，添加到进度数据中（用于前端从云存储下载）
     if audio_url:
         data["audio_url"] = audio_url
+    # 如果提供了 audio_base64，添加到进度数据中（用于web端直接获取音频）
+    if audio_base64:
+        data["audio_base64"] = audio_base64
     _PROGRESS_CACHE[job_id] = data
     try:
         with open(_progress_path(job_id), 'w', encoding='utf-8') as f:
@@ -2095,16 +2099,16 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 except Exception as e:
                     logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
             
-            # 更新进度（web端请求时直接完成，不等待上传）
-            if not use_cloud_storage:
-                _update_progress(request.job_id, "completed", 100, "生成完成", done=True)
-            
             # 编码输出音频
             logger.info("编码输出音频文件...")
             audio_base64 = encode_file_to_base64(output_path)
             file_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
             total_time = time.time() - start_time
             logger.info(f"多角色播客生成成功，总耗时: {total_time:.2f}s，输出文件大小: {file_size:.2f} MB")
+            
+            # 更新进度（web端请求时包含audio_base64，不等待上传）
+            if not use_cloud_storage:
+                _update_progress(request.job_id, "completed", 100, "生成完成", done=True, audio_base64=audio_base64)
             
             data = {
                     "audio_base64": audio_base64,
@@ -2430,7 +2434,7 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
             agc_result = None
             if not use_cloud_storage:
                 logger.info("检测到web端请求（使用base64音色），跳过云存储上传，直接返回音频")
-                _update_progress(request.job_id, "completed", 100, "生成完成", done=True)
+                _update_progress(request.job_id, "completed", 100, "生成完成", done=True, audio_base64=audio_base64)
             else:
                 try:
                     agc_storage_url = os.getenv('AGC_STORAGE_URL')
@@ -2779,7 +2783,7 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
             agc_result = None
             if not use_cloud_storage:
                 logger.info("检测到web端请求（使用base64音色），跳过云存储上传，直接返回音频")
-                _update_progress(request.job_id, "completed", 100, "生成完成", done=True)
+                _update_progress(request.job_id, "completed", 100, "生成完成", done=True, audio_base64=audio_base64)
             else:
                 try:
                     agc_storage_url = os.getenv('AGC_STORAGE_URL')
@@ -2866,6 +2870,12 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
         )
 
 
+class StreamingScriptRequest(BaseModel):
+    """流式播客脚本生成请求"""
+    text_material: str = Field(..., description="输入内容（报告、文章、访谈稿、数据手册、故事素材等）")
+    instruction: Optional[str] = Field(None, description="可选指令（用于控制生成过程，如'生成3分钟播客'、'使用轻松风格'等）")
+
+
 class AnalyzeTextRequest(BaseModel):
     """文本分析请求"""
     text: str = Field(..., description="要分析的文本素材")
@@ -2905,6 +2915,90 @@ async def analyze_text_for_podcast(request: AnalyzeTextRequest):
         return ApiResponse(
             success=False,
             message="分析失败",
+            error=str(e),
+            data={"traceback": error_detail}
+        )
+
+
+@app.post("/api/v1/podcast/streaming_script", response_model=ApiResponse)
+async def generate_streaming_podcast_script(request: StreamingScriptRequest):
+    """
+    生成流式播客脚本（单人播客，适配流式播放）
+    
+    ## 功能说明
+    
+    基于任意输入内容（报告、文章、访谈稿、数据手册、故事素材等），生成适配音频流式播放的专业播客脚本。
+    核心特点是：信息精准不偏差、语言口语好理解、节奏适配碎片化收听。
+    
+    ## 请求参数
+    
+    ### 必需参数
+    - **text_material** (必需): 输入内容（报告、文章、访谈稿、数据手册、故事素材等）
+    
+    ### 可选参数
+    - **instruction** (可选): 指令内容（用于控制生成过程，如"生成3分钟播客"、"使用轻松风格"等）
+    
+    ## 响应格式
+    
+    成功时返回：
+    ```json
+    {
+        "success": true,
+        "message": "脚本生成成功",
+        "data": {
+            "script": "生成的播客脚本内容"
+        }
+    }
+    ```
+    
+    ## 注意事项
+    
+    - 生成的脚本是单人播客格式，适合流式播放
+    - 脚本内容严格基于输入内容，不添加无关信息
+    - 语言风格完全口语化，适配碎片化收听
+    - 脚本结构包含：开场白、核心总览、分模块拆解、结尾总结
+    """
+    try:
+        processor = TextProcessor()
+        api_client = get_client()
+        
+        logger.info(f"开始生成流式播客脚本: 输入内容长度={len(request.text_material)}")
+        
+        # 构建提示词
+        prompt = processor.build_streaming_podcast_prompt(
+            text_material=request.text_material,
+            instruction=request.instruction
+        )
+        
+        # 调用混元大模型生成脚本
+        logger.info("调用混元大模型生成播客脚本...")
+        text_generation_start = time.time()
+        generated_text = api_client.generate_text(
+            prompt=prompt,
+            temperature=0.7,
+            max_tokens=3000
+        )
+        text_generation_time = time.time() - text_generation_start
+        logger.info(f"脚本生成完成，耗时: {text_generation_time:.2f}s，文本长度: {len(generated_text)}")
+        
+        # 清理生成的文本
+        cleaned_script = processor.clean_text(generated_text)
+        
+        return ApiResponse(
+            success=True,
+            message="脚本生成成功",
+            data={
+                "script": cleaned_script
+            }
+        )
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        logger.error(f"流式播客脚本生成失败: {str(e)}")
+        logger.error(f"错误详情:\n{error_detail}")
+        return ApiResponse(
+            success=False,
+            message="脚本生成失败",
             error=str(e),
             data={"traceback": error_detail}
         )

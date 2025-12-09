@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Plus, X } from 'lucide-react';
 import { podcastService, CharacterRequest, CharacterInfo, ProgressStatus } from '../../services/PodcastService';
 import VoiceSelector from '../../components/VoiceSelector';
+import { saveRecentPodcast } from '../../services/RecentPodcastService';
 
 const CATEGORY_OPTIONS = [
   '社会文化与历史',
@@ -108,7 +109,24 @@ export default function CharacterPage() {
           if (progress.error) {
             alert(`生成失败: ${progress.error}`);
           } else if (progress.audio_url || progress.audio_base64) {
-            alert('播客生成成功！');
+            // 保存到最近播客列表
+            if (progress.audio_base64) {
+              saveRecentPodcast({
+                title: '自定义角色播客',
+                type: 'character',
+                audioBase64: progress.audio_base64,
+                script: progress.script,
+                characters: progress.characters,
+              });
+            } else if (progress.audio_url) {
+              saveRecentPodcast({
+                title: '自定义角色播客',
+                type: 'character',
+                audioUrl: progress.audio_url,
+                script: progress.script,
+                characters: progress.characters,
+              });
+            }
           }
         }
       });
@@ -135,7 +153,28 @@ export default function CharacterPage() {
 
       if (result.success && result.data) {
         stopPolling();
-        alert('播客生成成功！');
+        
+        // 保存到最近播客列表
+        if (result.data.audio_base64) {
+          saveRecentPodcast({
+            title: '自定义角色播客',
+            type: 'character',
+            audioBase64: result.data.audio_base64,
+            script: result.data.script,
+            characters: result.data.characters,
+            fileSizeMb: result.data.file_size_mb,
+          });
+        } else if (result.data.audio_url) {
+          saveRecentPodcast({
+            title: '自定义角色播客',
+            type: 'character',
+            audioUrl: result.data.audio_url,
+            script: result.data.script,
+            characters: result.data.characters,
+            fileSizeMb: result.data.file_size_mb,
+          });
+        }
+        
         navigate('/podcast');
       }
     } catch (error) {

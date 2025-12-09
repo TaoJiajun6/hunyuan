@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, FileText } from 'lucide-react';
+import { ArrowLeft, FileText, Download, Play } from 'lucide-react';
 import { podcastService, MultiRoleRequest, ProgressStatus } from '../../services/PodcastService';
 import VoiceSelector from '../../components/VoiceSelector';
+import AudioPlayer from '../../components/AudioPlayer';
+import { saveRecentPodcast } from '../../services/RecentPodcastService';
 
 const INPUT_TYPE_OPTIONS = [
   '文字',
@@ -53,6 +55,8 @@ export default function MultiRolePage() {
   const [isLoading, setIsLoading] = useState(false);
   const [progressPercent, setProgressPercent] = useState(0);
   const [progressMessage, setProgressMessage] = useState('');
+  const [generatedAudioUrl, setGeneratedAudioUrl] = useState<string | null>(null);
+  const [generatedAudioTitle, setGeneratedAudioTitle] = useState<string>('');
 
   const handleSelectTextFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -129,8 +133,35 @@ export default function MultiRolePage() {
           if (progress.error) {
             alert(`生成失败: ${progress.error}`);
           } else if (progress.audio_url || progress.audio_base64) {
-            alert('播客生成成功！');
-            // TODO: 播放或下载音频
+            // 处理音频数据
+            if (progress.audio_base64) {
+              // 将base64转换为可播放的URL
+              const audioUrl = `data:audio/wav;base64,${progress.audio_base64}`;
+              setGeneratedAudioUrl(audioUrl);
+              setGeneratedAudioTitle('生成的播客');
+              
+              // 保存到最近播客列表
+              console.log('保存播客到最近列表，音频数据长度:', progress.audio_base64?.length || 0);
+              saveRecentPodcast({
+                title: '多角色互动播客',
+                type: 'multi-role',
+                audioBase64: progress.audio_base64,
+                script: progress.script,
+                roles: progress.roles,
+              });
+            } else if (progress.audio_url) {
+              setGeneratedAudioUrl(progress.audio_url);
+              setGeneratedAudioTitle('生成的播客');
+              
+              // 保存到最近播客列表
+              saveRecentPodcast({
+                title: '多角色互动播客',
+                type: 'multi-role',
+                audioUrl: progress.audio_url,
+                script: progress.script,
+                roles: progress.roles,
+              });
+            }
           }
         }
       });
@@ -158,8 +189,36 @@ export default function MultiRolePage() {
       if (result.success && result.data) {
         // 如果API立即返回成功，停止轮询
         stopPolling();
-        alert('播客生成成功！');
-        navigate('/podcast');
+        
+        // 处理音频数据
+        if (result.data.audio_base64) {
+          const audioUrl = `data:audio/wav;base64,${result.data.audio_base64}`;
+          setGeneratedAudioUrl(audioUrl);
+          setGeneratedAudioTitle('生成的播客');
+          
+          // 保存到最近播客列表
+          saveRecentPodcast({
+            title: '多角色互动播客',
+            type: 'multi-role',
+            audioBase64: result.data.audio_base64,
+            script: result.data.script,
+            roles: result.data.roles,
+            fileSizeMb: result.data.file_size_mb,
+          });
+        } else if (result.data.audio_url) {
+          setGeneratedAudioUrl(result.data.audio_url);
+          setGeneratedAudioTitle('生成的播客');
+          
+          // 保存到最近播客列表
+          saveRecentPodcast({
+            title: '多角色互动播客',
+            type: 'multi-role',
+            audioUrl: result.data.audio_url,
+            script: result.data.script,
+            roles: result.data.roles,
+            fileSizeMb: result.data.file_size_mb,
+          });
+        }
       }
     } catch (error) {
       console.error('生成失败:', error);
@@ -347,6 +406,27 @@ export default function MultiRolePage() {
           {isLoading ? '生成中...' : '生成播客'}
         </button>
       </div>
+
+      {/* 音频播放器 */}
+      {generatedAudioUrl && (
+        <AudioPlayer
+          src={generatedAudioUrl}
+          title={generatedAudioTitle}
+          onClose={() => {
+            setGeneratedAudioUrl(null);
+            setGeneratedAudioTitle('');
+          }}
+          onDownload={() => {
+            // 从data URL下载
+            const link = document.createElement('a');
+            link.href = generatedAudioUrl;
+            link.download = `${generatedAudioTitle || 'podcast'}.wav`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+          }}
+        />
+      )}
     </div>
   );
 }
