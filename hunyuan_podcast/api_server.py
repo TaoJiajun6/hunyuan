@@ -13,6 +13,8 @@ import json
 from typing import Optional, List, Dict, Any, Union
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request, BackgroundTasks
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
+from starlette.responses import Response
+from starlette.types import Receive, Scope, Send
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 import asyncio
@@ -628,6 +630,36 @@ def get_generator() -> PodcastGenerator:
         logger.info("PodcastGenerator初始化完成")
     return generator
 
+
+# ============ 自定义响应类 ============
+
+class SafeStreamingResponse(StreamingResponse):
+    """安全的流式响应，忽略客户端断开连接时的错误"""
+    
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """重写 __call__ 方法以捕获断开连接错误"""
+        try:
+            await super().__call__(scope, receive, send)
+        except RuntimeError as e:
+            error_msg = str(e)
+            # 忽略流式响应中的客户端断开连接错误
+            if "Unexpected message received: http.request" in error_msg:
+                logger.debug(f"客户端断开连接（流式响应）: {scope.get('path', 'unknown')}")
+                # 不抛出异常，静默处理
+                return
+            # 其他运行时错误继续抛出
+            raise
+        except Exception as e:
+            # 捕获其他可能的异常，但只记录日志
+            error_msg = str(e)
+            if "Unexpected message" in error_msg or "disconnect" in error_msg.lower():
+                logger.debug(f"流式响应连接问题: {error_msg}")
+                return
+            # 其他异常继续抛出
+            raise
+
+
+# ============ 中间件 ============
 
 # 请求日志中间件
 @app.middleware("http")
@@ -3220,7 +3252,7 @@ async def stream_progress(job_id: str):
                 del _PROGRESS_SSE_QUEUES[job_id]
                 logger.info(f"SSE队列已清理，job_id={job_id}")
     
-    return StreamingResponse(
+    return SafeStreamingResponse(
         event_generator(),
         media_type="text/event-stream",
         headers={
@@ -3466,7 +3498,7 @@ async def generate_deep_podcast_streaming(request: DeepPodcastRequest):
             except:
                 pass  # 如果yield失败，说明连接已断开，忽略错误
     
-    return StreamingResponse(
+    return SafeStreamingResponse(
         event_generator(),
         media_type="text/event-stream",
         headers={
@@ -3642,7 +3674,7 @@ async def generate_multi_role_podcast_streaming(request: MultiRoleRequest):
             except:
                 pass  # 如果yield失败，说明连接已断开，忽略错误
     
-    return StreamingResponse(
+    return SafeStreamingResponse(
         event_generator(),
         media_type="text/event-stream",
         headers={
@@ -3832,7 +3864,7 @@ async def generate_character_podcast_streaming(request: CharacterRequest):
             yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
             _update_progress(request.job_id, "failed", 0, error_msg)
     
-    return StreamingResponse(
+    return SafeStreamingResponse(
         event_generator(),
         media_type="text/event-stream",
         headers={
