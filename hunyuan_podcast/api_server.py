@@ -3175,6 +3175,233 @@ async def stream_progress(job_id: str):
     )
 
 
+@app.post("/api/v1/podcast/deep/stream")
+async def generate_deep_podcast_streaming(request: DeepPodcastRequest):
+    """
+    流式生成主题深度播客（边生成边播放）
+    
+    使用 Server-Sent Events (SSE) 实时推送音频片段，支持边生成边播放
+    
+    使用示例（JavaScript，使用 fetch API 读取流）：
+    ```javascript
+    const response = await fetch('/api/v1/podcast/deep/stream', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            topic: '人工智能',
+            role_voice_urls: {...},
+            num_characters: 2
+        })
+    });
+    
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\\n');
+        
+        for (const line of lines) {
+            if (line.startsWith('data: ')) {
+                const data = JSON.parse(line.slice(6));
+                if (data.type === 'audio_segment') {
+                    // 播放音频片段
+                    playAudioSegment(data.audio_base64);
+                } else if (data.type === 'progress') {
+                    // 更新进度
+                    updateProgress(data.percent, data.message);
+                } else if (data.type === 'script') {
+                    // 显示脚本
+                    displayScript(data.script);
+                } else if (data.type === 'done') {
+                    // 生成完成
+                    onGenerationComplete();
+                } else if (data.type === 'error') {
+                    // 错误处理
+                    handleError(data.message);
+                }
+            }
+        }
+    }
+    ```
+    
+    注意：由于需要传递请求体，本端点使用 POST 方法，前端需要使用 fetch API 而不是 EventSource
+    """
+    async def event_generator():
+        try:
+            # 初始化进度
+            _update_progress(request.job_id, "queued", 1, "任务已提交，准备开始处理")
+            yield f"data: {json.dumps({'type': 'progress', 'status': 'queued', 'percent': 1, 'message': '任务已提交'}, ensure_ascii=False)}\n\n"
+            
+            # 验证云存储URL
+            if not request.role_voice_urls or len(request.role_voice_urls) == 0:
+                error_msg = "至少需要提供一个角色的音色文件URL（role_voice_urls）"
+                yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
+                return
+            
+            logger.info(f"开始流式生成主题深度播客: 主题={request.topic}, 角色数量={request.num_characters}")
+            
+            gen = get_generator()
+            processor = TextProcessor()
+            api_client = get_client()
+            
+            # 下载音色文件
+            temp_files = []
+            role_voices = {}
+            
+            try:
+                _update_progress(request.job_id, "downloading_voices", 5, "正在下载角色音色文件")
+                yield f"data: {json.dumps({'type': 'progress', 'status': 'downloading_voices', 'percent': 5, 'message': '正在下载角色音色文件'}, ensure_ascii=False)}\n\n"
+                
+                role_names = ["角色A", "角色B", "角色C"][:request.num_characters]
+                for i, role_name in enumerate(role_names):
+                    if role_name in request.role_voice_urls:
+                        voice_url = request.role_voice_urls[role_name]
+                        temp_file = download_audio_from_url(voice_url)
+                        temp_files.append(temp_file)
+                        role_voices[role_name] = temp_file
+                    else:
+                        error_msg = f"缺少角色 '{role_name}' 的音色文件URL"
+                        yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
+                        return
+                
+                # 生成对话文本
+                _update_progress(request.job_id, "generating_text", 10, "正在生成对话文本")
+                yield f"data: {json.dumps({'type': 'progress', 'status': 'generating_text', 'percent': 10, 'message': '正在生成对话文本'}, ensure_ascii=False)}\n\n"
+                
+                prompt = processor.build_deep_podcast_prompt(
+                    request.topic,
+                    request.depth_level,
+                    request.num_characters,
+                    instruction=request.instruction
+                )
+                
+                generated_text = api_client.generate_text(
+                    prompt=prompt,
+                    temperature=0.7,
+                    max_tokens=3000
+                )
+                
+                cleaned_text = processor.clean_text(generated_text)
+                
+                # 发送脚本内容
+                yield f"data: {json.dumps({'type': 'script', 'script': cleaned_text}, ensure_ascii=False)}\n\n"
+                
+                # 选择背景音乐
+                background_music_path = None
+                try:
+                    _update_progress(request.job_id, "selecting_music", 20, "正在选择背景音乐")
+                    yield f"data: {json.dumps({'type': 'progress', 'status': 'selecting_music', 'percent': 20, 'message': '正在选择背景音乐'}, ensure_ascii=False)}\n\n"
+                    
+                    music_selector = MusicSelector(use_cloud_storage=False)
+                    selected_music = music_selector.select_music_by_ai(
+                        text=cleaned_text,
+                        podcast_name=None,
+                        topic=request.topic,
+                        scene_types=None,
+                        category=request.category,
+                        num_music=1
+                    )
+                    
+                    if selected_music and len(selected_music) > 0 and os.path.exists(selected_music[0]):
+                        background_music_path = selected_music[0]
+                except Exception as e:
+                    logger.warning(f"选择背景音乐失败: {str(e)}")
+                
+                # 开始流式生成音频
+                _update_progress(request.job_id, "generating_audio", 30, "正在生成播客音频...")
+                yield f"data: {json.dumps({'type': 'progress', 'status': 'generating_audio', 'percent': 30, 'message': '正在生成播客音频...'}, ensure_ascii=False)}\n\n"
+                
+                import io
+                import soundfile as sf
+                import numpy as np
+                
+                # 使用流式生成（支持背景音乐）
+                segment_count = 0
+                accumulated_audio = []
+                
+                for segment_index, role_name, audio_segment, is_final in gen.generate_from_text_streaming(
+                    text=cleaned_text,
+                    role_voices=role_voices,
+                    silence_interval=request.silence_interval,
+                    background_music=background_music_path,  # 支持背景音乐混合
+                    background_volume=request.background_volume,
+                    background_mode="single",
+                    verbose=True
+                ):
+                    # 将音频张量转换为numpy数组
+                    if audio_segment.shape[1] > 0:  # 确保不是空音频
+                        audio_np = audio_segment.cpu().squeeze(0).numpy()
+                        
+                        # 将音频片段保存到内存中的WAV文件
+                        audio_buffer = io.BytesIO()
+                        sf.write(audio_buffer, audio_np, 22050, format='WAV')
+                        audio_buffer.seek(0)
+                        
+                        # 编码为base64
+                        audio_base64 = base64.b64encode(audio_buffer.read()).decode('utf-8')
+                        
+                        # 发送音频片段
+                        segment_data = {
+                            'type': 'audio_segment',
+                            'segment_index': segment_index,
+                            'role_name': role_name,
+                            'audio_base64': audio_base64,
+                            'is_final': is_final,
+                            'sample_rate': 22050
+                        }
+                        yield f"data: {json.dumps(segment_data, ensure_ascii=False)}\n\n"
+                        
+                        segment_count += 1
+                        
+                        # 更新进度（根据已生成的片段数估算）
+                        # 假设总共有约30-60段对话
+                        estimated_total = max(30, len(processor.parse_role_text(cleaned_text)) * 2)  # 每段对话可能产生2个片段（音频+静音）
+                        progress_percent = min(90, 30 + int((segment_count / estimated_total) * 60))
+                        _update_progress(request.job_id, "generating_audio", progress_percent, f"已生成 {segment_count} 个音频片段...")
+                        yield f"data: {json.dumps({'type': 'progress', 'status': 'generating_audio', 'percent': progress_percent, 'message': f'已生成 {segment_count} 个音频片段...'}, ensure_ascii=False)}\n\n"
+                        
+                        # 同时保存到累积列表（用于最终文件）
+                        accumulated_audio.append(audio_np)
+                
+                # 生成完成
+                _update_progress(request.job_id, "completed", 100, "播客生成完成")
+                yield f"data: {json.dumps({'type': 'progress', 'status': 'completed', 'percent': 100, 'message': '播客生成完成'}, ensure_ascii=False)}\n\n"
+                
+                # 发送完成信号
+                yield f"data: {json.dumps({'type': 'done', 'total_segments': segment_count}, ensure_ascii=False)}\n\n"
+                
+            finally:
+                # 清理临时文件
+                for temp_file in temp_files:
+                    try:
+                        if os.path.exists(temp_file):
+                            os.remove(temp_file)
+                    except Exception as e:
+                        logger.warning(f"清理临时文件失败: {str(e)}")
+                        
+        except Exception as e:
+            logger.error(f"流式生成播客失败: {e}", exc_info=True)
+            error_msg = f"生成失败: {str(e)}"
+            yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
+            _update_progress(request.job_id, "failed", 0, error_msg)
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+
 # 应用启动和关闭事件
 @app.on_event("startup")
 async def startup_event():

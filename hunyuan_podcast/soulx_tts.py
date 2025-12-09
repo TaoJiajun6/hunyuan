@@ -317,4 +317,212 @@ class SoulXTTS:
             print(f"[INFO] 音频已保存到: {output_path}")
         
         return output_path
+    
+    def infer_multi_speaker_streaming(
+        self,
+        speakers: Dict[str, Dict[str, str]],
+        dialogues: List[tuple],
+        silence_interval: Optional[int] = None,
+        verbose: bool = False
+    ):
+        """
+        流式生成多角色播客音频（生成器）
+        
+        Args:
+            speakers: 说话人信息字典，格式为 {角色名: {"prompt_audio": 路径, "prompt_text": 文本}}
+            dialogues: 对话列表，格式为 [(角色名, 文本), ...]
+            silence_interval: 角色切换静音间隔（毫秒），如果为None则使用默认值400ms
+            verbose: 是否输出详细信息
+        
+        Yields:
+            (segment_index, role_name, audio_segment, is_final): 
+                - segment_index: 片段索引（从0开始）
+                - role_name: 角色名（静音片段为None）
+                - audio_segment: 音频张量 (1, samples)，采样率24000
+                - is_final: 是否为最后一个片段
+        """
+        # 确保模型已加载
+        self._ensure_model_loaded()
+        
+        # 构建播客格式数据
+        role_mapping = {}
+        podcast_speakers = {}
+        for idx, (role_name, role_info) in enumerate(speakers.items(), 1):
+            spk_id = f"S{idx}"
+            role_mapping[role_name] = spk_id
+            podcast_speakers[spk_id] = {
+                "prompt_audio": role_info["prompt_audio"],
+                "prompt_text": role_info.get("prompt_text", "这是一个参考音频。")
+            }
+        
+        # 转换对话格式
+        podcast_text = []
+        for role_name, text in dialogues:
+            spk_id = role_mapping.get(role_name, "S1")
+            podcast_text.append([spk_id, text])
+        
+        podcast_data = {
+            "speakers": podcast_speakers,
+            "text": podcast_text
+        }
+        
+        # 解析格式
+        inputs = podcast_format_parser(podcast_data)
+        
+        # 处理输入
+        data = process_single_input(
+            self.dataset,
+            inputs['text'],
+            inputs['prompt_wav'],
+            inputs['prompt_text'],
+            inputs.get('use_dialect_prompt', False),
+            inputs.get('dialect_prompt_text', [])
+        )
+        
+        if verbose:
+            print(f"[INFO] 开始流式生成多角色播客音频...")
+            print(f"      说话人数量: {len(speakers)}")
+            print(f"      对话轮数: {len(dialogues)}")
+        
+        # SoulX-Podcast 输出采样率为 24000
+        sr = 24000
+        silence_interval_ms = silence_interval if silence_interval is not None else 400
+        
+        # 获取模型内部数据，以便逐段生成
+        from itertools import chain
+        from transformers import DynamicCache
+        from soulxpodcast.config import AutoPretrainedConfig
+        
+        prompt_mels_for_llm = data['prompt_mels_for_llm']
+        prompt_mels_lens_for_llm = data['prompt_mels_lens_for_llm']
+        prompt_text_tokens_for_llm = data['prompt_text_tokens_for_llm']
+        text_tokens_for_llm = data['text_tokens_for_llm']
+        prompt_mels_for_flow_ori = data['prompt_mels_for_flow_ori']
+        spk_emb_for_flow = data['spk_emb_for_flow']
+        sampling_params = data['sampling_params']
+        spk_ids = data['spk_ids']
+        use_dialect_prompt = data.get('use_dialect_prompt', False)
+        dialect_prompt_text_tokens_for_llm = data.get('dialect_prompt_text_tokens_for_llm', None)
+        dialect_prefix = data.get('dialect_prefix', None)
+        
+        # 准备 prompt inputs（与 forward_longform 相同）
+        prompt_size, turn_size = len(prompt_mels_for_llm), len(text_tokens_for_llm)
+        
+        # Audio tokenization
+        prompt_speech_tokens_ori, prompt_speech_tokens_lens_ori = self.model.audio_tokenizer.quantize(
+            prompt_mels_for_llm.cuda(), prompt_mels_lens_for_llm.cuda()
+        )
+        
+        # align speech token with speech feat
+        prompt_speech_tokens = []
+        prompt_mels_for_flow, prompt_mels_lens_for_flow = [], []
+        
+        for prompt_index in range(prompt_size):
+            prompt_speech_token_len = prompt_speech_tokens_lens_ori[prompt_index].item()
+            prompt_speech_token = prompt_speech_tokens_ori[prompt_index, :prompt_speech_token_len]
+            prompt_mel = prompt_mels_for_flow_ori[prompt_index]
+            prompt_mel_len = prompt_mel.shape[0]
+            if prompt_speech_token_len * 2 > prompt_mel_len:
+                prompt_speech_token = prompt_speech_token[:int(prompt_mel_len/2)]
+                prompt_mel_len = torch.tensor([prompt_mel_len]).cuda()
+            else:
+                prompt_mel = prompt_mel.detach().clone()[:prompt_speech_token_len * 2].cuda()
+                prompt_mel_len = torch.tensor([prompt_speech_token_len * 2]).cuda()
+            prompt_speech_tokens.append(prompt_speech_token)
+            prompt_mels_for_flow.append(prompt_mel)
+            prompt_mels_lens_for_flow.append(prompt_mel_len)
+        
+        # Prepare LLM inputs
+        prompt_inputs = []
+        history_inputs = []
+        
+        for i in range(prompt_size):
+            speech_tokens_i = [token+self.model.config.hf_config.speech_token_offset for token in prompt_speech_tokens[i].tolist()]
+            speech_tokens_i += [self.model.config.hf_config.eos_token_id]
+            if use_dialect_prompt and dialect_prompt_text_tokens_for_llm and len(dialect_prompt_text_tokens_for_llm[i])>0:
+                dialect_prompt_input = prompt_text_tokens_for_llm[i] + speech_tokens_i + dialect_prompt_text_tokens_for_llm[i]
+                if i>0:
+                    dialect_prompt_input = dialect_prefix[0] + dialect_prompt_input
+                prompt_input = self.model.llm.generate(dialect_prompt_input, sampling_params, past_key_values=None)['token_ids']
+                prompt_inputs.append(dialect_prefix[i+1]+dialect_prompt_text_tokens_for_llm[i] + prompt_input)
+                history_inputs.append(dialect_prefix[i+1]+dialect_prompt_text_tokens_for_llm[i] + prompt_input)
+            else:
+                prompt_inputs.append(prompt_text_tokens_for_llm[i] + speech_tokens_i )
+                history_inputs.append(prompt_text_tokens_for_llm[i] + speech_tokens_i )
+        
+        # LLM generation - 逐段生成并 yield
+        inputs = list(chain.from_iterable(prompt_inputs))
+        cache_config = AutoPretrainedConfig().from_dataclass(self.model.llm.config.hf_config)
+        past_key_values = DynamicCache(config=cache_config)
+        valid_turn_size = prompt_size
+        
+        # 反向映射：从 spk_id 到角色名
+        spk_id_to_role = {v: k for k, v in role_mapping.items()}
+        
+        for i in range(turn_size):
+            # 检查是否需要重置缓存
+            if valid_turn_size > self.model.config.max_turn_size or len(inputs)>self.model.config.turn_tokens_threshold:
+                assert self.model.config.max_turn_size >= self.model.config.prompt_context + self.model.config.history_context, "Invalid Long history size setting"
+                prompt_text_bound = max(self.model.config.prompt_context, len(history_inputs)-self.model.config.history_text_context-self.model.config.history_context)
+                inputs = list(chain.from_iterable(
+                    history_inputs[:self.model.config.prompt_context]+ \
+                    history_inputs[prompt_text_bound:-self.model.config.history_context]+ \
+                    prompt_inputs[-self.model.config.history_context:]
+                ))
+                valid_turn_size = self.model.config.prompt_context + len(history_inputs) - prompt_text_bound
+                past_key_values = DynamicCache(config=cache_config)
+            valid_turn_size += 1
+            
+            inputs.extend(text_tokens_for_llm[i])
+            llm_outputs = self.model.llm.generate(inputs, sampling_params, past_key_values=past_key_values)
+            
+            inputs.extend(llm_outputs['token_ids'])
+            prompt_inputs.append(text_tokens_for_llm[i]+llm_outputs['token_ids'])
+            history_inputs.append(text_tokens_for_llm[i][:-1])  # remove the <|audio_start|>
+            
+            # Prepare Flow inputs
+            turn_spk = spk_ids[i]
+            generated_speech_tokens = [token - self.model.config.hf_config.speech_token_offset for token in llm_outputs['token_ids'][:-1]]
+            prompt_speech_token = prompt_speech_tokens[turn_spk].tolist()
+            flow_input = torch.tensor([prompt_speech_token + generated_speech_tokens])
+            flow_inputs_len = torch.tensor([len(prompt_speech_token) + len(generated_speech_tokens)])
+            
+            # Flow generation and HiFi-GAN generation
+            start_idx = spk_ids[i]
+            prompt_mels = prompt_mels_for_flow[start_idx][None]
+            prompt_mels_lens = prompt_mels_lens_for_flow[start_idx][None]
+            spk_emb = spk_emb_for_flow[start_idx:start_idx+1]
+            
+            # Flow generation
+            with torch.amp.autocast("cuda", dtype=torch.float16 if self.model.config.hf_config.fp16_flow else torch.float32):
+                generated_mels, generated_mels_lens = self.model.flow(
+                    flow_input.cuda(), flow_inputs_len.cuda(),
+                    prompt_mels, prompt_mels_lens, spk_emb.cuda(),
+                    streaming=False, finalize=True
+                )
+            
+            # HiFi-GAN generation
+            mel = generated_mels[:, :, prompt_mels_lens[0].item():generated_mels_lens[0].item()]
+            wav, _ = self.model.hift(speech_feat=mel)
+            
+            # 处理音频格式
+            if wav.dim() == 1:
+                wav = wav.unsqueeze(0)
+            elif wav.dim() > 1 and wav.shape[0] > 1:
+                wav = torch.mean(wav, dim=0, keepdim=True)
+            wav = wav.clone()
+            
+            # 获取角色名
+            spk_id = f"S{turn_spk + 1}"
+            role_name = spk_id_to_role.get(spk_id, f"角色{turn_spk + 1}")
+            
+            # Yield 音频片段
+            is_final = (i == turn_size - 1)
+            yield i, role_name, wav, is_final
+            
+            # 如果不是最后一个片段，添加静音间隔
+            if not is_final:
+                silence_samples = int(sr * silence_interval_ms / 1000.0)
+                silence = torch.zeros(1, silence_samples, device=wav.device)
+                yield i, None, silence, False  # None 表示这是静音片段
 
