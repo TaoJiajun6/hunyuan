@@ -8,7 +8,7 @@ import { FileUtils, TextFileInfo } from '../../utils/FileUtils';
 import { picker } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
 import { Logger } from 'lib_common';
-import { podcastService, MultiRoleRequest } from 'lib_api';
+import { podcastService, MultiRoleRequest, PodcastListItem } from 'lib_api';
 import { AppStorageV2 } from '@kit.ArkUI';
 
 /**
@@ -33,6 +33,8 @@ export struct PodcastPage {
   @Local musicModel: MusicModel = getMusicModel(); // 音乐模型
   @Local isShowUploadMenu: boolean = false; // 是否显示上传菜单
   @Local isGenerating: boolean = false; // 是否正在生成播客
+  // 存储播客ID到创建时间的映射（用于从云数据库获取的播客）
+  private podcastCreatedAtMap: Map<string, number> = new Map();
   @Param headerBarHeight: Length = $r('app.float.nav_header_height');
   @Local windowModel: WindowModel = AppStorageV2.connect(WindowModel, () => new WindowModel())!;
   @Local breakPointModel: BreakpointModel = AppStorageV2.connect(BreakpointModel, () => new BreakpointModel())!;
@@ -215,10 +217,38 @@ export struct PodcastPage {
 
   /**
    * 加载最近播客列表
+   * 优先从云数据库获取，如果失败则从本地播放列表获取
    */
   async loadRecentPodcasts(): Promise<void> {
     try {
       this.isRefreshing = true;
+      
+      // 优先从云数据库获取播客列表
+      try {
+        const podcastList = await podcastService.getPodcastList(20);
+        
+        if (podcastList && podcastList.length > 0) {
+          // 清空之前的映射
+          this.podcastCreatedAtMap.clear();
+          
+          // 转换为SongItem格式
+          const songItems = podcastList.map((podcast: PodcastListItem) => {
+            // 保存创建时间到映射表
+            if (podcast.created_at) {
+              this.podcastCreatedAtMap.set(podcast.id, podcast.created_at);
+            }
+            return this.convertPodcastToSongItem(podcast);
+          });
+          
+          this.recentPodcasts = songItems;
+          Logger.info('PodcastPage', `从云数据库加载了 ${songItems.length} 个播客`);
+          return;
+        }
+      } catch (cloudError) {
+        Logger.warn('PodcastPage', `从云数据库获取播客列表失败，使用本地列表: ${cloudError}`);
+      }
+
+      // 如果云数据库获取失败或返回空，则从本地播放列表获取
       const songList = this.musicModel.getSongList();
 
       if (songList.length === 0) {
@@ -226,13 +256,23 @@ export struct PodcastPage {
         return;
       }
 
-      // 按时间排序，最新的在前（假设id包含时间戳）
+      // 按创建时间排序，优先使用映射表中的created_at字段
       const sortedList = [...songList].sort((a, b) => {
-        const getTimestamp = (id: string): number => {
-          const match = id.match(/(\d+)/);
-          return match ? parseInt(match[1]) : 0;
-        };
-        return getTimestamp(b.id) - getTimestamp(a.id);
+        // 从映射表获取创建时间（数据库中的created_at字段）
+        const timestampA = this.podcastCreatedAtMap.get(a.id) || 0;
+        const timestampB = this.podcastCreatedAtMap.get(b.id) || 0;
+        
+        // 如果都有created_at，按时间倒序
+        if (timestampA > 0 && timestampB > 0) {
+          return timestampB - timestampA;
+        }
+        
+        // 如果只有一个有created_at，有created_at的排在前面
+        if (timestampA > 0) return -1;
+        if (timestampB > 0) return 1;
+        
+        // 如果都没有created_at（本地播客），按ID倒序（保持原有逻辑）
+        return b.id.localeCompare(a.id);
       });
 
       // 只显示最近20个
@@ -242,6 +282,53 @@ export struct PodcastPage {
     } finally {
       this.isRefreshing = false;
     }
+  }
+
+  /**
+   * 将PodcastListItem转换为SongItem
+   */
+  convertPodcastToSongItem(podcast: PodcastListItem): SongItem {
+    const songItem = new SongItem();
+    
+    // 基本信息
+    songItem.id = podcast.id || '';
+    songItem.title = podcast.title || '未知播客';
+    
+    // 设置singer为分类或"云存储音频"
+    if (podcast.category) {
+      songItem.singer = podcast.category;
+    } else if (podcast.roles && podcast.roles.length > 0) {
+      songItem.singer = podcast.roles.join('、');
+    } else {
+      songItem.singer = '云存储音频';
+    }
+    
+    // 音频URL（优先使用audio_url）
+    if (podcast.audio_url) {
+      songItem.src = podcast.audio_url;
+      songItem.isLocal = false;
+    } else if (podcast.local_file) {
+      songItem.src = podcast.local_file;
+      songItem.isLocal = true;
+    } else {
+      songItem.src = '';
+      songItem.isLocal = false;
+    }
+    
+    // 设置脚本内容
+    songItem.script = podcast.script || '';
+    
+    // 设置封面图标（使用默认图标）
+    songItem.label = $r('app.media.zhibozhong');
+    
+    // 其他属性
+    songItem.isCollected = false;
+    songItem.isVip = false;
+    songItem.mark = '1';
+    songItem.lyric = '';
+    songItem.mvUrl = '';
+    
+    return songItem;
   }
 
   /**
@@ -255,13 +342,25 @@ export struct PodcastPage {
   }
 
   /**
-   * 从文件名或ID提取时间戳
+   * 从数据库中获取创建时间戳
+   * 直接使用数据库中的created_at字段，不进行其他提取
    */
   extractTimestamp(song: SongItem): number {
-    const match = song.id.match(/(\d+)/);
-    if (match) {
-      return parseInt(match[1]) * 1000; // 转换为毫秒
+    if (!song.id) {
+      return Date.now();
     }
+    
+    // 直接从映射表中获取创建时间（数据库中的created_at字段）
+    const createdAt = this.podcastCreatedAtMap.get(song.id);
+    if (createdAt !== undefined && createdAt > 0) {
+      // 判断是秒还是毫秒（如果小于当前时间戳的1/1000，则是秒）
+      if (createdAt < 10000000000) {
+        return createdAt * 1000; // 转换为毫秒
+      }
+      return createdAt;
+    }
+    
+    // 如果映射表中没有（可能是本地播客），返回当前时间
     return Date.now();
   }
 

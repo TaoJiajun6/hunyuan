@@ -6,6 +6,7 @@ import { NetworkUtils } from '../common/NetworkUtils';
 import { WindowUtils } from '../common/WindowUtils';
 import { AppUtils } from '../common/AppUtils';
 import { GlobalContext } from '../common/GlobalContext';
+import { cloudDatabaseService } from 'lib_api';
 const TAG = '[EntryAbility]';
 
 export default class EntryAbility extends UIAbility {
@@ -15,6 +16,13 @@ export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam) {
     Logger.info(TAG, 'Ability onCreate');
     GlobalContext.initContext(this.context);
+    // 初始化云数据库服务
+    try {
+      cloudDatabaseService.initialize();
+      Logger.info(TAG, '云数据库服务初始化完成');
+    } catch (error) {
+      Logger.error(TAG, `云数据库服务初始化失败: ${JSON.stringify(error)}`);
+    }
     this.setNeedLoadContent(true);
   }
 

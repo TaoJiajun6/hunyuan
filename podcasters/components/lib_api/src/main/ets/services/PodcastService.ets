@@ -1,6 +1,8 @@
 import { http } from '@kit.NetworkKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { Logger } from 'lib_common';
+import { cloudDatabaseService, PodcastQueryResult } from './CloudDatabaseService';
+import { PodcastInfo } from '../database/PodcastInfo';
 
 const TAG = '[PodcastService]';
 
@@ -401,6 +403,34 @@ export interface PodcastResult {
 
   // 上传状态信息（可用于前端展示）
   agc_upload_status?: UploadStatus;
+}
+
+/**
+ * 播客列表项（用于前端展示）
+ * 对应云数据库中的播客数据
+ */
+export interface PodcastListItem {
+  id: string;
+  title: string;
+  audio_url?: string;
+  local_file?: string;
+  created_at: number;
+  duration?: number;
+  category?: string;
+  status?: string;
+  script?: string;
+  file_size_mb?: number;
+  topic?: string;
+  roles?: string[];
+  content?: string; // 内容预览（script的前100字符）
+}
+
+/**
+ * 播客列表API响应数据
+ */
+interface PodcastListResponseData {
+  podcasts: PodcastListItem[];
+  total?: number;
 }
 
 /**
@@ -1359,6 +1389,184 @@ export class PodcastService {
         });
       }
     });
+  }
+
+  /**
+   * 从云数据库获取播客列表
+   * @param limit 限制返回数量，默认不限制
+   * @param category 按分类筛选，可选
+   * @returns 播客列表
+   */
+  async getPodcastListFromCloudDB(
+    limit?: number,
+    category?: string
+  ): Promise<PodcastListItem[]> {
+    try {
+      // 确保云数据库服务已初始化
+      cloudDatabaseService.initialize();
+
+      // 查询播客列表
+      const result: PodcastQueryResult = await cloudDatabaseService.queryAllPodcasts(
+        limit,
+        category
+      );
+
+      // 转换为前端需要的格式
+      const podcastList: PodcastListItem[] = result.podcasts.map((podcast: PodcastInfo) => {
+        const item: PodcastListItem = {
+          id: podcast.id || '',
+          title: podcast.title || '',
+          audio_url: podcast.audio_url,
+          local_file: podcast.local_file,
+          created_at: podcast.created_at || 0,
+          duration: podcast.duration,
+          category: podcast.category,
+          status: podcast.status,
+          script: podcast.script,
+          file_size_mb: podcast.file_size_mb,
+          topic: podcast.topic,
+          roles: podcast.getRolesArray(),
+          content: podcast.getContentPreview()
+        };
+        return item;
+      });
+
+      Logger.info(TAG, `从云数据库获取播客列表成功，共 ${podcastList.length} 条`);
+      return podcastList;
+    } catch (error) {
+      Logger.error(TAG, `从云数据库获取播客列表失败: ${JSON.stringify(error)}`);
+      return [];
+    }
+  }
+
+  /**
+   * 从API服务器获取播客列表（备用方案）
+   * @param limit 限制返回数量
+   * @param category 按分类筛选
+   * @returns 播客列表
+   */
+  async getPodcastListFromAPI(
+    limit?: number,
+    category?: string
+  ): Promise<PodcastListItem[]> {
+    return new Promise<PodcastListItem[]>((resolve) => {
+      try {
+        const httpRequest = http.createHttp();
+        let url = this.buildApiUrl('/api/v1/podcast/history');
+        const params: string[] = [];
+        
+        if (limit && limit > 0) {
+          params.push(`limit=${limit}`);
+        }
+        if (category && category.trim() !== '') {
+          params.push(`category=${encodeURIComponent(category)}`);
+        }
+        
+        if (params.length > 0) {
+          url += `?${params.join('&')}`;
+        }
+
+        const options: http.HttpRequestOptions = {
+          method: http.RequestMethod.GET,
+          connectTimeout: 30000,
+          readTimeout: 30000
+        };
+
+        Logger.info(TAG, `请求播客列表: ${url}`);
+
+        httpRequest.request(url, options, (err: BusinessError, data: http.HttpResponse) => {
+          httpRequest.destroy();
+          
+          if (err || !data || data.responseCode !== 200) {
+            Logger.error(TAG, `获取播客列表失败: ${err?.message || '未知错误'}`);
+            resolve([]);
+            return;
+          }
+
+          try {
+            const response = JSON.parse(data.result.toString()) as ApiResponse<PodcastListResponseData>;
+            if (response.success && response.data && response.data.podcasts) {
+              const podcasts: PodcastListItem[] = response.data.podcasts;
+              Logger.info(TAG, `从API获取播客列表成功，共 ${podcasts.length} 条`);
+              resolve(podcasts);
+            } else {
+              Logger.warn(TAG, `API返回数据格式异常: ${JSON.stringify(response)}`);
+              resolve([]);
+            }
+          } catch (parseError) {
+            Logger.error(TAG, `解析API响应失败: ${JSON.stringify(parseError)}`);
+            resolve([]);
+          }
+        });
+      } catch (error) {
+        Logger.error(TAG, `获取播客列表异常: ${JSON.stringify(error)}`);
+        resolve([]);
+      }
+    });
+  }
+
+  /**
+   * 获取播客列表（优先从云数据库获取，失败则从API获取）
+   * @param limit 限制返回数量
+   * @param category 按分类筛选
+   * @param useCloudDB 是否优先使用云数据库，默认true
+   * @returns 播客列表
+   */
+  async getPodcastList(
+    limit?: number,
+    category?: string,
+    useCloudDB: boolean = true
+  ): Promise<PodcastListItem[]> {
+    if (useCloudDB) {
+      try {
+        const list = await this.getPodcastListFromCloudDB(limit, category);
+        if (list.length > 0) {
+          return list;
+        }
+        // 如果云数据库返回空列表，尝试从API获取
+        Logger.info(TAG, '云数据库返回空列表，尝试从API获取');
+      } catch (error) {
+        Logger.warn(TAG, `从云数据库获取失败，尝试从API获取: ${JSON.stringify(error)}`);
+      }
+    }
+
+    // 从API获取
+    return await this.getPodcastListFromAPI(limit, category);
+  }
+
+  /**
+   * 根据ID获取播客详情
+   * @param id 播客ID
+   * @returns 播客信息，如果不存在返回null
+   */
+  async getPodcastById(id: string): Promise<PodcastListItem | null> {
+    try {
+      cloudDatabaseService.initialize();
+      const podcast = await cloudDatabaseService.queryPodcastById(id);
+      
+      if (!podcast) {
+        return null;
+      }
+
+      return {
+        id: podcast.id || '',
+        title: podcast.title || '',
+        audio_url: podcast.audio_url,
+        local_file: podcast.local_file,
+        created_at: podcast.created_at || 0,
+        duration: podcast.duration,
+        category: podcast.category,
+        status: podcast.status,
+        script: podcast.script,
+        file_size_mb: podcast.file_size_mb,
+        topic: podcast.topic,
+        roles: podcast.getRolesArray(),
+        content: podcast.getContentPreview()
+      };
+    } catch (error) {
+      Logger.error(TAG, `根据ID获取播客失败: ${JSON.stringify(error)}`);
+      return null;
+    }
   }
 }
 

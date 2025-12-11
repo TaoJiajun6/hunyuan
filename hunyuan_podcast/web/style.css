@@ -648,9 +648,10 @@ body {
 .player-card {
   position: fixed;
   bottom: 24px;
-  left: calc(var(--sidebar-width) + 40px);
-  right: 40px;
+  left: 50%;
+  transform: translateX(-50%);
   max-width: 800px;
+  width: calc(100% - var(--sidebar-width) - 80px);
   background: #ffffff;
   border-radius: 16px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
@@ -825,8 +826,9 @@ body {
   }
 
   .player-card {
-    left: 20px;
-    right: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: calc(100% - 40px);
     bottom: 20px;
   }
 

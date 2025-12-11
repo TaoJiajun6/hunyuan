@@ -1263,26 +1263,8 @@ function loadPodcastDetail(podcast) {
     return;
   }
   
-  // 处理时间
-  let created_at = podcast.created_at;
-  if (created_at) {
-    if (created_at > 10000000000) {
-      created_at = Math.floor(created_at / 1000);
-    }
-    var date = new Date(created_at * 1000);
-    var dateStr = date.toLocaleDateString('zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit'
-    });
-    var timeStr = date.toLocaleTimeString('zh-CN', {
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  } else {
-    var dateStr = '未知';
-    var timeStr = '';
-  }
+  // 直接使用数据库中的 created_at 字段
+  const created_at = podcast.created_at || '';
   
   // 格式化时长
   let durationStr = '未知';
@@ -1330,7 +1312,7 @@ function loadPodcastDetail(podcast) {
         <div class="detail-meta">
           ${rolesText ? `<span>${rolesText}</span>` : ''}
           ${category ? `<span>${category}</span>` : ''}
-          <span>${dateStr} ${timeStr}</span>
+          ${created_at ? `<span>${created_at}</span>` : '<span>未知</span>'}
         </div>
       </div>
     </div>

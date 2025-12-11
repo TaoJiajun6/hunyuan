@@ -29,5 +29,19 @@ export {
   PodcastResult,
   ProgressStatus,
   AnalyzeTextRequest,
-  AnalyzeTextResult
+  AnalyzeTextResult,
+  PodcastListItem
 } from './src/main/ets/services/PodcastService'
+
+// 云数据库服务
+export {
+  cloudDatabaseService,
+  CloudDatabaseService,
+  CloudDatabaseConfig,
+  PodcastQueryResult
+} from './src/main/ets/services/CloudDatabaseService'
+
+// 数据库对象类型
+export {
+  PodcastInfo
+} from './src/main/ets/database/PodcastInfo'
