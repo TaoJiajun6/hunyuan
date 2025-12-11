@@ -56,9 +56,9 @@
       "buildFunction": "PodcastPageBuilder"
     },
     {
-      "name": "AIPodcastPage",
-      "pageSourceFile": "src/main/ets/pages/podcast/AIPodcastPage.ets",
-      "buildFunction": "AIPodcastPageBuilder"
+      "name": "PodcastCreatePage",
+      "pageSourceFile": "src/main/ets/pages/podcast/PodcastCreatePage.ets",
+      "buildFunction": "PodcastCreatePageBuilder"
     },
     {
       "name": "PodcastMultiRolePage",

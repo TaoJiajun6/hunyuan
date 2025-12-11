@@ -1775,9 +1775,12 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
     - 生成过程可能需要几分钟，建议使用job_id轮询进度
     - 使用云存储URL可以避免请求体过大，提高传输效率和稳定性
     """
-    # 生成或使用提供的 job_id
+    # 生成或使用提供的 job_id（用于进度跟踪）
     if not request.job_id:
         request.job_id = f"job_{int(time.time() * 1000)}_{os.getpid()}_{random.randint(1000, 9999)}"
+    
+    # 生成独立的 podcast_id（用于数据库存储和文件命名）
+    podcast_id = f"{int(time.time() * 1000)}_{random.randint(100000, 999999)}"
     
     # 立即创建初始进度，确保前端轮询时能立即获取到状态
     _update_progress(request.job_id, "queued", 1, "任务已提交，准备开始处理")
@@ -2248,7 +2251,7 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 background_volume=request.background_volume,
                 background_mode="single",  # 单个背景音乐，使用single模式
                 verbose=True,
-                podcast_id=request.job_id  # 使用ID生成文件名
+                podcast_id=podcast_id  # 使用独立的podcast_id生成文件名
             )
             generation_time = time.time() - generation_start
             logger.info("=" * 60)
@@ -2361,7 +2364,7 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
             duration_seconds = get_audio_duration(output_path)
             
             podcast_metadata = {
-                "id": request.job_id,
+                "id": podcast_id,  # 使用独立的podcast_id作为数据库id
                 "title": podcast_title,
                 "audio_url": agc_result.get('url') if isinstance(agc_result, dict) else None,
                 "local_file": os.path.basename(output_path) if output_path else None,
@@ -2495,6 +2498,13 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
     - 生成过程可能需要几分钟，建议使用job_id轮询进度
     - 使用云存储URL可以避免请求体过大，提高传输效率和稳定性
     """
+    # 生成或使用提供的 job_id（用于进度跟踪）
+    if not request.job_id:
+        request.job_id = f"job_{int(time.time() * 1000)}_{os.getpid()}_{random.randint(1000, 9999)}"
+    
+    # 生成独立的 podcast_id（用于数据库存储和文件命名）
+    podcast_id = f"{int(time.time() * 1000)}_{random.randint(100000, 999999)}"
+    
     # 立即创建初始进度，确保前端轮询时能立即获取到状态
     _update_progress(request.job_id, "queued", 1, "任务已提交，准备开始处理")
     start_time = time.time()
@@ -2675,7 +2685,7 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
                 background_volume=request.background_volume,
                 background_mode="single",  # 单个背景音乐，使用single模式
                 verbose=True,
-                podcast_id=request.job_id  # 使用ID生成文件名
+                podcast_id=podcast_id  # 使用独立的podcast_id生成文件名
             )
             generation_time = time.time() - generation_start
             logger.info(f"播客音频生成完成，耗时: {generation_time:.2f}s")
@@ -2771,7 +2781,7 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
             character_names = [char.name for char in request.characters]
             
             podcast_metadata = {
-                "id": request.job_id,
+                "id": podcast_id,  # 使用独立的podcast_id作为数据库id
                 "title": podcast_title,
                 "audio_url": agc_result.get('url') if isinstance(agc_result, dict) else None,
                 "local_file": os.path.basename(output_path) if output_path else None,
@@ -2894,6 +2904,13 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
     - 生成过程可能需要几分钟，建议使用job_id轮询进度
     - 使用云存储URL可以避免请求体过大，提高传输效率和稳定性
     """
+    # 生成或使用提供的 job_id（用于进度跟踪）
+    if not request.job_id:
+        request.job_id = f"job_{int(time.time() * 1000)}_{os.getpid()}_{random.randint(1000, 9999)}"
+    
+    # 生成独立的 podcast_id（用于数据库存储和文件命名）
+    podcast_id = f"{int(time.time() * 1000)}_{random.randint(100000, 999999)}"
+    
     # 立即创建初始进度，确保前端轮询时能立即获取到状态
     _update_progress(request.job_id, "queued", 1, "任务已提交，准备开始处理")
     start_time = time.time()
@@ -3060,7 +3077,7 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
                 background_volume=request.background_volume,
                 background_mode="single",  # 单个背景音乐，使用single模式
                 verbose=True,
-                podcast_id=request.job_id  # 使用ID生成文件名
+                podcast_id=podcast_id  # 使用独立的podcast_id生成文件名
             )
             generation_time = time.time() - generation_start
             logger.info(f"播客音频生成完成，耗时: {generation_time:.2f}s")
@@ -3156,7 +3173,7 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
             roles_list = list(unique_roles)
             
             podcast_metadata = {
-                "id": request.job_id,
+                "id": podcast_id,  # 使用独立的podcast_id作为数据库id
                 "title": podcast_title,
                 "audio_url": agc_result.get('url') if isinstance(agc_result, dict) else None,
                 "local_file": os.path.basename(output_path) if output_path else None,

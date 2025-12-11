@@ -567,59 +567,24 @@ export struct PodcastPage {
    * 上传文字内容并生成播客
    */
   async uploadText(): Promise<void> {
-    // 跳转到多角色播客页面，预设输入类型为文字
-    const params: PodcastMultiRolePageParams = {
-      initialInputType: '文字'
-    };
-    RouterUtils.pushPathByName(RouterMap.PODCAST_MULTI_ROLE_PAGE, params);
+    // 跳转到整合的播客创建页面
+    RouterUtils.pushPathByName(RouterMap.PODCAST_CREATE_PAGE);
   }
 
   /**
    * 上传文件并生成播客
    */
   async uploadFile(): Promise<void> {
-    try {
-      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-
-      // 选择文本文件（支持.txt、.doc、.docx、.pdf）
-      const textFileInfos = await FileUtils.pickTextFiles(context, true);
-      if (textFileInfos && textFileInfos.length > 0) {
-        // 获取云存储URL列表
-        const fileUrls: string[] = [];
-        for (let i = 0; i < textFileInfos.length; i++) {
-          const fileInfo = textFileInfos[i];
-          if (fileInfo && fileInfo.cloudUrl) {
-            fileUrls.push(fileInfo.cloudUrl);
-          }
-        }
-
-        if (fileUrls.length > 0) {
-          await this.generatePodcastFromFiles(fileUrls);
-        } else {
-          promptAction.showToast({
-            message: '文件上传失败，请重试',
-            duration: 2000
-          });
-        }
-      }
-    } catch (error) {
-      Logger.error('PodcastPage', `上传文件失败: ${error}`);
-      promptAction.showToast({
-        message: `上传文件失败: ${error}`,
-        duration: 2000
-      });
-    }
+    // 跳转到整合的播客创建页面
+    RouterUtils.pushPathByName(RouterMap.PODCAST_CREATE_PAGE);
   }
 
   /**
    * 上传链接并生成播客
    */
   async uploadLink(): Promise<void> {
-    // 跳转到多角色播客页面，预设输入类型为网页
-    const params: PodcastMultiRolePageParams = {
-      initialInputType: '网页'
-    };
-    RouterUtils.pushPathByName(RouterMap.PODCAST_MULTI_ROLE_PAGE, params);
+    // 跳转到整合的播客创建页面
+    RouterUtils.pushPathByName(RouterMap.PODCAST_CREATE_PAGE);
   }
 
 
@@ -857,30 +822,12 @@ export struct PodcastPage {
 
               Scroll() {
                 Row({ space: 12 }) {
-                  // 多角色互动播客卡片
+                  // AI播客创建卡片（整合三个模块）
                   this.podcastFunctionCard(
-                    '多角色互动播客',
-                    '将文本素材转化为多角色自然互动的播客音频',
+                    'AI播客',
+                    '多角色互动、自定义角色、主题深度播客一键生成',
                     () => {
-                      RouterUtils.pushPathByName(RouterMap.PODCAST_MULTI_ROLE_PAGE)
-                    }
-                  )
-
-                  // 自定义角色播客卡片
-                  this.podcastFunctionCard(
-                    '自定义角色播客',
-                    '根据用户自定义的角色人设和音色生成契合风格的播客音频',
-                    () => {
-                      RouterUtils.pushPathByName(RouterMap.PODCAST_CHARACTER_PAGE)
-                    }
-                  )
-
-                  // 主题深度播客卡片
-                  this.podcastFunctionCard(
-                    '主题深度播客',
-                    '基于指定主题生成有深度、引发思考的播客音频',
-                    () => {
-                      RouterUtils.pushPathByName(RouterMap.PODCAST_DEEP_PAGE)
+                      RouterUtils.pushPathByName(RouterMap.PODCAST_CREATE_PAGE)
                     }
                   )
 
