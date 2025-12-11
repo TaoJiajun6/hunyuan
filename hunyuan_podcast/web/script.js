@@ -787,6 +787,15 @@ function createPodcastCard(podcast) {
     </div>
   `;
   
+  // 添加点击事件监听（包括缩略图区域）
+  const thumbnail = card.querySelector('.podcast-thumbnail');
+  if (thumbnail) {
+    thumbnail.style.cursor = 'pointer';
+    thumbnail.addEventListener('click', function(e) {
+      openPodcastDetail(podcast.id, e);
+    });
+  }
+  
   // 添加点击事件监听（备用方案）
   const mainContent = card.querySelector('.podcast-card-main');
   if (mainContent) {

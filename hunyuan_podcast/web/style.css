@@ -541,6 +541,12 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.podcast-thumbnail:hover {
+  opacity: 0.9;
 }
 
 .podcast-thumbnail::before {
