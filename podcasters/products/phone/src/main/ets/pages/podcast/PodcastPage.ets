@@ -1,4 +1,4 @@
-import { CommonConstants, RouterMap, RouterUtils } from 'lib_common';
+import { BreakpointModel, CommonConstants, RouterMap, RouterUtils, WindowModel } from 'lib_common';
 import { NavHeaderBar } from 'lib_widget';
 import { MusicPlayController } from 'module_musicplay';
 import { CloudStorageMusicUtils, CloudAudioFile } from '../../common/CloudStorageMusicUtils';
@@ -9,6 +9,7 @@ import { picker } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
 import { Logger } from 'lib_common';
 import { podcastService, MultiRoleRequest } from 'lib_api';
+import { AppStorageV2 } from '@kit.ArkUI';
 
 /**
  * 多角色播客页面路由参数
@@ -32,6 +33,12 @@ export struct PodcastPage {
   @Local musicModel: MusicModel = getMusicModel(); // 音乐模型
   @Local isShowUploadMenu: boolean = false; // 是否显示上传菜单
   @Local isGenerating: boolean = false; // 是否正在生成播客
+  @Param headerBarHeight: Length = $r('app.float.nav_header_height');
+  @Local windowModel: WindowModel = AppStorageV2.connect(WindowModel, () => new WindowModel())!;
+  @Local breakPointModel: BreakpointModel = AppStorageV2.connect(BreakpointModel, () => new BreakpointModel())!;
+  @Consumer() isCommentInModalDialog: boolean = false
+  @Param customPadding: Padding = {};
+  @Param bgColor: ResourceColor = '#00000000';
 
   /**
    * 页面加载时自动导入播放列表（如果为空）
@@ -512,13 +519,62 @@ export struct PodcastPage {
     NavDestination() {
       Column() {
         // 顶部标题栏，带右侧操作按钮
-        Row(){
+        Row({ space: 12 }) {
           Text('真AI播客')
             .fontSize($r('sys.float.Title_M'))
             .fontColor($r('sys.color.font_primary'))
             .fontWeight(FontWeight.Bold)
             .margin({ left: CommonConstants.SPACE_S })
-        }
+          Blank()
+          // 加号按钮（上传内容）
+          Button() {
+            Image($r('app.media.plus'))
+              .width(18)
+              .height(18)
+              .fillColor(Color.White)
+          }
+          .type(ButtonType.Normal)
+          .backgroundColor($r('sys.color.icon_emphasize'))
+          .borderRadius(20)
+          .width(40)
+          .height(40)
+          .bindMenu(this.MyMenu)
+
+          // 搜索按钮
+          Button() {
+            SymbolGlyph($r('sys.symbol.magnifyingglass'))
+              .fontSize(18)
+              .fontColor([$r('sys.color.font_primary')])
+          }
+          .type(ButtonType.Normal)
+          .backgroundColor(Color.Transparent)
+          .borderRadius(20)
+          .width(40)
+          .height(40)
+          .onClick(() => {
+            // 搜索功能
+            promptAction.showToast({ message: '搜索功能开发中', duration: 2000 });
+          })
+
+          // 更多选项按钮
+          Button() {
+            SymbolGlyph($r('sys.symbol.list_bullet'))
+              .fontSize(18)
+              .fontColor([$r('sys.color.font_primary')])
+          }
+          .type(ButtonType.Normal)
+          .backgroundColor(Color.Transparent)
+          .borderRadius(20)
+          .width(40)
+          .height(40)
+          .onClick(() => {
+            // 更多选项
+            promptAction.showToast({ message: '更多选项开发中', duration: 2000 });
+          })
+
+        }.height(this.headerBarHeight)
+        .justifyContent(FlexAlign.SpaceBetween)
+        .width(CommonConstants.FULL_PERCENT)
 
 
         Scroll() {
@@ -639,66 +695,18 @@ export struct PodcastPage {
         // 播放器组件 - 放在底部导航栏上方
         MusicPlayController()
       }
-      .width('100%')
-      .height('100%')
-      .backgroundColor($r('sys.color.background_primary'))
+      .padding({
+        left: this.customPadding.left ?? this.breakPointModel.pagePadding,
+        right: this.customPadding.right ?? this.breakPointModel.pagePadding,
+        top: this.customPadding.top ?? (this.isCommentInModalDialog ? CommonConstants.PADDING_S :
+          this.windowModel.windowTopPadding),
+        bottom: this.customPadding.bottom ?? 0,
+      })
+      .width(CommonConstants.FULL_PERCENT)
+      .backgroundColor(this.bgColor)
 
     }
     .hideTitleBar(true)
-  }
-
-  /**
-   * 标题栏右侧按钮构建器
-   */
-  @Builder
-  headerRightBuilder() {
-    Row({ space: 12 }) {
-      // 加号按钮（上传内容）
-      Button() {
-        Image($r('app.media.plus'))
-          .width(18)
-          .height(18)
-          .fillColor(Color.White)
-      }
-      .type(ButtonType.Normal)
-      .backgroundColor($r('sys.color.icon_emphasize'))
-      .borderRadius(20)
-      .width(40)
-      .height(40)
-      //.bindMenu(this.MyMenu)
-
-      // 搜索按钮
-      Button() {
-        SymbolGlyph($r('sys.symbol.magnifyingglass'))
-          .fontSize(18)
-          .fontColor([$r('sys.color.font_primary')])
-      }
-      .type(ButtonType.Normal)
-      .backgroundColor(Color.Transparent)
-      .borderRadius(20)
-      .width(40)
-      .height(40)
-      .onClick(() => {
-        // 搜索功能
-        promptAction.showToast({ message: '搜索功能开发中', duration: 2000 });
-      })
-
-      // 更多选项按钮
-      Button() {
-        SymbolGlyph($r('sys.symbol.list_bullet'))
-          .fontSize(18)
-          .fontColor([$r('sys.color.font_primary')])
-      }
-      .type(ButtonType.Normal)
-      .backgroundColor(Color.Transparent)
-      .borderRadius(20)
-      .width(40)
-      .height(40)
-      .onClick(() => {
-        // 更多选项
-        promptAction.showToast({ message: '更多选项开发中', duration: 2000 });
-      })
-    }
   }
 
   /**
@@ -707,37 +715,37 @@ export struct PodcastPage {
   @Builder
   MyMenu() {
     Menu() {
-      MenuItem({ 
-        startIcon: $r("sys.symbol.doc_text"), 
-        content: "文字" 
+      MenuItem({
+        startIcon: $r("sys.symbol.doc_text"),
+        content: "文字"
       })
-      .onChange(() => {
-        this.uploadText();
-      })
+        .onChange(() => {
+          this.uploadText();
+        })
 
-      MenuItem({ 
-        startIcon: $r("sys.symbol.folder"), 
-        content: "文件" 
+      MenuItem({
+        startIcon: $r("sys.symbol.folder"),
+        content: "文件"
       })
-      .onChange(() => {
-        this.uploadFile();
-      })
+        .onChange(() => {
+          this.uploadFile();
+        })
 
-      MenuItem({ 
-        startIcon: $r("sys.symbol.link"), 
-        content: "链接" 
+      MenuItem({
+        startIcon: $r("sys.symbol.link"),
+        content: "链接"
       })
-      .onChange(() => {
-        this.uploadLink();
-      })
+        .onChange(() => {
+          this.uploadLink();
+        })
 
-      MenuItem({ 
-        startIcon: $r("sys.symbol.camera"), 
-        content: "图片和视频" 
+      MenuItem({
+        startIcon: $r("sys.symbol.camera"),
+        content: "图片和视频"
       })
-      .onChange(() => {
-        this.uploadImageAndVideo();
-      })
+        .onChange(() => {
+          this.uploadImageAndVideo();
+        })
     }
   }
 

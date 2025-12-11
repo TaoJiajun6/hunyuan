@@ -790,13 +790,22 @@ function playPodcast(audioUrl, podcastId, event) {
   // 可以打开一个播放器或者直接播放
   const player = document.getElementById('audio-player');
   if (player) {
-    console.log('播放播客:', podcastId, '音频URL:', audioUrl);
-    player.src = audioUrl;
+    // 检测是否是云存储URL（需要代理）
+    let finalUrl = audioUrl;
+    if (audioUrl.includes('agcstorage.link') || audioUrl.includes('ops-server')) {
+      // 使用代理接口
+      finalUrl = `/api/v1/podcast/proxy_audio?url=${encodeURIComponent(audioUrl)}`;
+      console.log('检测到云存储URL，使用代理接口:', finalUrl);
+    }
+    
+    console.log('播放播客:', podcastId, '原始URL:', audioUrl, '最终URL:', finalUrl);
+    player.src = finalUrl;
     player.style.display = 'block';
     
     // 添加错误处理
     player.onerror = function(e) {
       console.error('音频播放失败:', e);
+      console.error('失败的URL:', finalUrl);
       alert('音频加载失败，请检查URL是否正确或网络连接');
       player.style.display = 'none';
     };

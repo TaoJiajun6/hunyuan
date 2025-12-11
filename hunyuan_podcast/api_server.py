@@ -3565,6 +3565,136 @@ async def upload_voice_file(request: UploadVoiceRequest):
         )
 
 
+@app.get("/api/v1/podcast/proxy_audio")
+async def proxy_audio_from_agc(url: str):
+    """
+    代理下载云存储音频文件（用于前端播放）
+    
+    - **url**: 云存储URL，例如 https://ops-server-drcn.agcstorage.link/v0/bucket/path/file.wav
+    
+    此接口使用服务器端的认证信息从云存储下载文件并返回给前端，解决浏览器无法直接访问需要认证的云存储URL的问题。
+    """
+    try:
+        # 验证URL格式
+        if not url or not url.startswith('http'):
+            raise HTTPException(status_code=400, detail="无效的URL")
+        
+        # 检查是否是云存储URL
+        if 'agcstorage.link' not in url and 'ops-server' not in url:
+            raise HTTPException(status_code=400, detail="不是有效的云存储URL")
+        
+        # 从环境变量读取云存储配置
+        storage_url = os.getenv('AGC_STORAGE_URL', 'https://ops-server-drcn.agcstorage.link/v0/')
+        bucket = os.getenv('AGC_BUCKET')
+        domain = os.getenv('AGC_STORAGE_DOMAIN') or os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
+        client_id = os.getenv('AGC_STORAGE_CLIENT_ID') or os.getenv('AGC_CLIENT_ID')
+        client_secret = os.getenv('AGC_STORAGE_CLIENT_SECRET') or os.getenv('AGC_CLIENT_SECRET')
+        product_id = os.getenv('AGC_PRODUCT_ID')
+        
+        if not client_id or not client_secret:
+            raise HTTPException(status_code=500, detail="云存储认证信息未配置")
+        
+        # 从URL中提取bucket和object_name
+        # URL格式: https://ops-server-drcn.agcstorage.link/v0/{bucket}/{object_name}
+        # 或者: https://ops-server-drcn.agcstorage.link/v0/podcasters-y0qig/outputs/podcasts/file.wav
+        try:
+            # 尝试从URL中提取路径部分
+            # 找到 /v0/ 之后的部分
+            v0_index = url.find('/v0/')
+            if v0_index == -1:
+                raise HTTPException(status_code=400, detail="URL格式不正确，未找到 /v0/ 路径")
+            
+            path_after_v0 = url[v0_index + 4:]  # 跳过 '/v0/'
+            if not path_after_v0:
+                raise HTTPException(status_code=400, detail="URL格式不正确，/v0/ 后没有路径")
+            
+            # 分割路径：第一部分是bucket，剩余部分是object_name
+            path_parts = path_after_v0.split('/', 1)
+            if len(path_parts) < 2:
+                # 如果只有bucket，没有object_name
+                if not bucket:
+                    extracted_bucket = path_parts[0] if path_parts else ''
+                    raise HTTPException(status_code=400, detail=f"无法从URL提取object_name，只找到bucket: {extracted_bucket}")
+                object_name = path_parts[0] if path_parts else ''
+            else:
+                extracted_bucket = path_parts[0]
+                object_name = path_parts[1]
+                # 如果配置了bucket，使用配置的bucket（更可靠）
+                if bucket and extracted_bucket != bucket:
+                    logger.warning(f"URL中的bucket ({extracted_bucket}) 与配置的bucket ({bucket}) 不一致，使用配置的bucket")
+                elif not bucket:
+                    bucket = extracted_bucket
+            
+            if not bucket:
+                raise HTTPException(status_code=400, detail="无法从URL或配置中获取bucket信息")
+            if not object_name:
+                raise HTTPException(status_code=400, detail="无法从URL提取object_name")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"解析URL失败: {e}")
+            raise HTTPException(status_code=400, detail=f"解析URL失败: {str(e)}")
+        
+        # 获取token
+        from .upload_client import get_agc_token
+        token, _ = get_agc_token(domain, client_id, client_secret, storage_url=storage_url, service_type='storage')
+        
+        # 构建下载URL
+        if not storage_url.endswith('/'):
+            storage_url = storage_url + '/'
+        download_url = f"{storage_url}{bucket}/{object_name}"
+        
+        # 下载文件（流式传输）
+        headers = {
+            'productId': product_id or '',
+            'client_id': client_id,
+            'Authorization': f'Bearer {token}',
+        }
+        
+        logger.info(f"代理下载云存储音频: {download_url}")
+        
+        # 使用流式下载，直接返回给前端
+        response = requests.get(download_url, headers=headers, stream=True, timeout=300)
+        response.raise_for_status()
+        
+        # 确定媒体类型
+        ext = os.path.splitext(object_name)[1].lower()
+        media_types = {
+            '.wav': 'audio/wav',
+            '.mp3': 'audio/mpeg',
+            '.flac': 'audio/flac',
+            '.ogg': 'audio/ogg',
+            '.m4a': 'audio/mp4',
+            '.aac': 'audio/aac',
+        }
+        media_type = media_types.get(ext, 'application/octet-stream')
+        
+        # 流式返回文件内容
+        
+        def generate():
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    yield chunk
+        
+        return StreamingResponse(
+            generate(),
+            media_type=media_type,
+            headers={
+                'Content-Disposition': f'inline; filename="{os.path.basename(object_name)}"',
+                'Cache-Control': 'public, max-age=3600'
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"代理下载云存储音频失败 (HTTP {e.response.status_code if e.response else 'unknown'}): {e}")
+        raise HTTPException(status_code=e.response.status_code if e.response else 500, detail=f"下载失败: {str(e)}")
+    except Exception as e:
+        logger.error(f"代理下载云存储音频失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"代理下载失败: {str(e)}")
+
+
 @app.get("/api/v1/podcast/file/{file_id}")
 async def get_podcast_file(file_id: str):
     """
