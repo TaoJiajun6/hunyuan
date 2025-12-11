@@ -772,7 +772,7 @@ function createPodcastCard(podcast) {
           </div>
         </div>
       </div>
-      <div class="podcast-actions">
+      <div class="podcast-actions" onclick="event.stopPropagation();">
         <button class="play-btn" onclick="playPodcast('${podcast.audio_url || ''}', '${podcast.id}', event)" title="${podcast.audio_url ? '播放' : '暂无音频'}" ${!podcast.audio_url ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''}>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
             <path d="M6 4 L12 8 L6 12 Z"/>
@@ -786,6 +786,18 @@ function createPodcastCard(podcast) {
       </div>
     </div>
   `;
+  
+  // 添加点击事件监听（备用方案）
+  const mainContent = card.querySelector('.podcast-card-main');
+  if (mainContent) {
+    mainContent.addEventListener('click', function(e) {
+      // 如果点击的是按钮区域，不处理
+      if (e.target.closest('.podcast-actions')) {
+        return;
+      }
+      openPodcastDetail(podcast.id, e);
+    });
+  }
   
   return card;
 }
@@ -1202,6 +1214,194 @@ function filterByCategory(category) {
   document.querySelectorAll('.category-btn').forEach(btn => btn.classList.remove('active'));
   event.target.classList.add('active');
   loadHistory();
+}
+
+// 打开播客详情页
+function openPodcastDetail(podcastId, event) {
+  if (event) {
+    event.stopPropagation();
+  }
+  
+  console.log('打开播客详情:', podcastId);
+  
+  // 从播客列表中查找
+  const podcast = podcastList.find(p => p.id === podcastId);
+  if (!podcast) {
+    console.error('找不到播客:', podcastId, '播客列表长度:', podcastList.length);
+    alert('找不到该播客');
+    return;
+  }
+  
+  console.log('找到播客:', podcast);
+  
+  // 切换到详情页（不传递event，避免导航栏高亮问题）
+  currentPage = 'detail';
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  const detailPage = document.getElementById('page-detail');
+  if (detailPage) {
+    detailPage.classList.add('active');
+  }
+  
+  // 加载详情内容
+  loadPodcastDetail(podcast);
+}
+
+// 加载播客详情
+function loadPodcastDetail(podcast) {
+  const detailContent = document.getElementById('detail-content');
+  if (!detailContent) {
+    console.error('找不到详情内容容器');
+    return;
+  }
+  
+  // 处理时间
+  let created_at = podcast.created_at;
+  if (created_at) {
+    if (created_at > 10000000000) {
+      created_at = Math.floor(created_at / 1000);
+    }
+    var date = new Date(created_at * 1000);
+    var dateStr = date.toLocaleDateString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    var timeStr = date.toLocaleTimeString('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  } else {
+    var dateStr = '未知';
+    var timeStr = '';
+  }
+  
+  // 格式化时长
+  let durationStr = '未知';
+  let durationMinutes = 0;
+  if (podcast.duration) {
+    const totalSeconds = parseInt(podcast.duration);
+    durationMinutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    if (durationMinutes > 0) {
+      durationStr = seconds > 0 ? `${durationMinutes}分${seconds}秒` : `${durationMinutes}分钟`;
+    } else {
+      durationStr = `${seconds}秒`;
+    }
+  }
+  
+  // 获取脚本内容
+  const script = podcast.script || podcast.content || '';
+  
+  // 获取分类
+  const category = podcast.category || podcast.topic || '';
+  
+  // 获取角色信息
+  let rolesText = '';
+  if (podcast.roles) {
+    let roles = podcast.roles;
+    if (typeof roles === 'string') {
+      try {
+        roles = JSON.parse(roles);
+      } catch (e) {
+        roles = [];
+      }
+    }
+    if (Array.isArray(roles) && roles.length > 0) {
+      rolesText = roles.join(' | ');
+    }
+  }
+  
+  // 构建详情页HTML
+  detailContent.innerHTML = `
+    <!-- 缩略图和标题区域 -->
+    <div class="detail-hero">
+      <div class="detail-thumbnail"></div>
+      <div class="detail-header-info">
+        <h2 class="detail-podcast-title">${podcast.title || '未命名播客'}</h2>
+        <div class="detail-meta">
+          ${rolesText ? `<span>${rolesText}</span>` : ''}
+          ${category ? `<span>${category}</span>` : ''}
+          <span>${dateStr} ${timeStr}</span>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 播放按钮 -->
+    <div class="detail-play-section">
+      <button class="detail-play-btn" onclick="playPodcast('${podcast.audio_url || ''}', '${podcast.id}', event)" ${!podcast.audio_url ? 'disabled' : ''}>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M8 5 L19 12 L8 19 Z"/>
+        </svg>
+        <span>${durationStr}</span>
+      </button>
+    </div>
+    
+    <!-- 标签页 -->
+    <div class="detail-tabs">
+      <button class="detail-tab active" onclick="switchDetailTab('script')" id="tab-script">脚本</button>
+      <button class="detail-tab" onclick="switchDetailTab('outline')" id="tab-outline">大纲</button>
+    </div>
+    
+    <!-- 内容区域 -->
+    <div class="detail-body">
+      <div id="detail-script" class="detail-tab-content active">
+        <div class="detail-text-content">${script || '暂无脚本内容'}</div>
+      </div>
+      <div id="detail-outline" class="detail-tab-content">
+        <div class="detail-text-content">${generateOutline(script) || '暂无大纲内容'}</div>
+      </div>
+    </div>
+  `;
+}
+
+// 生成大纲（简单实现：提取段落标题）
+function generateOutline(script) {
+  if (!script) return '';
+  
+  // 简单的段落提取逻辑
+  const lines = script.split('\n').filter(line => line.trim().length > 0);
+  const outline = [];
+  
+  lines.forEach((line, index) => {
+    const trimmed = line.trim();
+    // 如果行长度较短且包含常见标题关键词，可能是标题
+    if (trimmed.length < 50 && (trimmed.includes('：') || trimmed.includes(':') || trimmed.match(/^[一二三四五六七八九十]+[、.]/))) {
+      outline.push(trimmed);
+    }
+  });
+  
+  if (outline.length === 0) {
+    // 如果没有找到明显的标题，返回前几个段落的第一句
+    const paragraphs = script.split(/\n\s*\n/).slice(0, 5);
+    return paragraphs.map(p => {
+      const firstLine = p.split('\n')[0].trim();
+      return firstLine.length > 100 ? firstLine.substring(0, 100) + '...' : firstLine;
+    }).join('\n\n');
+  }
+  
+  return outline.join('\n');
+}
+
+// 切换详情页标签
+function switchDetailTab(tabName) {
+  // 更新标签按钮状态
+  document.querySelectorAll('.detail-tab').forEach(tab => tab.classList.remove('active'));
+  const tabBtn = document.getElementById(`tab-${tabName}`);
+  if (tabBtn) {
+    tabBtn.classList.add('active');
+  }
+  
+  // 更新内容区域
+  document.querySelectorAll('.detail-tab-content').forEach(content => content.classList.remove('active'));
+  const contentEl = document.getElementById(`detail-${tabName}`);
+  if (contentEl) {
+    contentEl.classList.add('active');
+  }
+}
+
+// 返回上一页
+function goBack() {
+  switchPage('explore');
 }
 
 // 初始化

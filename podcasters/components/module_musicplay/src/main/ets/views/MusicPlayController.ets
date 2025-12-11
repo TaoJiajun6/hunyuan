@@ -107,7 +107,7 @@ export struct MusicPlayController {
       angle: 90,
       colors: [
         ['#ffb3e0', 0.0],
-        ['#c085f5', 0.5],
+        ['#ffc78cfd', 0.6],
         ['#a0e5ff', 1.0]
       ]
     })
@@ -151,16 +151,16 @@ export struct MusicPlayController {
       .backgroundColor('#0D000000')
       .alignItems(VerticalAlign.Center)
       .justifyContent(FlexAlign.Center)
-
+      .margin({right:5})
       Text('暂无播放')
         .fontSize(14)
         .fontWeight(500)
-        .fontColor('#88000000')
+        .fontColor('#000000')
     }
     .layoutWeight(1)
     .alignItems(VerticalAlign.Center)
     .justifyContent(FlexAlign.Start)
-    .padding(12)
+    .padding(5)
   }
 
   /**
@@ -171,31 +171,7 @@ export struct MusicPlayController {
     Stack({ alignContent: Alignment.BottomStart }) {
       // 圆形唱片作为缩略图
       RotatingCover()
-      
-      // 标签（本地/云存储）- 位于左下角
-      if (this.musicModel.currentSong?.isLocal) {
-        Row() {
-          Text('本地')
-            .fontSize(10)
-            .fontColor(Color.White)
-            .fontWeight(FontWeight.Medium)
-        }
-        .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-        .borderRadius(4)
-        .backgroundColor('#FF1949')
-        .margin({ left: 2, bottom: 2 })
-      } else {
-        Row() {
-          Text('云存储音频')
-            .fontSize(10)
-            .fontColor(Color.White)
-            .fontWeight(FontWeight.Medium)
-        }
-        .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-        .borderRadius(4)
-        .backgroundColor('#FF1949')
-        .margin({ left: 2, bottom: 2 })
-      }
+
     }
     .width(56)
     .height(56)
@@ -233,14 +209,6 @@ export struct MusicPlayController {
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
-        
-        // 类型标签
-        Image(this.getSongType())//VIP 标签
-          .height(14)
-          .width(20)
-          .fillColor(this.themeColor)
-          .visibility((!this.musicModel.currentSong?.isVip && !this.musicModel.currentSong?.isLocal) ?
-          Visibility.None : Visibility.Visible)
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
@@ -263,9 +231,9 @@ export struct MusicPlayController {
   PlayPauseButton() {
     Button() {
       Image(this.musicModel.isPlay ? $r('app.media.ic_pause') : $r('app.media.ic_play'))// 播放|暂停
-        .width(24)
-        .height(24)
-        .fillColor(Color.White)
+        .width(28)
+        .aspectRatio(1)
+        .fillColor('#000000')
     }
     .width(40)
     .height(40)
@@ -281,9 +249,9 @@ export struct MusicPlayController {
   PlayListButton() {
     Button() {
       Image($r('app.media.ic_music_list'))// 当前播放列表入口
-        .width(20)
-        .height(20)
-        .fillColor(Color.White)
+        .width(28)
+        .aspectRatio(1)
+        .fillColor('#000000')
     }
     .width(40)
     .height(40)
