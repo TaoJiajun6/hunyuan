@@ -70,24 +70,48 @@ export struct MusicPlayController {
   }
 
   build() {
+    // 卡片样式的播放器
     Row() {
       if (!this.musicModel.currentSong) {
         this.NoSong()
       } else {
-        // 左侧：当前歌曲信息
-        this.SongInfoBuild()
+        // 卡片内容
+        Row({ space: 12 }) {
+          // 左侧：缩略图
+          this.ThumbnailBuilder()
 
-        //中间：播放操作按钮
-        this.PlayButton()
+          // 中间：歌曲信息
+          Column({ space: 4 }) {
+            this.SongInfoBuild()
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+          .justifyContent(FlexAlign.Center)
+
+          // 右侧：控制按钮
+          Row({ space: 12 }) {
+            // 播放/暂停按钮
+            this.PlayPauseButton()
+            
+            // 播放列表按钮
+            this.PlayListButton()
+          }
+          .alignItems(VerticalAlign.Center)
+        }
+        .width('100%')
+        .padding(12)
       }
-
-      // 右侧：播放列表按钮
-      this.PlayListButton()
     }
     .width('100%')
-    .height(48)
-    .justifyContent(FlexAlign.Center)
-    .backgroundColor(this.isDefaultTheme ? $r('app.color.start_window_background') : this.playBarBgColor)
+    .height(55)
+    .backgroundColor(Color.White)
+    .borderRadius(16)
+    .shadow({
+      radius: 14,
+      color: '#1F000000',
+      offsetX: 0,
+      offsetY: 10
+    })
     .bindContentCover($$this.musicModel.isShowPlay, this.MusicPlayBuilder(), {
       transition: TransitionEffect.translate({ y: this.windowHeight })
         .animation({
@@ -97,7 +121,9 @@ export struct MusicPlayController {
     })
     .padding({
       left: 16,
-      right: 16
+      right: 16,
+      top: 8,
+      bottom: 8
     })
   }
 
@@ -123,44 +149,52 @@ export struct MusicPlayController {
       Text('暂无播放')
         .fontSize(14)
         .fontWeight(500)
-        .fontColor(this.titleFontColor)
+        .fontColor('#88000000')
     }
     .layoutWeight(1)
     .alignItems(VerticalAlign.Center)
     .justifyContent(FlexAlign.Start)
+    .padding(12)
   }
 
   /**
-   * 歌单信息
+   * 缩略图构建器
    */
   @Builder
-  SongInfoBuild() {
-    Row() {
-      // 圆形唱片
+  ThumbnailBuilder() {
+    Stack({ alignContent: Alignment.BottomStart }) {
+      // 圆形唱片作为缩略图
       RotatingCover()
-      Column() {
-        Text(this.musicModel.currentSong?.title)// 歌名
-          .fontSize(14)
-          .fontWeight(500)
-          .fontColor(this.titleFontColor)
+      
+      // 标签（本地/云存储）- 位于左下角
+      if (this.musicModel.currentSong?.isLocal) {
         Row() {
-          Image(this.getSongType())//VIP 标签
-            .height(16)
-            .width(25)
-            .margin({ right: 4 })
-            .fillColor(this.themeColor)
-            .visibility((!this.musicModel.currentSong?.isVip && !this.musicModel.currentSong?.isLocal) ?
-            Visibility.None : Visibility.Visible)
-          Text(this.musicModel.currentSong?.singer)//作者
+          Text('本地')
             .fontSize(10)
-            .fontColor(this.singerFontColor)
+            .fontColor(Color.White)
+            .fontWeight(FontWeight.Medium)
         }
+        .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+        .borderRadius(4)
+        .backgroundColor('#FF1949')
+        .margin({ left: 2, bottom: 2 })
+      } else {
+        Row() {
+          Text('云存储音频')
+            .fontSize(10)
+            .fontColor(Color.White)
+            .fontWeight(FontWeight.Medium)
+        }
+        .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+        .borderRadius(4)
+        .backgroundColor('#FF1949')
+        .margin({ left: 2, bottom: 2 })
       }
-      .alignItems(HorizontalAlign.Start)
     }
-    .layoutWeight(1)
+    .width(56)
+    .height(56)
     .onClick(() => {
-      // 播放列表为空提示
+      // 点击缩略图打开播放页面
       if (this.musicModel.songList.length <= 0) {
         promptAction.showToast({ message: '请选择歌曲播放' })
         return
@@ -170,64 +204,94 @@ export struct MusicPlayController {
   }
 
   /**
-   * 播放操作按钮
+   * 歌单信息
    */
   @Builder
-  PlayButton() {
-    Row() {
-      Image($r('app.media.ic_previous'))// 上一首
-        .height(24)
-        .width(24)
-        .margin({ right: 16 })
-        .displayPriority(2)
-        .fillColor(this.themeColor)
-        .onClick(singleClick(() => {
-          MediaService.getInstance().playPrevious();
-        }, 1000))
-
-
-      Image(this.musicModel.isPlay ? $r('app.media.ic_play') : $r('app.media.ic_pause'))// 播放|暂停
-        .height(23)
-        .width(23)
-        .displayPriority(3)
-        .borderRadius(50)
-        .fillColor(this.themeColor)
-        .onClick(singleClick(() => {
-          MediaService.getInstance().playAndPause();
-        }, 1000))
-
-      Image($r('app.media.ic_next'))// 下一首
-        .height(24)
-        .width(24)
-        .margin({
-          right: 16,
-          left: 16
-        })
-        .displayPriority(2)
-        .fillColor(this.themeColor)
-        .onClick(singleClick(() => {
-          MediaService.getInstance().playNext();
-        }, 1000))
+  SongInfoBuild() {
+    Column({ space: 4 }) {
+      // 标题
+      Text(this.musicModel.currentSong?.title || '未知播客')// 歌名
+        .fontSize(14)
+        .fontWeight(FontWeight.Bold)
+        .fontColor('#000000')
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .width('100%')
+      
+      // 作者和标签
+      Row({ space: 6 }) {
+        if (this.musicModel.currentSong?.singer) {
+          Text(this.musicModel.currentSong.singer)//作者
+            .fontSize(12)
+            .fontColor('#666666')
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        
+        // 类型标签
+        Image(this.getSongType())//VIP 标签
+          .height(14)
+          .width(20)
+          .fillColor(this.themeColor)
+          .visibility((!this.musicModel.currentSong?.isVip && !this.musicModel.currentSong?.isLocal) ?
+          Visibility.None : Visibility.Visible)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
     }
+    .width('100%')
+    .onClick(() => {
+      // 点击信息区域打开播放页面
+      if (this.musicModel.songList.length <= 0) {
+        promptAction.showToast({ message: '请选择歌曲播放' })
+        return
+      }
+      this.musicModel.isShowPlay = true;
+    })
+  }
+
+  /**
+   * 播放/暂停按钮
+   */
+  @Builder
+  PlayPauseButton() {
+    Button() {
+      Image(this.musicModel.isPlay ? $r('app.media.ic_pause') : $r('app.media.ic_play'))// 播放|暂停
+        .width(24)
+        .height(24)
+        .fillColor(Color.White)
+    }
+    .width(40)
+    .height(40)
+    .borderRadius(20)
+    .backgroundColor(this.themeColor || '#FF1949')
+    .onClick(singleClick(() => {
+      MediaService.getInstance().playAndPause();
+    }, 1000))
   }
 
   // 播放列表按钮
   @Builder
   PlayListButton() {
-    Image($r('app.media.ic_music_list'))// 当前播放列表入口
-      .height(24)
-      .width(24)
-      .displayPriority(1)
-      .bindSheet($$this.isShowSheet, this.PlayListSheet(), {
-        height: '68%',
-        dragBar: true,
-        showClose: true,
-        title: { title: $r('app.string.current_play_list', this.musicModel.songList.length) }
-      })
-      .fillColor(this.themeColor)
-      .onClick(singleClick(() => {
-        this.isShowSheet = !this.isShowSheet;
-      }))
+    Button() {
+      Image($r('app.media.ic_music_list'))// 当前播放列表入口
+        .width(20)
+        .height(20)
+        .fillColor(this.themeColor || '#FF1949')
+    }
+    .width(40)
+    .height(40)
+    .borderRadius(20)
+    .backgroundColor('#F5F5F5')
+    .bindSheet($$this.isShowSheet, this.PlayListSheet(), {
+      height: '68%',
+      dragBar: true,
+      showClose: true,
+      title: { title: $r('app.string.current_play_list', this.musicModel.songList.length) }
+    })
+    .onClick(singleClick(() => {
+      this.isShowSheet = !this.isShowSheet;
+    }, 1000))
   }
 
   /**

@@ -48,14 +48,16 @@ export struct RotatingCover {
   build() {
     Column() {
       Image(ImageUtils.getPic(this.musicModel.currentSong?.label ?? 'default'))
-        .height(32)
-        .width(32)
-        .borderRadius(16)
-        .margin({ right: 12 })
+        .height(56)
+        .width(56)
+        .borderRadius(12)
+        .objectFit(ImageFit.Cover)
         .rotate({ angle: this.imageRotate })
         .onAppear(() => {
           this.animationFun();
         })
     }
+    .width(56)
+    .height(56)
   }
 }

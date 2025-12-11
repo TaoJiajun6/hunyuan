@@ -694,6 +694,7 @@ export struct PodcastPage {
 
         // 播放器组件 - 放在底部导航栏上方
         MusicPlayController()
+          .margin({bottom:10})
       }
       .padding({
         left: this.customPadding.left ?? this.breakPointModel.pagePadding,

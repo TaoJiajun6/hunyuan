@@ -778,51 +778,236 @@ function createPodcastCard(podcast) {
   return card;
 }
 
+// 全局播放器状态
+let currentPlayingPodcast = null;
+let playerUpdateInterval = null;
+
 // 播放播客
 function playPodcast(audioUrl, podcastId, event) {
-  event.stopPropagation();
+  if (event) {
+    event.stopPropagation();
+  }
   
   if (!audioUrl || audioUrl === 'null' || audioUrl === 'undefined' || audioUrl.trim() === '') {
     alert('该播客暂无音频文件');
     return;
   }
   
-  // 可以打开一个播放器或者直接播放
-  const player = document.getElementById('audio-player');
-  if (player) {
-    // 检测是否是云存储URL（需要代理）
-    let finalUrl = audioUrl;
-    if (audioUrl.includes('agcstorage.link') || audioUrl.includes('ops-server')) {
-      // 使用代理接口
-      finalUrl = `/api/v1/podcast/proxy_audio?url=${encodeURIComponent(audioUrl)}`;
-      console.log('检测到云存储URL，使用代理接口:', finalUrl);
-    }
-    
-    console.log('播放播客:', podcastId, '原始URL:', audioUrl, '最终URL:', finalUrl);
-    player.src = finalUrl;
-    player.style.display = 'block';
-    
-    // 添加错误处理
-    player.onerror = function(e) {
-      console.error('音频播放失败:', e);
-      console.error('失败的URL:', finalUrl);
-      alert('音频加载失败，请检查URL是否正确或网络连接');
-      player.style.display = 'none';
+  // 获取播客信息
+  const card = event?.target?.closest('.podcast-card');
+  let podcastTitle = '未命名播客';
+  let podcastSubtitle = '';
+  let podcastCategory = '播客';
+  
+  if (card) {
+    const titleEl = card.querySelector('.podcast-title');
+    const authorEl = card.querySelector('.podcast-author');
+    if (titleEl) podcastTitle = titleEl.textContent.trim();
+    if (authorEl) podcastSubtitle = authorEl.textContent.trim();
+  }
+  
+  // 显示播放器卡片
+  const playerCard = document.getElementById('player-card');
+  const playerAudio = document.getElementById('player-audio');
+  const playerTitleEl = document.getElementById('player-title');
+  const playerSubtitleEl = document.getElementById('player-subtitle');
+  const playerCategoryEl = document.getElementById('player-category');
+  
+  if (!playerCard || !playerAudio) {
+    alert('找不到播放器组件');
+    return;
+  }
+  
+  // 更新播放器信息
+  playerTitleEl.textContent = podcastTitle;
+  playerSubtitleEl.textContent = podcastSubtitle || '正在加载...';
+  playerCategoryEl.textContent = podcastCategory;
+  playerCard.style.display = 'block';
+  
+  // 检测是否是云存储URL（需要代理）
+  let finalUrl = audioUrl;
+  if (audioUrl.includes('agcstorage.link') || audioUrl.includes('ops-server')) {
+    // 使用代理接口
+    finalUrl = `/api/v1/podcast/proxy_audio?url=${encodeURIComponent(audioUrl)}`;
+    console.log('检测到云存储URL，使用代理接口:', finalUrl);
+  }
+  
+  console.log('播放播客:', podcastId, '原始URL:', audioUrl, '最终URL:', finalUrl);
+  
+  // 如果正在播放其他播客，先停止
+  if (currentPlayingPodcast && currentPlayingPodcast !== podcastId) {
+    playerAudio.pause();
+    playerAudio.src = '';
+  }
+  
+  // 设置音频源
+  playerAudio.src = finalUrl;
+  currentPlayingPodcast = podcastId;
+  
+  // 清除之前的更新间隔
+  if (playerUpdateInterval) {
+    clearInterval(playerUpdateInterval);
+  }
+  
+  // 添加错误处理
+  playerAudio.onerror = function(e) {
+    console.error('音频播放失败:', e);
+    console.error('失败的URL:', finalUrl);
+    playerSubtitleEl.textContent = '加载失败';
+    alert('音频加载失败，请检查URL是否正确或网络连接');
+  };
+  
+  // 添加加载成功处理
+  playerAudio.onloadedmetadata = function() {
+    console.log('音频元数据加载成功');
+    updatePlayerTime();
+    playerSubtitleEl.textContent = podcastSubtitle || '准备播放';
+  };
+  
+  // 添加播放状态变化处理
+  playerAudio.onplay = function() {
+    updatePlayPauseButton(true);
+    startPlayerUpdate();
+  };
+  
+  playerAudio.onpause = function() {
+    updatePlayPauseButton(false);
+    stopPlayerUpdate();
+  };
+  
+  playerAudio.onended = function() {
+    updatePlayPauseButton(false);
+    stopPlayerUpdate();
+    resetPlayerProgress();
+  };
+  
+  // 进度条点击事件
+  const progressBar = document.querySelector('.player-progress-bar');
+  if (progressBar) {
+    progressBar.onclick = function(e) {
+      if (playerAudio.duration) {
+        const rect = progressBar.getBoundingClientRect();
+        const percent = (e.clientX - rect.left) / rect.width;
+        playerAudio.currentTime = percent * playerAudio.duration;
+      }
     };
-    
-    // 添加加载成功处理
-    player.onloadeddata = function() {
-      console.log('音频加载成功，开始播放');
-      player.play().catch(err => {
-        console.error('播放失败:', err);
-        alert('播放失败: ' + err.message);
-      });
-    };
-    
-    // 尝试播放
-    player.load();
+  }
+  
+  // 开始播放
+  playerAudio.load();
+  playerAudio.play().catch(err => {
+    console.error('播放失败:', err);
+    alert('播放失败: ' + err.message);
+  });
+}
+
+// 更新播放/暂停按钮
+function updatePlayPauseButton(isPlaying) {
+  const playIcon = document.getElementById('player-play-icon');
+  const pauseIcon = document.getElementById('player-pause-icon');
+  
+  if (isPlaying) {
+    if (playIcon) playIcon.style.display = 'none';
+    if (pauseIcon) pauseIcon.style.display = 'block';
   } else {
-    alert('找不到音频播放器');
+    if (playIcon) playIcon.style.display = 'block';
+    if (pauseIcon) pauseIcon.style.display = 'none';
+  }
+}
+
+// 切换播放/暂停
+function togglePlayer() {
+  const playerAudio = document.getElementById('player-audio');
+  if (!playerAudio || !playerAudio.src) {
+    return;
+  }
+  
+  if (playerAudio.paused) {
+    playerAudio.play().catch(err => {
+      console.error('播放失败:', err);
+    });
+  } else {
+    playerAudio.pause();
+  }
+}
+
+// 更新播放器时间和进度
+function updatePlayerTime() {
+  const playerAudio = document.getElementById('player-audio');
+  const currentTimeEl = document.getElementById('player-current-time');
+  const totalTimeEl = document.getElementById('player-total-time');
+  const progressFill = document.getElementById('player-progress');
+  
+  if (!playerAudio) return;
+  
+  const currentTime = playerAudio.currentTime || 0;
+  const duration = playerAudio.duration || 0;
+  
+  // 更新时间显示
+  if (currentTimeEl) {
+    currentTimeEl.textContent = formatTime(currentTime);
+  }
+  if (totalTimeEl) {
+    totalTimeEl.textContent = formatTime(duration);
+  }
+  
+  // 更新进度条
+  if (progressFill && duration > 0) {
+    const percent = (currentTime / duration) * 100;
+    progressFill.style.width = percent + '%';
+  }
+}
+
+// 格式化时间（秒转为 MM:SS）
+function formatTime(seconds) {
+  if (!isFinite(seconds) || isNaN(seconds)) {
+    return '0:00';
+  }
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+// 开始更新播放器
+function startPlayerUpdate() {
+  if (playerUpdateInterval) {
+    clearInterval(playerUpdateInterval);
+  }
+  playerUpdateInterval = setInterval(updatePlayerTime, 100);
+}
+
+// 停止更新播放器
+function stopPlayerUpdate() {
+  if (playerUpdateInterval) {
+    clearInterval(playerUpdateInterval);
+    playerUpdateInterval = null;
+  }
+}
+
+// 重置播放器进度
+function resetPlayerProgress() {
+  const progressFill = document.getElementById('player-progress');
+  const currentTimeEl = document.getElementById('player-current-time');
+  if (progressFill) progressFill.style.width = '0%';
+  if (currentTimeEl) currentTimeEl.textContent = '0:00';
+}
+
+// 关闭播放器
+function closePlayer() {
+  const playerCard = document.getElementById('player-card');
+  const playerAudio = document.getElementById('player-audio');
+  
+  if (playerAudio) {
+    playerAudio.pause();
+    playerAudio.src = '';
+  }
+  
+  stopPlayerUpdate();
+  resetPlayerProgress();
+  currentPlayingPodcast = null;
+  
+  if (playerCard) {
+    playerCard.style.display = 'none';
   }
 }
 
@@ -847,6 +1032,11 @@ async function deletePodcast(podcastId, event) {
     
     const data = await resp.json();
     if (data.success) {
+      // 如果正在播放这个播客，关闭播放器
+      if (currentPlayingPodcast === podcastId) {
+        closePlayer();
+      }
+      
       // 从页面中移除该卡片
       const card = event.target.closest('.podcast-card');
       if (card) {
