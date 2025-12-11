@@ -61,7 +61,8 @@ class AGCDatabaseClient:
             self.domain = 'connect-drcn.dbankcloud.cn'
         else:
             self.domain = env_domain
-        self.cloud_db_zone = cloud_db_zone or os.getenv('AGC_CLOUD_DB_ZONE', 'cloudDBZone')
+        # 优先使用环境变量，如果没有环境变量则使用参数值或默认值
+        self.cloud_db_zone = os.getenv('AGC_CLOUD_DB_ZONE') or cloud_db_zone or 'cloudDBZone'
         
         # 如果没有提供认证信息，尝试从文件读取
         if not self.api_key and (not self.client_id or not self.client_secret):
@@ -272,7 +273,7 @@ class AGCDatabaseClient:
                 headers = {
                     "content-type": "application/json",
                     "client_id": self.client_id,
-                    "Authorization": f"Bearer {token}",
+                    "access_token": token,
                     "productId": self.product_id,
                     "host": self.domain
                 }
@@ -341,9 +342,8 @@ class AGCDatabaseClient:
                 headers = {
                     "content-type": "application/json",
                     "client_id": self.client_id,
-                    "Authorization": f"Bearer {token}",
-                    "productId": self.product_id,
                     "access_token": token,
+                    "productId": self.product_id,
                     "host": self.domain
                 }
             
@@ -435,9 +435,8 @@ class AGCDatabaseClient:
                 headers = {
                     "content-type": "application/json",
                     "client_id": self.client_id,
-                    "Authorization": f"Bearer {token}",
-                    "productId": self.product_id,
                     "access_token": token,
+                    "productId": self.product_id,
                     "host": self.domain
                 }
             
@@ -511,7 +510,17 @@ class AGCDatabaseClient:
                 return podcasts
             return []
         except Exception as e:
-            logger.error(f"从云数据库获取播客列表时出错: {e}")
+            error_msg = str(e)
+            if "401" in error_msg or "Unauthorized" in error_msg or "auth failed" in error_msg:
+                logger.error(
+                    f"从云数据库获取播客列表时认证失败: {e}\n"
+                    "可能的原因：\n"
+                    "1. CloudDB REST API 需要使用服务端 API Key，而不是 OAuth Token\n"
+                    "2. 请在 AGC 控制台创建服务端 API Key，并设置环境变量 AGC_API_KEY\n"
+                    "3. 或者检查 OAuth client_id 是否有 CloudDB 访问权限"
+                )
+            else:
+                logger.error(f"从云数据库获取播客列表时出错: {e}")
             return []
     
     def delete_podcast(self, podcast_id: str) -> bool:
@@ -545,7 +554,7 @@ class AGCDatabaseClient:
                 headers = {
                     "content-type": "application/json",
                     "client_id": self.client_id,
-                    "Authorization": f"Bearer {token}",
+                    "access_token": token,
                     "productId": self.product_id,
                     "host": self.domain
                 }
