@@ -254,6 +254,32 @@ function fileToBase64(file) {
   });
 }
 
+// 上传音色文件到云存储，返回URL
+async function uploadVoiceFile(base64Data) {
+  try {
+    const resp = await fetch('/api/v1/podcast/upload_voice', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ base64_data: base64Data })
+    });
+    
+    if (!resp.ok) {
+      const error = await resp.json();
+      throw new Error(error.message || '上传失败');
+    }
+    
+    const result = await resp.json();
+    if (result.success && result.data && result.data.url) {
+      return result.data.url;
+    } else {
+      throw new Error(result.message || '上传失败');
+    }
+  } catch (e) {
+    console.error('上传音色文件失败:', e);
+    throw e;
+  }
+}
+
 // 生成播客（统一入口）
 async function generatePodcast(event) {
   const btn = event.target;
@@ -290,22 +316,31 @@ async function generateMultiRole() {
     return;
   }
   
-  log('create', '正在加载音色文件，请稍候...');
+  log('create', '正在上传音色文件，请稍候...');
   showProgress(5);
   
   try {
+    // 先上传音色文件到云存储，获取URL
     const [voice1Base64, voice2Base64] = await Promise.all([
       loadVoiceFileAsBase64(voice1Id),
       loadVoiceFileAsBase64(voice2Id)
+    ]);
+    
+    log('create', '正在上传音色文件到云存储...');
+    showProgress(8);
+    
+    const [voice1Url, voice2Url] = await Promise.all([
+      uploadVoiceFile(voice1Base64),
+      uploadVoiceFile(voice2Base64)
     ]);
     
     const jobId = 'job_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     
     const requestBody = {
       text: text,
-      role_voices: {
-        [role1]: voice1Base64,
-        [role2]: voice2Base64
+      role_voice_urls: {
+        [role1]: voice1Url,
+        [role2]: voice2Url
       },
       silence_interval: silence,
       job_id: jobId
@@ -351,19 +386,29 @@ async function generateCharacter() {
     return;
   }
   
-  log('create', '正在加载音色文件，请稍候...');
+  log('create', '正在上传音色文件，请稍候...');
   showProgress(5);
   
   try {
-    const characters = await Promise.all(chars.map(async (char) => {
-      const voiceBase64 = await loadVoiceFileAsBase64(char.voiceId);
-      return {
-        name: char.name,
-        identity: char.identity || undefined,
-        personality: char.personality || undefined,
-        speaking_style: char.speaking_style || undefined,
-        voice: voiceBase64
-      };
+    // 先加载并上传所有音色文件
+    const voiceBase64List = await Promise.all(
+      chars.map(char => loadVoiceFileAsBase64(char.voiceId))
+    );
+    
+    log('create', '正在上传音色文件到云存储...');
+    showProgress(8);
+    
+    const voiceUrlList = await Promise.all(
+      voiceBase64List.map(base64 => uploadVoiceFile(base64))
+    );
+    
+    // 构建characters数组，使用voice_url而不是voice
+    const characters = chars.map((char, index) => ({
+      name: char.name,
+      identity: char.identity || undefined,
+      personality: char.personality || undefined,
+      speaking_style: char.speaking_style || undefined,
+      voice_url: voiceUrlList[index]
     }));
     
     const jobId = 'job_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
@@ -416,22 +461,30 @@ async function generateDeep() {
     return;
   }
   
-  log('create', '正在加载音色文件，请稍候...');
+  log('create', '正在上传音色文件，请稍候...');
   showProgress(5);
   
   try {
-    const roleVoices = {};
-    const voicePromises = Object.keys(voices).map(async (role) => {
-      const base64 = await loadVoiceFileAsBase64(voices[role]);
-      roleVoices[role] = base64;
-    });
-    await Promise.all(voicePromises);
+    // 先加载所有音色文件
+    const voiceBase64Map = {};
+    await Promise.all(Object.keys(voices).map(async (role) => {
+      voiceBase64Map[role] = await loadVoiceFileAsBase64(voices[role]);
+    }));
+    
+    log('create', '正在上传音色文件到云存储...');
+    showProgress(8);
+    
+    // 上传所有音色文件，获取URL
+    const roleVoiceUrls = {};
+    await Promise.all(Object.keys(voiceBase64Map).map(async (role) => {
+      roleVoiceUrls[role] = await uploadVoiceFile(voiceBase64Map[role]);
+    }));
     
     const jobId = 'job_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     
     const requestBody = {
       topic: topic,
-      role_voices: roleVoices,
+      role_voice_urls: roleVoiceUrls,
       num_characters: numChars,
       depth_level: depthLevel,
       silence_interval: silence,

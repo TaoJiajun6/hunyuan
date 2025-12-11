@@ -742,15 +742,37 @@ async def log_requests(request: Request, call_next):
     if method == "POST" and path.startswith("/api/v1/podcast"):
         try:
             # 读取请求体（注意：读取后需要重新创建请求流）
-            # 添加超时保护，避免大请求体读取时阻塞太久
-            try:
-                body_bytes = await asyncio.wait_for(request.body(), timeout=30.0)
-            except asyncio.TimeoutError:
-                logger.warning(f"读取请求体超时（30秒），请求体可能过大")
-                body_bytes = None
-            except Exception as e:
-                logger.warning(f"读取请求体时出错: {str(e)}")
-                body_bytes = None
+            # 根据Content-Length动态调整超时时间
+            # 对于大请求体（>1MB），增加超时时间；对于超大请求体（>10MB），跳过中间件读取
+            content_length = request.headers.get("content-length")
+            if content_length:
+                content_length_int = int(content_length)
+                # 如果请求体超过10MB，跳过中间件读取，让FastAPI直接处理
+                if content_length_int > 10 * 1024 * 1024:
+                    logger.info(f"请求体过大（{content_length_int / 1024 / 1024:.2f} MB），跳过中间件读取，由FastAPI直接处理")
+                    body_bytes = None
+                else:
+                    # 根据请求体大小动态计算超时时间
+                    # 基础超时30秒，每MB增加10秒，最大120秒
+                    timeout = min(30.0 + (content_length_int / 1024 / 1024) * 10, 120.0)
+                    try:
+                        body_bytes = await asyncio.wait_for(request.body(), timeout=timeout)
+                    except asyncio.TimeoutError:
+                        logger.warning(f"读取请求体超时（{timeout:.1f}秒），请求体可能过大，将由FastAPI直接处理")
+                        body_bytes = None
+                    except Exception as e:
+                        logger.warning(f"读取请求体时出错: {str(e)}")
+                        body_bytes = None
+            else:
+                # 没有Content-Length，使用默认超时
+                try:
+                    body_bytes = await asyncio.wait_for(request.body(), timeout=30.0)
+                except asyncio.TimeoutError:
+                    logger.warning(f"读取请求体超时（30秒），请求体可能过大，将由FastAPI直接处理")
+                    body_bytes = None
+                except Exception as e:
+                    logger.warning(f"读取请求体时出错: {str(e)}")
+                    body_bytes = None
             
             if body_bytes:
                 try:
@@ -761,10 +783,14 @@ async def log_requests(request: Request, call_next):
                         if key == 'role_voice_urls' and isinstance(value, dict):
                             log_body[key] = f"{{角色数量: {len(value)}, 角色: {list(value.keys())}}}"
                         elif key == 'text':
-                            log_body[key] = f"长度: {len(str(value))} 字符"
+                            text_str = str(value)
+                            log_body[key] = f"长度: {len(text_str)} 字符"
+                            # 如果文本较短（<200字符），也显示前100字符
+                            if len(text_str) < 200:
+                                log_body[key] = f"长度: {len(text_str)} 字符, 内容: {text_str[:100]}"
                         else:
                             log_body[key] = value
-                    logger.info(f"请求体内容: {json.dumps(log_body, ensure_ascii=False)}")
+                    logger.info(f"请求体已成功读取并解析，内容摘要: {json.dumps(log_body, ensure_ascii=False)}")
                     
                     # 检查必需字段
                     if path == "/api/v1/podcast/multi_role":
@@ -813,7 +839,10 @@ async def log_requests(request: Request, call_next):
             else:
                 # 如果读取失败，不重新创建流，让 FastAPI 自己处理
                 # 这样可以避免请求流损坏导致端点无法读取请求体
-                logger.debug("中间件读取请求体失败，将让 FastAPI 端点直接处理请求体")
+                if content_length:
+                    logger.info(f"中间件未读取请求体（大小: {int(content_length) / 1024 / 1024:.2f} MB），将由FastAPI端点直接处理")
+                else:
+                    logger.debug("中间件读取请求体失败，将让 FastAPI 端点直接处理请求体")
         except Exception as e:
             logger.warning(f"中间件处理请求体时出错: {str(e)}")
             # 如果出现异常，确保不重新创建请求流，让 FastAPI 自己处理
@@ -2216,9 +2245,11 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 # 配置来源：优先环境变量，其次仓库中的 agc-apiclient-*.json
                 agc_storage_url = os.getenv('AGC_STORAGE_URL')
                 agc_bucket = os.getenv('AGC_BUCKET')
-                agc_domain = os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
-                agc_client_id = os.getenv('AGC_CLIENT_ID')
-                agc_client_secret = os.getenv('AGC_CLIENT_SECRET')
+                # 云存储优先使用专用域名，如果没有则使用通用域名
+                agc_domain = os.getenv('AGC_STORAGE_DOMAIN') or os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
+                # 云存储优先使用专用的client_id和client_secret，如果没有则使用通用的
+                agc_client_id = os.getenv('AGC_STORAGE_CLIENT_ID') or os.getenv('AGC_CLIENT_ID')
+                agc_client_secret = os.getenv('AGC_STORAGE_CLIENT_SECRET') or os.getenv('AGC_CLIENT_SECRET')
                 agc_product_id = os.getenv('AGC_PRODUCT_ID')
 
                 # 如果没有显式提供 client_id/secret，尝试在仓库中查找 agc-apiclient-*.json
@@ -3364,6 +3395,114 @@ async def get_debug_paths():
     except Exception as e:
         logger.error(f"获取调试信息失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取调试信息失败: {str(e)}")
+
+
+class UploadVoiceRequest(BaseModel):
+    """上传音色文件请求"""
+    base64_data: str = Field(..., description="base64编码的音频文件数据")
+    filename: Optional[str] = Field(None, description="文件名（可选）")
+
+
+@app.post("/api/v1/podcast/upload_voice", response_model=ApiResponse)
+async def upload_voice_file(request: UploadVoiceRequest):
+    """
+    上传音色文件到云存储（用于Web端）
+    
+    接收base64编码的音频文件，上传到云存储，返回下载URL
+    
+    - **base64_data**: base64编码的音频文件数据
+    - **filename**: 文件名（可选）
+    
+    返回：
+    - **url**: 云存储下载URL
+    - **file_size**: 文件大小（字节）
+    """
+    try:
+        # 解码base64数据
+        try:
+            # 如果是data URI格式，提取base64部分
+            base64_str = request.base64_data
+            if ',' in base64_str:
+                base64_str = base64_str.split(',', 1)[1]
+            file_content = _base64.b64decode(base64_str)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"base64解码失败: {str(e)}")
+        
+        # 保存到临时文件
+        filename = request.filename or 'voice.wav'
+        file_ext = os.path.splitext(filename)[1] or '.wav'
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp_file:
+            tmp_file.write(file_content)
+            tmp_path = tmp_file.name
+        
+        try:
+            # 上传到云存储
+            agc_storage_url = os.getenv('AGC_STORAGE_URL')
+            agc_bucket = os.getenv('AGC_BUCKET')
+            
+            if not agc_storage_url or not agc_bucket:
+                # 如果没有配置云存储，返回临时文件路径（仅用于测试）
+                logger.warning("未配置云存储，返回临时文件路径")
+                return ApiResponse(
+                    success=True,
+                    message="上传成功（未配置云存储）",
+                    data={
+                        "url": f"/api/v1/podcast/file/{os.path.basename(tmp_path)}",
+                        "file_size": len(file_content)
+                    }
+                )
+            
+            # 生成object_name
+            import hashlib
+            file_hash = hashlib.md5(file_content).hexdigest()
+            object_name = f"voices/{file_hash}{file_ext}"
+            
+            # 上传到云存储
+            if agc_upload_client:
+                result = agc_upload_client(
+                    output_path=tmp_path,
+                    storage_url=agc_storage_url,
+                    bucket=agc_bucket,
+                    object_name=object_name
+                )
+                
+                if result.get('status') == 'uploaded':
+                    # 构建下载URL
+                    if not agc_storage_url.endswith('/'):
+                        agc_storage_url = agc_storage_url + '/'
+                    download_url = f"{agc_storage_url}{agc_bucket}/{object_name}"
+                    
+                    return ApiResponse(
+                        success=True,
+                        message="上传成功",
+                        data={
+                            "url": download_url,
+                            "file_size": len(file_content)
+                        }
+                    )
+                else:
+                    raise Exception(f"上传失败: {result}")
+            else:
+                raise Exception("云存储上传功能未启用")
+        finally:
+            # 清理临时文件
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except:
+                pass
+                
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        logger.error(f"音色文件上传失败: {str(e)}")
+        logger.error(f"错误详情:\n{error_detail}")
+        return ApiResponse(
+            success=False,
+            message="上传失败",
+            error=str(e),
+            data={"traceback": error_detail}
+        )
 
 
 @app.get("/api/v1/podcast/file/{file_id}")

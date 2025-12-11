@@ -131,10 +131,17 @@ def get_agc_token(domain: str, client_id: str, client_secret: str, timeout: int 
         else:
             # 无法从 storage_url 推断，使用传入的 domain 和 service_type
             token_domain = domain or 'connect-api.cloud.huawei.com'
+            # 判断是否为云数据库域名
             if service_type == 'database' or token_domain == 'connect-drcn.dbankcloud.cn':
                 token_path = '/agc/apigw/oauth2/v1/token'
                 service_type = 'database'
             else:
+                # 云存储：所有云存储站点都使用 /api/oauth2/v1/token
+                # 支持的云存储站点域名：
+                # - connect-api.cloud.huawei.com (中国)
+                # - connect-api-dre.cloud.huawei.com (德国)
+                # - connect-api-dra.cloud.huawei.com (新加坡)
+                # - connect-api-drru.cloud.huawei.com (俄罗斯)
                 token_path = '/api/oauth2/v1/token'
                 service_type = 'storage'
     else:
@@ -146,12 +153,13 @@ def get_agc_token(domain: str, client_id: str, client_secret: str, timeout: int 
             token_path = '/agc/apigw/oauth2/v1/token'
             service_type = 'database'
         else:
-            # 云存储
-            if token_domain == 'connect-api.cloud.huawei.com':
-                token_path = '/api/oauth2/v1/token'
-            else:
-                # 其他云存储站点域名
-                token_path = '/api/oauth2/v1/token'
+            # 云存储：所有云存储站点都使用 /api/oauth2/v1/token
+            # 支持的云存储站点域名：
+            # - connect-api.cloud.huawei.com (中国)
+            # - connect-api-dre.cloud.huawei.com (德国)
+            # - connect-api-dra.cloud.huawei.com (新加坡)
+            # - connect-api-drru.cloud.huawei.com (俄罗斯)
+            token_path = '/api/oauth2/v1/token'
             service_type = 'storage'
     
     cache_key = f"{token_domain}{token_path}:{client_id}"
@@ -175,7 +183,7 @@ def get_agc_token(domain: str, client_id: str, client_secret: str, timeout: int 
             'client_secret': client_secret
         }
     else:
-        # 云存储不使用 useJwt（根据Java示例代码）
+        # 云存储不使用 useJwt（根据Java示例代码和文档）
         payload = {
             'grant_type': 'client_credentials',
             'client_id': client_id,
@@ -462,9 +470,11 @@ def upload_generated_podcast(
     # 从环境变量读取（可覆盖）
     storage_url = storage_url or os.getenv('AGC_STORAGE_URL')
     bucket = bucket or os.getenv('AGC_BUCKET')
-    domain = domain or os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
-    token_client_id = client_id or os.getenv('AGC_CLIENT_ID')
-    client_secret = client_secret or os.getenv('AGC_CLIENT_SECRET')
+    # 云存储优先使用专用域名，如果没有则使用通用域名
+    domain = domain or os.getenv('AGC_STORAGE_DOMAIN') or os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
+    # 云存储优先使用专用的client_id和client_secret，如果没有则使用通用的
+    token_client_id = client_id or os.getenv('AGC_STORAGE_CLIENT_ID') or os.getenv('AGC_CLIENT_ID')
+    client_secret = client_secret or os.getenv('AGC_STORAGE_CLIENT_SECRET') or os.getenv('AGC_CLIENT_SECRET')
     product_id = product_id or os.getenv('AGC_PRODUCT_ID')
     # 上传时使用的client_id（如果未指定，使用token_client_id）
     upload_client_id = upload_client_id or token_client_id
@@ -629,9 +639,12 @@ def download_generated_podcast(
     # 从环境变量读取（可覆盖）
     storage_url = storage_url or os.getenv('AGC_STORAGE_URL')
     bucket = bucket or os.getenv('AGC_BUCKET')
-    domain = domain or os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
-    token_client_id = client_id or os.getenv('AGC_CLIENT_ID')
-    client_secret = client_secret or os.getenv('AGC_CLIENT_SECRET')
+    # 云存储优先使用专用域名，如果没有则使用通用域名
+    # 注意：代码会根据 storage_url 自动推断正确的 domain，此参数主要用于没有 storage_url 的情况
+    domain = domain or os.getenv('AGC_STORAGE_DOMAIN') or os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
+    # 云存储优先使用专用的client_id和client_secret，如果没有则使用通用的
+    token_client_id = client_id or os.getenv('AGC_STORAGE_CLIENT_ID') or os.getenv('AGC_CLIENT_ID')
+    client_secret = client_secret or os.getenv('AGC_STORAGE_CLIENT_SECRET') or os.getenv('AGC_CLIENT_SECRET')
     product_id = product_id or os.getenv('AGC_PRODUCT_ID')
     # 下载时使用的client_id（如果未指定，使用token_client_id）
     download_client_id = download_client_id or token_client_id

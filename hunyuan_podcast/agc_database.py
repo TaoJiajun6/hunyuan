@@ -49,12 +49,13 @@ class AGCDatabaseClient:
         self.api_key = api_key or os.getenv('AGC_API_KEY')
         
         # OAuth 凭证（用于获取 token，如果未提供 API Key）
-        self.client_id = client_id or os.getenv('AGC_CLIENT_ID')
-        self.client_secret = client_secret or os.getenv('AGC_CLIENT_SECRET')
+        # 云数据库优先使用专用的client_id和client_secret，如果没有则使用通用的
+        self.client_id = client_id or os.getenv('AGC_DATABASE_CLIENT_ID') or os.getenv('AGC_CLIENT_ID')
+        self.client_secret = client_secret or os.getenv('AGC_DATABASE_CLIENT_SECRET') or os.getenv('AGC_CLIENT_SECRET')
         self.product_id = product_id or os.getenv('AGC_PRODUCT_ID')
+        # CloudDB 优先使用专用域名，如果没有则使用通用域名
         # CloudDB 和 Token 获取必须使用 connect-drcn.dbankcloud.cn
-        # 如果环境变量设置为其他域名，自动修正
-        env_domain = domain or os.getenv('AGC_DOMAIN', 'connect-drcn.dbankcloud.cn')
+        env_domain = domain or os.getenv('AGC_DATABASE_DOMAIN') or os.getenv('AGC_DOMAIN', 'connect-drcn.dbankcloud.cn')
         if env_domain == 'connect-api.cloud.huawei.com':
             # 自动修正为正确的 CloudDB 域名
             logger.warning(f"检测到域名 {env_domain}，CloudDB 需要使用 connect-drcn.dbankcloud.cn，已自动修正")

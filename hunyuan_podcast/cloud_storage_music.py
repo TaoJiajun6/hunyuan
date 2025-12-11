@@ -50,10 +50,12 @@ class CloudStorageMusicClient:
         self._music_cache: Optional[List[Dict[str, str]]] = None
         
         # AGC认证信息（用于API调用）
-        self.client_id = os.getenv('AGC_CLIENT_ID')
-        self.client_secret = os.getenv('AGC_CLIENT_SECRET')
+        # 云存储优先使用专用的client_id和client_secret，如果没有则使用通用的
+        self.client_id = os.getenv('AGC_STORAGE_CLIENT_ID') or os.getenv('AGC_CLIENT_ID')
+        self.client_secret = os.getenv('AGC_STORAGE_CLIENT_SECRET') or os.getenv('AGC_CLIENT_SECRET')
         self.product_id = os.getenv('AGC_PRODUCT_ID') or os.getenv('AGC_PRODUCT_ID')
-        self.domain = os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
+        # 云存储优先使用专用域名，如果没有则使用通用域名
+        self.domain = os.getenv('AGC_STORAGE_DOMAIN') or os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
         
         # 如果没有从环境变量获取，尝试从文件读取
         if not self.client_id or not self.client_secret:
