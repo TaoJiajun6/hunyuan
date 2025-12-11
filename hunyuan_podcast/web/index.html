@@ -25,13 +25,6 @@
         </svg>
         <span>首页</span>
       </a>
-      <a href="#" class="nav-item" onclick="switchPage('history'); return false;">
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-          <rect x="3" y="4" width="14" height="12" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/>
-          <path d="M7 8 L13 8 M7 11 L13 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-        </svg>
-        <span>资料库</span>
-      </a>
       <a href="#" class="nav-item" onclick="switchPage('explore'); return false;">
         <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
           <rect x="3" y="3" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/>
@@ -133,33 +126,6 @@
           </div>
           <audio id="audio-player" controls style="display:none; width: 100%; margin-top: 16px;"></audio>
         </div>
-      </div>
-    </div>
-
-    <!-- 历史播客页面 -->
-    <div id="page-history" class="page">
-      <div class="page-header">
-        <h1 class="page-title">资料库</h1>
-        <div class="page-actions">
-          <button class="btn-secondary" onclick="loadHistory()">刷新</button>
-        </div>
-      </div>
-
-      <!-- 分类筛选 -->
-      <div class="category-filters">
-        <button class="category-btn active" onclick="filterByCategory('all')">全部</button>
-        <button class="category-btn" onclick="filterByCategory('财经')">财经</button>
-        <button class="category-btn" onclick="filterByCategory('科技')">科技</button>
-        <button class="category-btn" onclick="filterByCategory('教育')">教育</button>
-        <button class="category-btn" onclick="filterByCategory('新闻')">新闻</button>
-        <button class="category-btn" onclick="filterByCategory('健康')">健康</button>
-        <button class="category-btn" onclick="filterByCategory('生活方式')">生活方式</button>
-        <button class="category-btn" onclick="filterByCategory('故事')">故事</button>
-      </div>
-
-      <!-- 播客列表 -->
-      <div id="podcast-list" class="podcast-grid">
-        <!-- 动态加载播客卡片 -->
       </div>
     </div>
 

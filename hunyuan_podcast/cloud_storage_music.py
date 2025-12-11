@@ -229,7 +229,7 @@ class CloudStorageMusicClient:
             
             try:
                 # 获取access_token
-                token = get_agc_token(
+                token, _ = get_agc_token(
                     domain=self.domain,
                     client_id=self.client_id,
                     client_secret=self.client_secret
@@ -363,7 +363,7 @@ class CloudStorageMusicClient:
                 
                 try:
                     # 获取access_token
-                    token = get_agc_token(
+                    token, _ = get_agc_token(
                         domain=self.domain,
                         client_id=self.client_id,
                         client_secret=self.client_secret
@@ -382,7 +382,7 @@ class CloudStorageMusicClient:
                 # 非AGC URL，尝试添加认证（如果配置了）
                 if HAS_UPLOAD_CLIENT and self.client_id and self.client_secret:
                     try:
-                        token = get_agc_token(
+                        token, _ = get_agc_token(
                             domain=self.domain,
                             client_id=self.client_id,
                             client_secret=self.client_secret

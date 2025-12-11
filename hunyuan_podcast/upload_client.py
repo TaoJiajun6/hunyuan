@@ -82,10 +82,14 @@ def _load_agc_credentials_from_file(path: str) -> Dict[str, Optional[str]]:
 
 
 def get_agc_token(domain: str, client_id: str, client_secret: str, timeout: int = 30, retries: int = 3,
-                  backoff_factor: float = 0.5) -> str:
+                  backoff_factor: float = 0.5) -> tuple[str, int]:
     """获取 AGC access_token（带缓存与重试）
 
-    返回 access_token。使用 module-level 缓存避免频繁获取。
+    返回 (access_token, expires_in) 元组。
+    使用 module-level 缓存避免频繁获取。
+    
+    Returns:
+        tuple[str, int]: (access_token, expires_in) 元组，expires_in 单位为秒
     """
     if not client_id or not client_secret:
         raise AGCUploadError('缺少 client_id 或 client_secret，无法获取 token')
@@ -94,10 +98,14 @@ def get_agc_token(domain: str, client_id: str, client_secret: str, timeout: int 
     cached = _TOKEN_CACHE.get(cache_key)
     now = time.time()
     if cached and cached.get('expires_at', 0) > now + 5:
-        return cached['token']
+        # 计算剩余的过期时间
+        remaining_expires = int(cached.get('expires_at', 0) - now)
+        return (cached['token'], remaining_expires if remaining_expires > 0 else 3600)
 
-    url = f"https://{domain}/api/oauth2/v1/token"
+    # 根据官方文档，URL是 /agc/apigw/oauth2/v1/token
+    url = f"https://{domain}/agc/apigw/oauth2/v1/token"
     payload = {
+        'useJwt': '1',  # 固定值，表示使用JWT
         'grant_type': 'client_credentials',
         'client_id': client_id,
         'client_secret': client_secret
@@ -118,7 +126,7 @@ def get_agc_token(domain: str, client_id: str, client_secret: str, timeout: int 
             expires_in = int(data.get('expires_in', 3600))
             _TOKEN_CACHE[cache_key] = {'token': token, 'expires_at': now + expires_in - 10}
             logger.info(f"Token 获取成功，有效期: {expires_in}秒")
-            return token
+            return (token, expires_in)
         except RequestException as e:
             last_exc = e
             wait = backoff_factor * (2 ** (attempt - 1))
@@ -423,7 +431,7 @@ def upload_generated_podcast(
     logger.info(f"  product_id: {'已设置' if product_id else '未设置'}")
 
     # 获取 token（使用token_client_id和client_secret）
-    token = get_agc_token(domain, token_client_id, client_secret)
+    token, _ = get_agc_token(domain, token_client_id, client_secret)
 
     # 上传（使用upload_client_id，可能与token_client_id不同）
     resp = upload_file_to_agc(storage_url, bucket, object_name, output_path,
@@ -592,7 +600,7 @@ def download_generated_podcast(
     logger.info(f"  product_id: {'已设置' if product_id else '未设置'}")
 
     # 获取 token（使用token_client_id和client_secret）
-    token = get_agc_token(domain, token_client_id, client_secret)
+    token, _ = get_agc_token(domain, token_client_id, client_secret)
 
     # 下载（使用download_client_id，可能与token_client_id不同）
     resp = download_file_from_agc(storage_url, bucket, object_name, output_path,

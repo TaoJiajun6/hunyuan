@@ -20,7 +20,7 @@ function switchPage(page) {
     navItem.classList.add('active');
   }
   
-  if (page === 'history' || page === 'explore') {
+  if (page === 'explore') {
     loadHistory();
   }
 }
@@ -599,7 +599,7 @@ function showProgress(percent) {
 
 // 加载历史播客
 async function loadHistory() {
-  const listElement = document.getElementById(currentPage === 'history' ? 'podcast-list' : 'explore-list');
+  const listElement = document.getElementById('explore-list');
   if (!listElement) return;
   
   listElement.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-secondary);">加载中...</div>';
@@ -756,8 +756,8 @@ document.addEventListener('DOMContentLoaded', function() {
   updateDynamicConfig();
   updateVoiceSelectors();
   
-  // 如果当前在历史页面，加载数据
-  if (currentPage === 'history' || currentPage === 'explore') {
+  // 如果当前在探索页面，加载数据
+  if (currentPage === 'explore') {
     loadHistory();
   }
 });

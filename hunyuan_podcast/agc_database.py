@@ -28,18 +28,27 @@ class AGCDatabaseClient:
         client_secret: Optional[str] = None,
         product_id: Optional[str] = None,
         domain: Optional[str] = None,
-        cloud_db_zone: str = "cloudDBZone"
+        cloud_db_zone: str = "cloudDBZone",
+        api_key: Optional[str] = None
     ):
         """
         初始化AGC云数据库客户端
         
         Args:
-            client_id: AGC Client ID（用于获取access_token）
-            client_secret: AGC Client Secret（用于获取access_token）
+            client_id: AGC Client ID（用于获取access_token，如果使用OAuth认证）
+            client_secret: AGC Client Secret（用于获取access_token，如果使用OAuth认证）
             product_id: AGC Product ID（项目ID）
             domain: AGC API域名，默认 connect-drcn.dbankcloud.cn
             cloud_db_zone: CloudDB存储区名称，默认 cloudDBZone
+            api_key: 服务端 API Key（用于CloudDB REST API，优先级高于OAuth client_id）
+        
+        注意：CloudDB REST API 需要使用服务端 API Key，而不是 OAuth client_id。
+        请在 AGC 控制台 > 我的项目 > API管理 > 凭据 中创建服务端 API Key。
         """
+        # 优先使用 API Key（服务端认证）
+        self.api_key = api_key or os.getenv('AGC_API_KEY')
+        
+        # OAuth 凭证（用于获取 token，如果未提供 API Key）
         self.client_id = client_id or os.getenv('AGC_CLIENT_ID')
         self.client_secret = client_secret or os.getenv('AGC_CLIENT_SECRET')
         self.product_id = product_id or os.getenv('AGC_PRODUCT_ID')
@@ -47,7 +56,7 @@ class AGCDatabaseClient:
         self.cloud_db_zone = cloud_db_zone or os.getenv('AGC_CLOUD_DB_ZONE', 'cloudDBZone')
         
         # 如果没有提供认证信息，尝试从文件读取
-        if not self.client_id or not self.client_secret:
+        if not self.api_key and (not self.client_id or not self.client_secret):
             if HAS_AGC_AUTH:
                 cfg_path = _find_agc_client_json()
                 if cfg_path:
@@ -66,9 +75,19 @@ class AGCDatabaseClient:
         self._token_expires_at: Optional[float] = None
     
     def _get_access_token(self) -> Optional[str]:
-        """获取AGC access token（客户端认证）"""
+        """
+        获取AGC access token
+        
+        如果配置了 API Key，直接返回 API Key（服务端认证）
+        否则使用 OAuth 客户端凭证获取 token
+        """
+        # 如果使用 API Key，直接返回（不需要 token）
+        if self.api_key:
+            return self.api_key
+        
+        # 使用 OAuth 认证
         if not HAS_AGC_AUTH:
-            logger.warning("AGC认证模块不可用，无法获取access token")
+            logger.warning("AGC认证模块不可用，且未配置 API Key，无法获取access token")
             return None
         
         # 如果token未过期，直接返回
@@ -92,7 +111,16 @@ class AGCDatabaseClient:
                 self._token_expires_at = time.time() + expires_in
                 return token
         except Exception as e:
-            logger.error(f"获取AGC access token失败: {e}")
+            error_msg = str(e)
+            if "type of clientId not match" in error_msg or "203886599" in error_msg:
+                logger.error(
+                    "获取 access token 失败：clientId 类型不匹配。\n"
+                    "CloudDB REST API 需要使用服务端 API Key，而不是 OAuth client_id。\n"
+                    "请在 AGC 控制台 > 我的项目 > API管理 > 凭据 中创建服务端 API Key，\n"
+                    "然后设置环境变量 AGC_API_KEY=你的API_KEY"
+                )
+            else:
+                logger.error(f"获取AGC access token失败: {e}")
         
         return None
     
@@ -222,13 +250,24 @@ class AGCDatabaseClient:
             
             # 构造upsert请求
             url = f"{self.base_url}/upsert?_v=4"
-            headers = {
-                "content-type": "application/json",
-                "client_id": self.client_id,
-                "Authorization": f"Bearer {token}",
-                "productId": self.product_id,
-                "host": self.domain
-            }
+            
+            # 如果使用 API Key，在 headers 中使用 API Key
+            # 如果使用 OAuth token，使用 Bearer token
+            if self.api_key:
+                headers = {
+                    "content-type": "application/json",
+                    "client_id": self.api_key,  # 使用 API Key 作为 client_id
+                    "productId": self.product_id,
+                    "host": self.domain
+                }
+            else:
+                headers = {
+                    "content-type": "application/json",
+                    "client_id": self.client_id,
+                    "Authorization": f"Bearer {token}",
+                    "productId": self.product_id,
+                    "host": self.domain
+                }
             
             payload = {
                 "msgInfo": {
@@ -281,14 +320,24 @@ class AGCDatabaseClient:
         try:
             # 构造查询请求
             url = f"{self.base_url}/query?_v=4"
-            headers = {
-                "content-type": "application/json",
-                "client_id": self.client_id,
-                "Authorization": f"Bearer {token}",
-                "productId": self.product_id,
-                "access_token": token,
-                "host": self.domain
-            }
+            
+            # 如果使用 API Key，在 headers 中使用 API Key
+            if self.api_key:
+                headers = {
+                    "content-type": "application/json",
+                    "client_id": self.api_key,  # 使用 API Key 作为 client_id
+                    "productId": self.product_id,
+                    "host": self.domain
+                }
+            else:
+                headers = {
+                    "content-type": "application/json",
+                    "client_id": self.client_id,
+                    "Authorization": f"Bearer {token}",
+                    "productId": self.product_id,
+                    "access_token": token,
+                    "host": self.domain
+                }
             
             # 构造查询条件：id等于指定值
             query_conditions = [
@@ -365,14 +414,24 @@ class AGCDatabaseClient:
         try:
             # 构造查询请求
             url = f"{self.base_url}/query?_v=4"
-            headers = {
-                "content-type": "application/json",
-                "client_id": self.client_id,
-                "Authorization": f"Bearer {token}",
-                "productId": self.product_id,
-                "access_token": token,
-                "host": self.domain
-            }
+            
+            # 如果使用 API Key，在 headers 中使用 API Key
+            if self.api_key:
+                headers = {
+                    "content-type": "application/json",
+                    "client_id": self.api_key,  # 使用 API Key 作为 client_id
+                    "productId": self.product_id,
+                    "host": self.domain
+                }
+            else:
+                headers = {
+                    "content-type": "application/json",
+                    "client_id": self.client_id,
+                    "Authorization": f"Bearer {token}",
+                    "productId": self.product_id,
+                    "access_token": token,
+                    "host": self.domain
+                }
             
             # 构造查询条件
             query_conditions = [
@@ -454,13 +513,23 @@ class AGCDatabaseClient:
         try:
             # 构造删除请求（使用upsert，设置naturalbase_deleted为true）
             url = f"{self.base_url}/upsert?_v=4"
-            headers = {
-                "content-type": "application/json",
-                "client_id": self.client_id,
-                "Authorization": f"Bearer {token}",
-                "productId": self.product_id,
-                "host": self.domain
-            }
+            
+            # 如果使用 API Key，在 headers 中使用 API Key
+            if self.api_key:
+                headers = {
+                    "content-type": "application/json",
+                    "client_id": self.api_key,  # 使用 API Key 作为 client_id
+                    "productId": self.product_id,
+                    "host": self.domain
+                }
+            else:
+                headers = {
+                    "content-type": "application/json",
+                    "client_id": self.client_id,
+                    "Authorization": f"Bearer {token}",
+                    "productId": self.product_id,
+                    "host": self.domain
+                }
             
             # 删除操作：只需要主键和删除标记字段
             delete_schema = {
@@ -527,9 +596,17 @@ def get_database_client() -> Optional[AGCDatabaseClient]:
         client = AGCDatabaseClient()
         
         # 检查必要的配置
-        if not client.client_id or not client.client_secret or not client.product_id:
-            logger.debug("AGC云数据库配置不完整，跳过云数据库功能")
-            return None
+        # 优先检查 API Key，如果没有则检查 OAuth 凭证
+        if not client.api_key:
+            if not client.client_id or not client.client_secret or not client.product_id:
+                logger.debug(
+                    "AGC云数据库配置不完整，跳过云数据库功能。\n"
+                    "请配置以下之一：\n"
+                    "  1. 环境变量 AGC_API_KEY（推荐，用于服务端 API Key）\n"
+                    "  2. 环境变量 AGC_CLIENT_ID, AGC_CLIENT_SECRET, AGC_PRODUCT_ID（OAuth认证）\n"
+                    "注意：CloudDB REST API 推荐使用服务端 API Key"
+                )
+                return None
         
         return client
     except Exception as e:
