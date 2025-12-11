@@ -3482,21 +3482,34 @@ async def get_task_status(task_id: str):
 
 
 @app.get("/api/v1/podcast/history", response_model=ApiResponse)
-async def get_podcast_history(limit: int = 50, category: Optional[str] = None):
+async def get_podcast_history(limit: int = 50, category: Optional[str] = None, debug: bool = False):
     """
     获取历史播客列表
     
     参数：
     - limit: 返回数量限制，默认50
     - category: 播客分类过滤，可选
+    - debug: 是否返回调试信息（包括真实路径），默认False
     """
     try:
         import glob
         from datetime import datetime
         
+        # 如果启用调试模式，返回路径信息
+        debug_info = {}
+        if debug:
+            debug_info = {
+                "output_dir": OUTPUT_DIR,
+                "output_dir_absolute": os.path.abspath(OUTPUT_DIR),
+                "output_dir_exists": os.path.exists(OUTPUT_DIR),
+                "project_root": os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "current_working_dir": os.getcwd(),
+            }
+        
         # 从进度文件读取播客信息
         history_list = []
-        file_map = {}  # 用于映射文件名到播客信息
+        file_map = {}  # 用于映射文件名到播客信息（用于去重和合并）
+        job_map = {}  # 用于映射 job_id 到播客信息
         
         if os.path.exists(_PROGRESS_DIR):
             progress_files = glob.glob(os.path.join(_PROGRESS_DIR, '*.json'))
@@ -3542,7 +3555,6 @@ async def get_podcast_history(limit: int = 50, category: Optional[str] = None):
                         if local_filename and os.path.exists(os.path.join(OUTPUT_DIR, local_filename)):
                             # 如果本地文件存在，使用本地文件API
                             audio_url = f"/api/v1/podcast/file/{local_filename}"
-                            file_map[local_filename] = True
                         
                         # 构建播客信息
                         podcast_info = {
@@ -3563,21 +3575,36 @@ async def get_podcast_history(limit: int = 50, category: Optional[str] = None):
                         if podcast_info['script']:
                             podcast_info['content'] = podcast_info['script'][:100] + '...' if len(podcast_info['script']) > 100 else podcast_info['script']
                         
-                        history_list.append(podcast_info)
+                        # 如果有本地文件，记录到 file_map 中（用于后续去重和补充文件信息）
+                        if local_filename:
+                            file_map[local_filename] = podcast_info
+                        else:
+                            # 没有本地文件，直接添加到列表
+                            history_list.append(podcast_info)
                 except Exception as e:
                     logger.debug(f"读取进度文件失败: {progress_file}, {e}")
         
-        # 扫描 OUTPUT_DIR 目录，添加没有进度文件的音频文件
+        # 扫描 OUTPUT_DIR 目录，添加没有进度文件的音频文件，或补充已有播客的文件信息
         if os.path.exists(OUTPUT_DIR):
             audio_extensions = ['.wav', '.mp3', '.flac', '.m4a']
             for ext in audio_extensions:
                 audio_files = glob.glob(os.path.join(OUTPUT_DIR, f'*{ext}'))
                 for audio_file in audio_files:
                     filename = os.path.basename(audio_file)
-                    # 如果这个文件还没有在历史列表中
-                    if filename not in file_map:
-                        file_stat = os.stat(audio_file)
-                        file_map[filename] = True
+                    file_stat = os.stat(audio_file)
+                    
+                    # 如果这个文件已经在 file_map 中（有进度文件），补充文件信息
+                    if filename in file_map:
+                        existing_info = file_map[filename]
+                        # 补充文件大小（如果还没有）
+                        if not existing_info.get('file_size_mb'):
+                            existing_info['file_size_mb'] = round(file_stat.st_size / (1024 * 1024), 2)
+                        # 确保使用本地文件 URL
+                        if not existing_info.get('audio_url') or not existing_info['audio_url'].startswith('/api/v1/podcast/file'):
+                            existing_info['audio_url'] = f"/api/v1/podcast/file/{filename}"
+                        existing_info['local_file'] = filename
+                    else:
+                        # 这是一个没有进度文件的本地文件，添加到列表
                         history_list.append({
                             'id': f'file_{filename}',
                             'title': os.path.splitext(filename)[0],
@@ -3591,9 +3618,40 @@ async def get_podcast_history(limit: int = 50, category: Optional[str] = None):
                             'file_size_mb': round(file_stat.st_size / (1024 * 1024), 2),
                             'topic': None,
                         })
+                        file_map[filename] = True  # 标记已处理
+        
+        # 将 file_map 中的播客信息添加到列表（这些是有本地文件的播客，已补充文件信息）
+        for filename, podcast_info in file_map.items():
+            if isinstance(podcast_info, dict) and podcast_info not in history_list:
+                history_list.append(podcast_info)
         
         # 按创建时间倒序排序
         history_list.sort(key=lambda x: x.get('created_at', 0), reverse=True)
+        
+        # 去重：如果有相同的 local_file，只保留一个（优先保留有更多信息的）
+        seen_files = {}
+        deduplicated_list = []
+        for podcast in history_list:
+            local_file = podcast.get('local_file')
+            if local_file:
+                if local_file not in seen_files:
+                    seen_files[local_file] = podcast
+                    deduplicated_list.append(podcast)
+                else:
+                    # 如果已有相同文件，选择信息更完整的（有 script 或更好的 title）
+                    existing = seen_files[local_file]
+                    if (podcast.get('script') and not existing.get('script')) or \
+                       (podcast.get('title') and podcast['title'] != os.path.splitext(local_file)[0] and 
+                        existing.get('title') == os.path.splitext(local_file)[0]):
+                        # 替换为信息更完整的
+                        deduplicated_list.remove(existing)
+                        seen_files[local_file] = podcast
+                        deduplicated_list.append(podcast)
+            else:
+                # 没有本地文件，直接添加（可能是只有云存储URL的）
+                deduplicated_list.append(podcast)
+        
+        history_list = deduplicated_list
         
         # 分类过滤
         if category and category != 'all':
@@ -3602,13 +3660,19 @@ async def get_podcast_history(limit: int = 50, category: Optional[str] = None):
         # 限制数量
         history_list = history_list[:limit]
         
+        response_data = {
+            "podcasts": history_list,
+            "total": len(history_list)
+        }
+        
+        # 如果启用调试模式，添加调试信息
+        if debug:
+            response_data["debug"] = debug_info
+        
         return ApiResponse(
             success=True,
             message=f"共找到 {len(history_list)} 个历史播客",
-            data={
-                "podcasts": history_list,
-                "total": len(history_list)
-            }
+            data=response_data
         )
     
     except Exception as e:
