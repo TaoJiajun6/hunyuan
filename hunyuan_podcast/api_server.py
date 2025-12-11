@@ -12,9 +12,10 @@ import requests
 import json
 from typing import Optional, List, Dict, Any, Union
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request, BackgroundTasks
-from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
+from fastapi.staticfiles import StaticFiles
 import asyncio
 from pydantic import BaseModel, Field, ValidationError
 import uvicorn
@@ -644,6 +645,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 获取web目录路径
+web_dir = os.path.join(os.path.dirname(__file__), "web")
+if not os.path.exists(web_dir):
+    # 如果当前目录下没有web目录，尝试从项目根目录查找
+    web_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "hunyuan_podcast", "web")
+
+# 挂载静态文件服务（web目录）
+if os.path.exists(web_dir):
+    app.mount("/web", StaticFiles(directory=web_dir), name="web")
+    logger.info(f"已挂载静态文件服务: {web_dir} -> /web")
+else:
+    logger.warning(f"Web目录不存在: {web_dir}")
 
 # 全局生成器实例
 generator: Optional[PodcastGenerator] = None
@@ -1477,15 +1491,23 @@ def do_agc_upload(output_path: str, storage_url: str, bucket: str, product_id: O
 
 # ============ API端点 ============
 
-@app.get("/", response_model=ApiResponse)
+@app.get("/")
 async def root():
-    """根端点，返回API信息"""
-    return ApiResponse(
-        success=True,
-        message="混元AI播客生成API服务",
-        data={
+    """根端点，返回Web页面或API信息"""
+    # 检查是否存在 web/index.html
+    web_index = os.path.join(web_dir, "index.html")
+    if os.path.exists(web_index):
+        with open(web_index, "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
+    
+    # 如果不存在web页面，返回API信息（JSON格式）
+    return JSONResponse(content={
+        "success": True,
+        "message": "混元AI播客生成API服务",
+        "data": {
             "version": "1.0.0",
             "endpoints": {
+                "web": "/web/index.html",
                 "multi_role": "/api/v1/podcast/multi_role",
                 "character": "/api/v1/podcast/character",
                 "deep": "/api/v1/podcast/deep",
@@ -1494,7 +1516,7 @@ async def root():
                 "docs": "/docs"
             }
         }
-    )
+    })
 
 
 @app.get("/health")
@@ -3491,16 +3513,46 @@ async def shutdown_event():
 
 if __name__ == "__main__":
     import argparse
+    import socket
+    
     parser = argparse.ArgumentParser(description="混元AI播客生成API服务")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="API服务主机")
     parser.add_argument("--port", type=int, default=8000, help="API服务端口")
     args = parser.parse_args()
     
-    print(f"🚀 启动混元AI播客生成API服务")
-    print(f"📡 API地址: http://{args.host}:{args.port}")
-    print(f"📚 API文档: http://{args.host}:{args.port}/docs")
-    print(f"💡 健康检查: http://{args.host}:{args.port}/health")
-    print(f"⚙️  最大并发任务数: {MAX_CONCURRENT_PODCAST_TASKS} (可通过环境变量 MAX_CONCURRENT_PODCAST_TASKS 配置)")
+    # 获取本机IP地址
+    def get_local_ip():
+        try:
+            # 连接到一个远程地址来获取本机IP
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return None
+    
+    local_ip = get_local_ip()
+    cloud_studio_url = os.getenv("CLOUD_STUDIO_URL", None)
+    
+    print(f"\n🚀 启动混元AI播客生成API服务\n")
+    print(f"访问地址：\n")
+    print(f"  本地访问: http://127.0.0.1:{args.port}")
+    print(f"  或使用: http://localhost:{args.port}")
+    if local_ip:
+        print(f"  局域网访问: http://{local_ip}:{args.port}")
+    if cloud_studio_url:
+        print(f"\nAPI文档: {cloud_studio_url}/docs")
+        print(f"健康检查: {cloud_studio_url}/health")
+    else:
+        print(f"\nAPI文档: http://127.0.0.1:{args.port}/docs")
+        print(f"健康检查: http://127.0.0.1:{args.port}/health")
+    print(f"\nAPI端点:\n")
+    print(f"  • 多角色播客: POST /api/v1/podcast/multi_role")
+    print(f"  • 自定义角色: POST /api/v1/podcast/character")
+    print(f"  • 主题深度播客: POST /api/v1/podcast/deep")
+    print(f"  • 文本分析: POST /api/v1/podcast/analyze")
+    print(f"\n⚙️  最大并发任务数: {MAX_CONCURRENT_PODCAST_TASKS} (可通过环境变量 MAX_CONCURRENT_PODCAST_TASKS 配置)\n")
     
     uvicorn.run(app, host=args.host, port=args.port)
 
