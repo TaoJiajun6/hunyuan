@@ -60,36 +60,28 @@ def sanitize_filename(title: str, max_length: int = 50) -> str:
     return filename
 
 
-def get_output_path(filename: Optional[str] = None, title: Optional[str] = None) -> str:
+def get_output_path(filename: Optional[str] = None, title: Optional[str] = None, podcast_id: Optional[str] = None) -> str:
     """
     获取输出文件路径
     
     Args:
         filename: 文件名（不含扩展名），如果为None则自动生成
-        title: 播客标题（可选），如果提供且filename为None，将使用标题生成文件名
+        title: 播客标题
+        podcast_id: 播客ID（可选），如果提供且filename为None，将使用ID生成文件名
     
     Returns:
         完整的输出文件路径
     """
     ensure_dir(OUTPUT_DIR)
     if filename is None:
-        if title:
-            # 使用标题生成文件名
-            safe_filename = sanitize_filename(title)
-            base_filename = f"{safe_filename}.wav"
-            file_path = os.path.join(OUTPUT_DIR, base_filename)
-            
-            # 如果文件已存在，添加时间戳后缀避免冲突
-            if os.path.exists(file_path):
-                import time
-                timestamp = int(time.time())
-                # 在文件名末尾（扩展名之前）添加时间戳
-                name_without_ext = safe_filename
-                filename = f"{name_without_ext}_{timestamp}.wav"
-            else:
-                filename = base_filename
+        if podcast_id:
+            # 使用ID生成文件名
+            # 清理ID中的特殊字符，确保文件名安全
+            import re
+            safe_id = re.sub(r'[<>:"/\\|?*]', '', str(podcast_id))
+            filename = f"{safe_id}.wav"
         else:
-            # 使用时间戳
+            # 如果没有ID，使用时间戳生成文件名（不使用title）
             import time
             filename = f"podcast_{int(time.time())}.wav"
     elif not filename.endswith('.wav'):

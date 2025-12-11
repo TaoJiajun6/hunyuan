@@ -1,4 +1,4 @@
-import { RouterMap, RouterUtils } from 'lib_common';
+import { CommonConstants, RouterMap, RouterUtils } from 'lib_common';
 import { NavHeaderBar } from 'lib_widget';
 import { MusicPlayController } from 'module_musicplay';
 import { CloudStorageMusicUtils, CloudAudioFile } from '../../common/CloudStorageMusicUtils';
@@ -512,12 +512,14 @@ export struct PodcastPage {
     NavDestination() {
       Column() {
         // 顶部标题栏，带右侧操作按钮
-        NavHeaderBar({
-          title: 'AI播客',
-          isSubTitle: false,
-          showBackBtn: false,
-          rightPartBuilder: this.headerRightBuilder
-        })
+        Row(){
+          Text('真AI播客')
+            .fontSize($r('sys.float.Title_M'))
+            .fontColor($r('sys.color.font_primary'))
+            .fontWeight(FontWeight.Bold)
+            .margin({ left: CommonConstants.SPACE_S })
+        }
+
 
         Scroll() {
           Column({ space: 20 }) {

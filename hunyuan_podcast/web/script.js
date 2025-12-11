@@ -790,40 +790,13 @@ function playPodcast(audioUrl, podcastId, event) {
   // 可以打开一个播放器或者直接播放
   const player = document.getElementById('audio-player');
   if (player) {
-    console.log('播放播客:', podcastId, '原始音频URL:', audioUrl);
-    
-    // 新版本使用job_id作为文件名，不再包含中文，直接使用URL
-    // 保留编码逻辑作为后备，以防有旧的URL包含中文文件名
-    let finalUrl = audioUrl;
-    
-    // 检查URL是否包含未编码的中文字符（仅作为后备处理）
-    if (/[\u4e00-\u9fa5]/.test(audioUrl) && !audioUrl.includes('%')) {
-      try {
-        // 分离URL的各个部分
-        const urlObj = new URL(audioUrl);
-        // 对路径部分进行编码（每个路径段单独编码，保留斜杠）
-        const pathParts = urlObj.pathname.split('/').filter(part => part);
-        const encodedPath = '/' + pathParts.map(part => {
-          if (part.includes('%')) {
-            return part;
-          }
-          return encodeURIComponent(part);
-        }).join('/');
-        urlObj.pathname = encodedPath;
-        finalUrl = urlObj.toString();
-        console.log('检测到中文文件名，已编码:', finalUrl);
-      } catch (e) {
-        console.warn('URL解析失败，使用原始URL:', e);
-      }
-    }
-    
-    player.src = finalUrl;
+    console.log('播放播客:', podcastId, '音频URL:', audioUrl);
+    player.src = audioUrl;
     player.style.display = 'block';
     
     // 添加错误处理
     player.onerror = function(e) {
       console.error('音频播放失败:', e);
-      console.error('失败的URL:', finalUrl);
       alert('音频加载失败，请检查URL是否正确或网络连接');
       player.style.display = 'none';
     };

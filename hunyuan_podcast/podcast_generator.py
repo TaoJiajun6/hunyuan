@@ -125,7 +125,8 @@ class PodcastGenerator:
         background_volume: float = 0.3,
         background_mode: str = "random",
         verbose: bool = False,
-        title: Optional[str] = None
+        title: Optional[str] = None,
+        podcast_id: Optional[str] = None
     ) -> str:
         """
         从文本生成播客音频（子题目1：多角色自然互动播客）
@@ -250,8 +251,8 @@ class PodcastGenerator:
         
         # 合成所有音频片段（SoulX-Podcast已经生成了完整音频，这里主要是为了后续处理）
         if not output_path:
-            # 如果提供了标题，使用标题生成文件名
-            output_path = get_output_path(title=title)
+            # 优先使用ID生成文件名，如果没有ID则使用标题（向后兼容）
+            output_path = get_output_path(podcast_id=podcast_id, title=title)
         else:
             # 确保输出路径是绝对路径
             output_path = os.path.abspath(output_path)
