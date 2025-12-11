@@ -283,7 +283,7 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
         
         # 保存原始的create_connection函数
         _original_create_connection = create_connection
-        
+            
         def create_connection_without_timeout(address, *args, **kwargs):
             """创建没有超时的socket连接，并优化TCP参数以提高上传速度"""
             sock = _original_create_connection(address, *args, **kwargs)
@@ -317,75 +317,75 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
         session.mount('https://', adapter)
         
         try:
-            upload_start = time.time()
-            
-            # AGC服务器要求必须使用Content-Length头，不能使用Transfer-Encoding: chunked
-            # 创建一个支持Content-Length的流式上传类
-            # 这个类实现了__iter__和__len__，让requests使用Content-Length而不是chunked编码
-            class FileStream:
-                """支持Content-Length的流式文件上传类"""
-                def __init__(self, file_path, chunk_size=1024 * 1024):
-                    self.file_path = file_path
-                    self.chunk_size = chunk_size
-                    self.file_size = os.path.getsize(file_path)
-                    self._file = None
-                    self._bytes_sent = 0
-                    self._last_log_time = upload_start
+                upload_start = time.time()
                 
-                def __len__(self):
-                    """返回文件大小，让requests使用Content-Length"""
-                    return self.file_size
+                # AGC服务器要求必须使用Content-Length头，不能使用Transfer-Encoding: chunked
+                # 创建一个支持Content-Length的流式上传类
+                # 这个类实现了__iter__和__len__，让requests使用Content-Length而不是chunked编码
+                class FileStream:
+                    """支持Content-Length的流式文件上传类"""
+                    def __init__(self, file_path, chunk_size=1024 * 1024):
+                        self.file_path = file_path
+                        self.chunk_size = chunk_size
+                        self.file_size = os.path.getsize(file_path)
+                        self._file = None
+                        self._bytes_sent = 0
+                        self._last_log_time = upload_start
+                    
+                    def __len__(self):
+                        """返回文件大小，让requests使用Content-Length"""
+                        return self.file_size
+                    
+                    def __iter__(self):
+                        """迭代器，分块读取文件"""
+                        try:
+                            self._file = open(self.file_path, 'rb')
+                            while True:
+                                chunk = self._file.read(self.chunk_size)
+                                if not chunk:
+                                    break
+                                self._bytes_sent += len(chunk)
+                                # 每2秒记录一次进度
+                                current_time = time.time()
+                                if current_time - self._last_log_time >= 2.0:
+                                    elapsed = current_time - upload_start
+                                    if elapsed > 0:
+                                        speed = (self._bytes_sent / (1024 * 1024)) / elapsed
+                                        progress = (self._bytes_sent / self.file_size) * 100
+                                        file_size_mb = self.file_size / (1024 * 1024)
+                                        logger.info(f"上传进度: {progress:.1f}% ({self._bytes_sent / (1024 * 1024):.2f}/{file_size_mb:.2f} MB), 速度: {speed:.2f} MB/s")
+                                    self._last_log_time = current_time
+                                yield chunk
+                        finally:
+                            if self._file:
+                                self._file.close()
                 
-                def __iter__(self):
-                    """迭代器，分块读取文件"""
-                    try:
-                        self._file = open(self.file_path, 'rb')
-                        while True:
-                            chunk = self._file.read(self.chunk_size)
-                            if not chunk:
-                                break
-                            self._bytes_sent += len(chunk)
-                            # 每2秒记录一次进度
-                            current_time = time.time()
-                            if current_time - self._last_log_time >= 2.0:
-                                elapsed = current_time - upload_start
-                                if elapsed > 0:
-                                    speed = (self._bytes_sent / (1024 * 1024)) / elapsed
-                                    progress = (self._bytes_sent / self.file_size) * 100
-                                    file_size_mb = self.file_size / (1024 * 1024)
-                                    logger.info(f"上传进度: {progress:.1f}% ({self._bytes_sent / (1024 * 1024):.2f}/{file_size_mb:.2f} MB), 速度: {speed:.2f} MB/s")
-                                self._last_log_time = current_time
-                            yield chunk
-                    finally:
-                        if self._file:
-                            self._file.close()
-            
-            # 优化chunk_size以提高上传速度
-            # 在保证不超时的前提下，使用更大的chunk可以减少网络往返次数，提高速度
-            # 由于已经禁用了socket超时，可以使用更大的chunk
-            # 针对1MB以上的文件（常见情况），使用更大的chunk_size以提高速度
-            if file_size_mb > 50:
-                chunk_size = 4 * 1024 * 1024  # 4MB chunks，超大文件（最大化速度）
-            elif file_size_mb > 20:
-                chunk_size = 2 * 1024 * 1024  # 2MB chunks，大文件
-            elif file_size_mb > 5:
-                chunk_size = 1024 * 1024  # 1MB chunks，中等文件
-            elif file_size_mb > 1:
-                chunk_size = 512 * 1024  # 512KB chunks，1MB以上的文件
-            else:
-                chunk_size = 256 * 1024  # 256KB chunks，小于1MB的小文件
-            
-            logger.info(f"流式上传模式（文件大小: {file_size_mb:.2f} MB, chunk_size: {chunk_size / 1024:.0f} KB）")
-            
-            file_stream = FileStream(file_path, chunk_size)
-            
-            resp = session.put(
-                url,
-                data=file_stream,  # 使用支持Content-Length的流式对象
-                headers=headers,
-                timeout=(connect_timeout, read_timeout),
-                allow_redirects=True
-            )
+                # 优化chunk_size以提高上传速度
+                # 在保证不超时的前提下，使用更大的chunk可以减少网络往返次数，提高速度
+                # 由于已经禁用了socket超时，可以使用更大的chunk
+                # 针对1MB以上的文件（常见情况），使用更大的chunk_size以提高速度
+                if file_size_mb > 50:
+                    chunk_size = 4 * 1024 * 1024  # 4MB chunks，超大文件（最大化速度）
+                elif file_size_mb > 20:
+                    chunk_size = 2 * 1024 * 1024  # 2MB chunks，大文件
+                elif file_size_mb > 5:
+                    chunk_size = 1024 * 1024  # 1MB chunks，中等文件
+                elif file_size_mb > 1:
+                    chunk_size = 512 * 1024  # 512KB chunks，1MB以上的文件
+                else:
+                    chunk_size = 256 * 1024  # 256KB chunks，小于1MB的小文件
+                
+                logger.info(f"流式上传模式（文件大小: {file_size_mb:.2f} MB, chunk_size: {chunk_size / 1024:.0f} KB）")
+                
+                file_stream = FileStream(file_path, chunk_size)
+                
+                resp = session.put(
+                    url,
+                    data=file_stream,  # 使用支持Content-Length的流式对象
+                    headers=headers,
+                    timeout=(connect_timeout, read_timeout),
+                    allow_redirects=True
+                )
         finally:
             session.close()
             # 恢复原始的create_connection函数（在session关闭后）

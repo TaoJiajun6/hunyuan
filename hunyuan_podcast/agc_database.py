@@ -337,13 +337,24 @@ class AGCDatabaseClient:
             
             result = resp.json()
             
-            # 检查响应状态：云数据库可能返回 ret.code 或 resInfo.resCode
+            # 检查响应状态：云数据库可能返回多种格式
+            # 1. ret.code == 0 表示成功
+            # 2. resInfo.resCode == 1002000 表示成功
+            # 3. updateResMsg.successRecCount > 0 表示成功保存了记录
             ret_code = result.get('ret', {}).get('code')
             res_code = result.get('resInfo', {}).get('resCode')
+            update_res_msg = result.get('updateResMsg', {})
+            success_count = update_res_msg.get('successRecCount', 0)
             
-            # resCode 1002000 表示成功
-            if ret_code == 0 or res_code == 1002000:
-                logger.info(f"播客数据已保存到云数据库: {podcast_data['id']}")
+            # 判断成功：任一条件满足即可
+            is_success = (
+                ret_code == 0 or 
+                res_code == 1002000 or 
+                success_count > 0
+            )
+            
+            if is_success:
+                logger.info(f"播客数据已保存到云数据库: {podcast_data['id']} (成功保存 {success_count} 条记录)")
                 return True
             else:
                 ret_msg = result.get('ret', {}).get('msg', '未知错误')
@@ -353,6 +364,7 @@ class AGCDatabaseClient:
                 logger.error(f"保存播客数据到云数据库失败:")
                 logger.error(f"  ret.code: {ret_code}")
                 logger.error(f"  resInfo.resCode: {res_code}")
+                logger.error(f"  updateResMsg.successRecCount: {success_count}")
                 logger.error(f"  错误信息: {error_msg}")
                 logger.error(f"  完整响应: {json.dumps(result, ensure_ascii=False, indent=2)}")
                 logger.error(f"  播客数据ID: {podcast_data.get('id')}")
@@ -367,7 +379,7 @@ class AGCDatabaseClient:
                     logger.error(f"  响应内容: {json.dumps(error_detail, ensure_ascii=False, indent=2)}")
                 except:
                     logger.error(f"  响应内容: {e.response.text[:500]}")
-            return False
+                return False
         except Exception as e:
             logger.error(f"保存播客数据到云数据库时出错: {e}", exc_info=True)
             logger.error(f"  播客数据: {json.dumps(podcast_data, ensure_ascii=False, indent=2, default=str)}")

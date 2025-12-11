@@ -404,10 +404,10 @@ async function generateCharacter() {
     
     // 构建characters数组，使用voice_url而不是voice
     const characters = chars.map((char, index) => ({
-      name: char.name,
-      identity: char.identity || undefined,
-      personality: char.personality || undefined,
-      speaking_style: char.speaking_style || undefined,
+        name: char.name,
+        identity: char.identity || undefined,
+        personality: char.personality || undefined,
+        speaking_style: char.speaking_style || undefined,
       voice_url: voiceUrlList[index]
     }));
     
