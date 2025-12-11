@@ -21,6 +21,7 @@ import { LyricFile, LyricScrollEffect, LyricTopPosition } from '../lyric/LyricCo
 import { LrcEntry } from '../lyric/LrcEntry';
 import { parseKrcLyric, parseLrcLyric } from '../lyric/LrcUtils';
 import { getMusicModel, MusicModel } from '../viewmodel/MusicModel';
+import { MediaService } from '../utils/MediaService';
 
 /**
  * 歌词页面
@@ -59,63 +60,140 @@ export struct PlayerLyrics {
 
   build() {
     Column() {
-      Row() {
-        Image(this.musicModel.currentSong?.label)
-          .width($r('app.float.label_width_sm'))
-          .borderRadius($r('app.float.label_border'))
-          .aspectRatio(1)
-          .margin({
-            right: $r('app.float.label_margin_right')
-          })
+      // 顶部区域：标题、作者信息、播放按钮
+      Column({ space: 12 }) {
+        // 图标和标题
+        Row({ space: 12 }) {
+          // 图标
+          Image(this.musicModel.currentSong?.label)
+            .width(60)
+            .height(60)
+            .borderRadius(12)
+            .aspectRatio(1)
+            .objectFit(ImageFit.Cover)
 
-        Column() {
-          Text(this.musicModel.currentSong?.title)
-            .fontSize(16)
-            .fontColor(Color.White)
-            .fontWeight(700)
-          Text(this.musicModel.currentSong?.singer)
-            .fontSize(12)
-            .fontColor($r('sys.color.ohos_id_color_text_hint_contrary'))
-            .fontWeight(500)
-            .margin({
-              top: $r('app.float.singer_margin_top')
-            })
+          // 标题和作者信息
+          Column({ space: 4 }) {
+            Text(this.musicModel.currentSong?.title ?? '未知播客')
+              .fontSize(18)
+              .fontColor(Color.White)
+              .fontWeight(FontWeight.Bold)
+              .maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('100%')
+              .textAlign(TextAlign.Start)
+
+            Row({ space: 8 }) {
+              // 作者信息
+              Row({ space: 4 }) {
+                SymbolGlyph($r('sys.symbol.person'))
+                  .fontSize(14)
+                  .fontColor([Color.White])
+                  .opacity(0.6)
+                Text(this.musicModel.currentSong?.singer ?? '未知作者')
+                  .fontSize(12)
+                  .fontColor(Color.White)
+                  .opacity(0.6)
+              }
+
+              // 播放次数
+              Row({ space: 4 }) {
+                SymbolGlyph($r('sys.symbol.headphones'))
+                  .fontSize(14)
+                  .fontColor([Color.White])
+                  .opacity(0.6)
+                Text('39')
+                  .fontSize(12)
+                  .fontColor(Color.White)
+                  .opacity(0.6)
+              }
+
+              // 日期
+              Text('12-11')
+                .fontSize(12)
+                .fontColor(Color.White)
+                .opacity(0.6)
+            }
+            .width('100%')
+            .margin({ top: 4 })
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
         }
-        .alignItems(HorizontalAlign.Start)
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+
+        // 播放按钮
+        Row() {
+          Button() {
+            Row({ space: 8 }) {
+              SymbolGlyph(this.musicModel.isPlay ? $r('sys.symbol.pause_fill') : $r('sys.symbol.play_fill'))
+                .fontSize(20)
+                .fontColor([Color.White])
+              Text(this.musicModel.totalTime || '8分钟')
+                .fontSize(14)
+                .fontColor(Color.White)
+            }
+          }
+          .type(ButtonType.Normal)
+          .backgroundColor('#33FFFFFF')
+          .borderRadius(24)
+          .height(48)
+          .padding({ left: 24, right: 24 })
+          .onClick(() => {
+            MediaService.getInstance().playAndPause();
+          })
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.Center)
+        .margin({ top: 8 })
       }
       .width('100%')
-      .justifyContent(FlexAlign.Start)
       .margin({
         top: 48,
-        bottom: $r('app.float.info_margin_bottom')
+        bottom: 24
       })
 
-      LrcView({
-        lyricMilliSecondsTime: this.musicModel.progress,
-        mLrcEntryList: this.mLrcEntryList,
-        lyricScrollEffect: this.lyricScrollEffect,
-        lyricTopPosition: LyricTopPosition.Middle
-      })
+      // 脚本内容区域（可滚动）
+      if (this.musicModel.currentSong?.script && this.musicModel.currentSong.script.trim().length > 0) {
+        Scroll() {
+          Text(this.musicModel.currentSong.script)
+            .fontSize(15)
+            .fontColor(Color.White)
+            .opacity(0.9)
+            .lineHeight(26)
+            .textAlign(TextAlign.Start)
+            .padding({
+              left: 16,
+              right: 16,
+              top: 20,
+              bottom: 20
+            })
+            .width('100%')
+        }
         .layoutWeight(1)
-
-      Row() {
-        Image($r('app.media.ic_lyrics_button'))
-          .width(24)
-          .aspectRatio(1)
-          .opacity(0.86)
+        .width('100%')
+        .borderRadius(16)
+        .backgroundColor('#1AFFFFFF')
+        .margin({ bottom: 16 })
+      } else if (this.mLrcEntryList.length > 0) {
+        // 如果没有脚本，显示歌词
+        LrcView({
+          lyricMilliSecondsTime: this.musicModel.progress,
+          mLrcEntryList: this.mLrcEntryList,
+          lyricScrollEffect: this.lyricScrollEffect,
+          lyricTopPosition: LyricTopPosition.Middle
+        })
+          .layoutWeight(1)
+      } else {
+        Blank()
+          .layoutWeight(1)
       }
-      .width('100%')
-      .height($r('app.float.control_icon_height'))
-      .justifyContent(FlexAlign.End)
-      .margin({
-        top: $r('app.float.lyric_margin_top'),
-        bottom: 8,
-        right: 3
-      })
 
+      // 底部播放控制区域
       PlayerControlArea()
         .margin({
-          top: $r('app.float.control_lyric_margin'),
+          top: 16,
           bottom: $r('app.float.music_component_bottom')
         })
     }

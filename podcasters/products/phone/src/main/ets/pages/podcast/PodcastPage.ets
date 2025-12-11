@@ -220,47 +220,103 @@ export struct PodcastPage {
 
   /**
    * 加载最近播客列表
-   * 优先从云数据库获取，如果失败则从本地播放列表获取
+   * 显示云数据库中的播客和云存储中的音频文件
    */
   async loadRecentPodcasts(): Promise<void> {
     try {
       this.isRefreshing = true;
       
-      // 优先从云数据库获取播客列表
+      // 清空之前的映射
+      this.podcastCreatedAtMap.clear();
+      const allSongItems: SongItem[] = [];
+      const urlSet = new Set<string>(); // 用于去重，根据URL去重
+      const cloudDbFilePaths = new Set<string>(); // 记录云数据库中已有的文件路径
+      let podcastList: PodcastListItem[] = [];
+      
+      // 1. 从云数据库获取播客数据（优先显示）
       try {
-        const podcastList = await podcastService.getPodcastList(20);
+        podcastList = await podcastService.getPodcastList(); // 获取全部播客
         
         if (podcastList && podcastList.length > 0) {
-          // 清空之前的映射
-          this.podcastCreatedAtMap.clear();
-          
-          // 转换为SongItem格式
-          const songItems = podcastList.map((podcast: PodcastListItem) => {
-            // 保存创建时间到映射表
-            if (podcast.created_at) {
-              this.podcastCreatedAtMap.set(podcast.id, podcast.created_at);
-            }
-            return this.convertPodcastToSongItem(podcast);
-          });
-          
-          this.recentPodcasts = songItems;
-          Logger.info('PodcastPage', `从云数据库加载了 ${songItems.length} 个播客`);
-          return;
+          for (const podcast of podcastList) {
+            // 只处理有 audio_url 的播客
+            if (podcast.audio_url && podcast.audio_url.trim() !== '') {
+              // 保存创建时间到映射表
+              if (podcast.created_at) {
+                this.podcastCreatedAtMap.set(podcast.id, podcast.created_at);
+              }
+              
+              // 提取云存储路径，用于后续匹配
+              const cloudPath = CloudStorageMusicUtils.extractCloudPath(podcast.audio_url);
+              if (cloudPath) {
+                cloudDbFilePaths.add(cloudPath);
+                // 也添加文件名用于匹配
+                const fileName = cloudPath.split('/').pop() || '';
+                if (fileName) {
+                  cloudDbFilePaths.add(fileName);
+                }
+              }
+              
+              // 转换为SongItem
+              const songItem = this.convertPodcastToSongItem(podcast);
+              
+              // 根据URL去重
+              if (songItem.src && !urlSet.has(songItem.src)) {
+                urlSet.add(songItem.src);
+                allSongItems.push(songItem);
+              }
+          }
+          }
+          Logger.info('PodcastPage', `从云数据库加载了 ${allSongItems.length} 个播客`);
         }
       } catch (cloudError) {
-        Logger.warn('PodcastPage', `从云数据库获取播客列表失败，使用本地列表: ${cloudError}`);
+        Logger.warn('PodcastPage', `从云数据库获取播客列表失败: ${cloudError}`);
       }
 
-      // 如果云数据库获取失败或返回空，则从本地播放列表获取
-      const songList = this.musicModel.getSongList();
-
-      if (songList.length === 0) {
-        this.recentPodcasts = [];
-        return;
+      // 2. 从云存储获取音频文件列表（只添加云数据库中没有的）
+      try {
+        const audioFiles = await CloudStorageMusicUtils.getAudioFileList('outputs/podcasts/');
+        Logger.info('PodcastPage', `从云存储找到 ${audioFiles.length} 个音频文件`);
+        
+        if (audioFiles.length > 0) {
+          let addedCount = 0;
+          
+          // 逐个处理音频文件
+          for (const audioFile of audioFiles) {
+            // 检查这个文件是否已经在云数据库中
+            const filePath = audioFile.filePath;
+            const fileName = audioFile.fileName;
+            const isInCloudDb = cloudDbFilePaths.has(filePath) || cloudDbFilePaths.has(fileName);
+            
+            // 如果不在云数据库中，才添加（使用云存储的元数据）
+            if (!isInCloudDb) {
+              try {
+                // 转换为SongItem
+                const songItem = await CloudStorageMusicUtils.convertToSongItem(audioFile);
+                
+                // 只添加成功转换的项（src不为空）且未重复的
+                if (songItem.src && songItem.src !== '' && !urlSet.has(songItem.src)) {
+                  urlSet.add(songItem.src);
+                  allSongItems.push(songItem);
+                  addedCount++;
+                } else {
+                  Logger.warn('PodcastPage', `跳过文件 ${fileName}，转换失败或已存在（src为空或重复）`);
+                }
+              } catch (convertError) {
+                Logger.warn('PodcastPage', `转换文件 ${fileName} 失败: ${convertError}`);
+              }
+            } else {
+              Logger.info('PodcastPage', `跳过文件 ${fileName}，已在云数据库中`);
+            }
+          }
+          Logger.info('PodcastPage', `从云存储添加了 ${addedCount} 个云数据库中没有的音频文件`);
+        }
+      } catch (cloudStorageError) {
+        Logger.warn('PodcastPage', `从云存储获取音频文件失败: ${cloudStorageError}`);
       }
 
-      // 按创建时间排序，优先使用映射表中的created_at字段
-      const sortedList = [...songList].sort((a, b) => {
+      // 3. 按创建时间排序
+      const sortedList = allSongItems.sort((a, b) => {
         // 从映射表获取创建时间（数据库中的created_at字段）
         const timestampA = this.podcastCreatedAtMap.get(a.id) || 0;
         const timestampB = this.podcastCreatedAtMap.get(b.id) || 0;
@@ -274,14 +330,16 @@ export struct PodcastPage {
         if (timestampA > 0) return -1;
         if (timestampB > 0) return 1;
         
-        // 如果都没有created_at（本地播客），按ID倒序（保持原有逻辑）
+        // 如果都没有created_at，按ID倒序
         return b.id.localeCompare(a.id);
       });
 
-      // 只显示最近20个
-      this.recentPodcasts = sortedList.slice(0, 20);
+      // 显示全部播客
+      this.recentPodcasts = sortedList;
+      Logger.info('PodcastPage', `合并后共显示 ${this.recentPodcasts.length} 个播客`);
     } catch (error) {
       Logger.error('PodcastPage', `加载最近播客失败: ${error}`);
+      this.recentPodcasts = [];
     } finally {
       this.isRefreshing = false;
     }
@@ -564,24 +622,6 @@ export struct PodcastPage {
     RouterUtils.pushPathByName(RouterMap.PODCAST_MULTI_ROLE_PAGE, params);
   }
 
-  /**
-   * 上传图片和视频并生成播客
-   */
-  async uploadImageAndVideo(): Promise<void> {
-    try {
-      promptAction.showToast({
-        message: '图片和视频功能开发中',
-        duration: 2000
-      });
-      // TODO: 实现图片和视频上传功能
-    } catch (error) {
-      Logger.error('PodcastPage', `上传图片和视频失败: ${error}`);
-      promptAction.showToast({
-        message: `上传失败: ${error}`,
-        duration: 2000
-      });
-    }
-  }
 
   /**
    * 从文字生成播客
@@ -762,8 +802,8 @@ export struct PodcastPage {
           // 加号按钮（上传内容）
           Button() {
             Image($r('app.media.plus'))
-              .width(18)
-              .height(18)
+              .width(24)
+              .aspectRatio(1)
               .fillColor(Color.White)
           }
           .type(ButtonType.Normal)
@@ -780,7 +820,7 @@ export struct PodcastPage {
               .fontColor([$r('sys.color.font_primary')])
           }
           .type(ButtonType.Normal)
-          .backgroundColor(Color.Transparent)
+          .backgroundColor('#ffe5e5e5')
           .borderRadius(20)
           .width(40)
           .height(40)
@@ -789,21 +829,6 @@ export struct PodcastPage {
             promptAction.showToast({ message: '搜索功能开发中', duration: 2000 });
           })
 
-          // 更多选项按钮
-          Button() {
-            SymbolGlyph($r('sys.symbol.list_bullet'))
-              .fontSize(18)
-              .fontColor([$r('sys.color.font_primary')])
-          }
-          .type(ButtonType.Normal)
-          .backgroundColor(Color.Transparent)
-          .borderRadius(20)
-          .width(40)
-          .height(40)
-          .onClick(() => {
-            // 更多选项
-            promptAction.showToast({ message: '更多选项开发中', duration: 2000 });
-          })
 
         }.height(this.headerBarHeight)
         .justifyContent(FlexAlign.SpaceBetween)
@@ -970,14 +995,6 @@ export struct PodcastPage {
       })
         .onChange(() => {
           this.uploadLink();
-        })
-
-      MenuItem({
-        startIcon: $r("sys.symbol.camera"),
-        content: "图片和视频"
-      })
-        .onChange(() => {
-          this.uploadImageAndVideo();
         })
     }
   }

@@ -11,6 +11,7 @@ export enum RouterMap {
   OFFICE_HISTORY_PAGE = 'OfficeHistoryPage',
   OFFICE_RESULT_PAGE = 'OfficeResultPage',
   PODCAST_PAGE = 'PodcastPage',
+  AI_PODCAST_PAGE = 'AIPodcastPage',
   PODCAST_MULTI_ROLE_PAGE = 'PodcastMultiRolePage',
   PODCAST_CHARACTER_PAGE = 'PodcastCharacterPage',
   PODCAST_DEEP_PAGE = 'PodcastDeepPage',

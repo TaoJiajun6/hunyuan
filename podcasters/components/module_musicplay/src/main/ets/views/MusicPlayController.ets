@@ -230,7 +230,7 @@ export struct MusicPlayController {
   @Builder
   PlayPauseButton() {
     Button() {
-      Image(this.musicModel.isPlay ? $r('app.media.ic_pause') : $r('app.media.ic_play'))// 播放|暂停
+      Image(this.musicModel.isPlay ? $r('app.media.ic_play') : $r('app.media.ic_pause'))// 播放|暂停
         .width(28)
         .aspectRatio(1)
         .fillColor('#000000')

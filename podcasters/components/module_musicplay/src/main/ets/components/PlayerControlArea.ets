@@ -148,22 +148,7 @@ export struct PlayerControlArea {
 
   build() {
     Column() {
-      Row() {
-        //收藏
-        this.collectedBuilder()
-
-        // 加歌单
-        this.playlistBuilder()
-
-        // 下载
-        this.downloadBuilder()
-
-        // 分享
-        this.shareBuilder()
-      }
-      .width('100%')
-      .justifyContent(FlexAlign.SpaceBetween)
-      .visibility(this.musicModel.currentSong?.isLocal ? Visibility.Hidden : Visibility.Visible)
+      // 移除交互按钮（收藏、加歌单、下载、分享）
 
       // 进度条
       Column() {

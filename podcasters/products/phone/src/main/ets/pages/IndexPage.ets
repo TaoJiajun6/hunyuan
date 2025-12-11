@@ -2,6 +2,7 @@ import { CommonConstants } from 'lib_common';
 import { IndexPageViewModel } from '../viewmodels/IndexPageVM';
 import { OfficePage } from './office/OfficePage';
 import { PodcastPageBuilder } from './podcast/PodcastPage';
+import { AIPodcastPageBuilder } from './podcast/AIPodcastPage';
 import { MinePageBuilder } from 'business_mine';
 import { window } from '@kit.ArkUI';
 import { PhoneConstants } from '../common/Constants';
@@ -36,7 +37,7 @@ struct IndexPage {
       Column() {
         Tabs({ index: $$this.selectedIndex, barPosition: BarPosition.End }) {
           TabContent() {
-            PodcastPageBuilder()
+            AIPodcastPageBuilder()
           }.tabBar(this.tabBarBuilder(0, 'AI播客', $r('app.media.icon_ai_office_on'), $r('app.media.icon_ai_office_off')))
 
           /*TabContent() {

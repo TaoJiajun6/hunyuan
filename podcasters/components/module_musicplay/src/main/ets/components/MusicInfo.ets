@@ -88,15 +88,15 @@ export struct MusicInfo {
   @Builder
   musicInfo() {
     Column() {
+      // 标题和音质选择
       Flex({ justifyContent: FlexAlign.SpaceBetween, alignItems: ItemAlign.Center }) {
         Row() {
-          Text(this.musicModel.currentSong?.title)
+          Text(this.musicModel.currentSong?.title ?? '未知播客')
             .fontSize($r('app.float.title_font_play'))
             .fontColor(Color.White)
             .opacity(0.86)
             .fontWeight(FontWeight.Bold)
             .margin({ right: 8 })
-            .width(200)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
@@ -107,7 +107,6 @@ export struct MusicInfo {
             .textAlign(TextAlign.Start)
             .fontSize($r('app.float.font_fourteen'))
             .fontColor($r('app.color.slider_select'))
-            .margin({ top: $r('app.float.music_text_margin_top') })
             .fontWeight(FontWeight.Regular)
             .bindSheet($$this.isShowSheet, this.qualityListSheet(), {
               height: '50%',
@@ -129,13 +128,14 @@ export struct MusicInfo {
           bottom: 0
         })
         .backgroundColor('#11ffffff')
-        .borderRadius(16) // 椭圆形框 (高度的一半)
+        .borderRadius(16)
         .onClick(() => {
           this.isShowSheet = !this.isShowSheet;
         })
       }
       .width('100%')
 
+      // 分类信息
       Row({ space: 5 }) {
         Image($r('app.media.ic_local'))
           .width(25)
@@ -147,40 +147,44 @@ export struct MusicInfo {
           .height(16)
           .fillColor($r('app.color.slider_select'))
           .visibility(this.musicModel.currentSong?.isVip ? Visibility.Visible : Visibility.None)
-        Text(this.musicModel.currentSong?.singer)
+        Text(this.musicModel.currentSong?.singer ?? '未知分类')
           .textAlign(TextAlign.Start)
           .fontSize($r('app.float.font_fourteen'))
           .fontColor($r('app.color.play_text_color'))
-          .margin({ top: $r('app.float.music_text_margin_top') })
           .width('100%')
           .fontWeight(FontWeight.Regular)
       }
+      .width('100%')
+      .margin({ top: 8 })
     }
+    .width('100%')
     .margin({ top: $r('app.float.music_info_margin_top') })
 
-    // 显示对话内容（如果有）
+    // 脚本内容区域（可滚动，大文本区域）
     if (this.musicModel.currentSong?.script && this.musicModel.currentSong.script.trim().length > 0) {
       Scroll() {
         Text(this.musicModel.currentSong.script)
-          .fontSize($r('app.float.font_fourteen'))
+          .fontSize(15)
           .fontColor(Color.White)
-          .opacity(0.86)
-          .lineHeight(24)
+          .opacity(0.9)
+          .lineHeight(26)
           .textAlign(TextAlign.Start)
           .padding({
             left: 16,
             right: 16,
-            top: 16,
-            bottom: 16
+            top: 20,
+            bottom: 20
           })
+          .width('100%')
       }
       .layoutWeight(1)
       .width('100%')
       .margin({ top: 16 })
-      .borderRadius(12)
-      .backgroundColor('#11ffffff')
+      .borderRadius(16)
+      .backgroundColor('#1AFFFFFF')
     } else {
-    Blank()
+      Blank()
+        .layoutWeight(1)
     }
   }
 

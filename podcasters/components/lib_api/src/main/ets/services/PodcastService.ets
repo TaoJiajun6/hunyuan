@@ -1411,30 +1411,88 @@ export class PodcastService {
         category
       );
 
+      Logger.info(TAG, `CloudDatabaseService 查询返回 ${result.podcasts.length} 条记录`);
+
       // 转换为前端需要的格式
-      const podcastList: PodcastListItem[] = result.podcasts.map((podcast: PodcastInfo) => {
-        const item: PodcastListItem = {
-          id: podcast.id || '',
-          title: podcast.title || '',
-          audio_url: podcast.audio_url,
-          local_file: podcast.local_file,
-          created_at: podcast.created_at || 0,
-          duration: podcast.duration,
-          category: podcast.category,
-          status: podcast.status,
-          script: podcast.script,
-          file_size_mb: podcast.file_size_mb,
-          topic: podcast.topic,
-          roles: podcast.getRolesArray(),
-          content: podcast.getContentPreview()
-        };
-        return item;
-      });
+      const podcastList: PodcastListItem[] = [];
+      for (const podcast of result.podcasts) {
+        try {
+          // 安全地获取 roles 数组
+          let rolesArray: string[] = [];
+          try {
+            if (podcast.getRolesArray) {
+              rolesArray = podcast.getRolesArray();
+            } else if (podcast.roles) {
+              if (typeof podcast.roles === 'string') {
+                rolesArray = JSON.parse(podcast.roles);
+              } else if (Array.isArray(podcast.roles)) {
+                rolesArray = podcast.roles as string[];
+              }
+            }
+          } catch (rolesError) {
+            Logger.warn(TAG, `解析 roles 失败，ID: ${podcast.id}, 错误: ${String(rolesError)}`);
+            rolesArray = [];
+          }
+
+          // 安全地获取内容预览
+          let content = '';
+          try {
+            if (podcast.getContentPreview) {
+              content = podcast.getContentPreview();
+            } else if (podcast.script) {
+              content = podcast.script.length > 100 ? podcast.script.substring(0, 100) + '...' : podcast.script;
+            }
+          } catch (contentError) {
+            Logger.warn(TAG, `获取内容预览失败，ID: ${podcast.id}, 错误: ${String(contentError)}`);
+            content = '';
+          }
+
+          const item: PodcastListItem = {
+            id: podcast.id || '',
+            title: podcast.title || '',
+            audio_url: podcast.audio_url,
+            local_file: podcast.local_file,
+            created_at: podcast.created_at || 0,
+            duration: podcast.duration,
+            category: podcast.category,
+            status: podcast.status,
+            script: podcast.script,
+            file_size_mb: podcast.file_size_mb,
+            topic: podcast.topic,
+            roles: rolesArray,
+            content: content
+          };
+          podcastList.push(item);
+        } catch (itemError) {
+          Logger.error(TAG, `转换播客数据失败，ID: ${podcast.id}, 错误: ${String(itemError)}`);
+          // 即使转换失败，也尝试添加基本信息
+          try {
+            const basicItem: PodcastListItem = {
+              id: podcast.id || '',
+              title: podcast.title || '',
+              audio_url: podcast.audio_url,
+              local_file: podcast.local_file,
+              created_at: podcast.created_at || 0,
+              duration: podcast.duration,
+              category: podcast.category,
+              status: podcast.status,
+              script: podcast.script,
+              file_size_mb: podcast.file_size_mb,
+              topic: podcast.topic,
+              roles: [],
+              content: ''
+            };
+            podcastList.push(basicItem);
+          } catch (basicError) {
+            Logger.error(TAG, `添加基本播客信息也失败: ${String(basicError)}`);
+          }
+        }
+      }
 
       Logger.info(TAG, `从云数据库获取播客列表成功，共 ${podcastList.length} 条`);
       return podcastList;
     } catch (error) {
-      Logger.error(TAG, `从云数据库获取播客列表失败: ${JSON.stringify(error)}`);
+      Logger.error(TAG, `从云数据库获取播客列表失败: ${String(error)}`);
       return [];
     }
   }
@@ -1454,10 +1512,10 @@ export class PodcastService {
     // 从云数据库获取
     try {
       const list = await this.getPodcastListFromCloudDB(limit, category);
-      Logger.info(TAG, `从云数据库获取播客列表成功，共 ${list.length} 条`);
+      // getPodcastListFromCloudDB 内部已经记录了详细日志，这里不再重复记录
       return list;
     } catch (error) {
-      Logger.error(TAG, `从云数据库获取播客列表失败: ${JSON.stringify(error)}`);
+      Logger.error(TAG, `getPodcastList 调用失败: ${String(error)}`);
       // 返回空列表
       return [];
     }

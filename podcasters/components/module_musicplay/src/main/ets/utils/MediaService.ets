@@ -737,22 +737,51 @@ export class MediaService {
 
   /**
    * 从云存储下载文件
+   * @param cloudPath 云存储路径
+   * @param podcastId 播客ID，用于生成唯一文件名
+   * @returns 本地文件路径
    */
-  private async downloadFromCloudStorage(cloudPath: string): Promise<string> {
-    return new Promise<string>((resolve, reject) => {
+  private async downloadFromCloudStorage(cloudPath: string, podcastId?: string): Promise<string> {
+    return new Promise<string>(async (resolve, reject) => {
       try {
         // 获取有效的context
         const context = this.getValidContext();
         const storageBucket = cloudStorage.bucket();
 
-        // 生成本地文件名
-        const fileName = cloudPath.split('/').pop() || `audio_${Date.now()}.wav`;
+        // 生成本地文件名（使用播客ID确保唯一性）
+        const originalFileName = cloudPath.split('/').pop() || `audio_${Date.now()}.wav`;
+        // 如果有播客ID，且文件名不包含播客ID，才添加前缀
+        let fileName: string;
+        if (podcastId && podcastId.trim() !== '') {
+          // 检查文件名是否已经包含播客ID，避免重复
+          if (originalFileName.startsWith(podcastId + '_') || originalFileName === podcastId + '.wav') {
+            fileName = originalFileName; // 文件名已包含ID，直接使用
+          } else {
+            fileName = `${podcastId}_${originalFileName}`; // 添加ID前缀
+          }
+        } else {
+          fileName = originalFileName;
+        }
         const localPath = fileName;
+        const localFilePath = `${context.cacheDir}/${localPath}`;
+
+        // 检查文件是否已存在（快速检查，避免阻塞）
+        try {
+          const stat = fs.statSync(localFilePath);
+          if (stat.isFile()) {
+            Logger.info(TAG, `文件已存在，跳过下载: ${localFilePath}`);
+            resolve(localFilePath);
+            return;
+          }
+        } catch (accessError) {
+          // 文件不存在，需要下载
+          Logger.info(TAG, `文件不存在，开始下载: ${cloudPath} -> ${localFilePath}`);
+        }
 
         storageBucket.downloadFile(context, {
           localPath: localPath,
           cloudPath: cloudPath,
-          overwrite: true // 允许覆盖已存在的文件
+          overwrite: false // 不覆盖已存在的文件
         }).then((task: request.agent.Task) => {
           // 监听下载进度
           task.on('progress', (progress: request.agent.Progress) => {
@@ -763,7 +792,6 @@ export class MediaService {
           // 监听下载完成
           task.on('completed', (progress: request.agent.Progress) => {
             // 文件已下载到 context.cacheDir/localPath
-            const localFilePath = `${context.cacheDir}/${localPath}`;
             Logger.info(TAG, `云存储文件下载完成: ${localFilePath}`);
             resolve(localFilePath);
           });
@@ -818,19 +846,30 @@ export class MediaService {
       const cloudPath = this.extractCloudPath(qualityUrl);
       if (cloudPath) {
         try {
-          const localFilePath = await this.downloadFromCloudStorage(cloudPath);
-          // 使用本地文件路径播放（直接使用文件路径，参考 AudioPlayer 的实现）
+          // 使用播客ID确保每个播客文件独立
+          const podcastId = currentSong.id || '';
+          const localFilePath = await this.downloadFromCloudStorage(cloudPath, podcastId);
+          // 使用本地文件路径播放（需要使用 fd:// 协议）
           if (this.avPlayer) {
-            // 验证文件是否存在（fs.accessSync 如果文件不存在会抛出异常）
-            try {
-              fs.accessSync(localFilePath);
-              Logger.info(TAG, `文件存在，准备播放: ${localFilePath}`);
-            } catch (accessError) {
-              Logger.warn(TAG, `文件访问检查失败，但继续尝试播放: ${localFilePath}, 错误: ${String(accessError)}`);
-            }
-            // 直接使用文件路径播放（AudioPlayer 就是这样做的）
-            this.avPlayer.url = localFilePath;
-            Logger.info(TAG, `loadAssetHttp success, 已设置播放URL: ${localFilePath}`);
+            // 直接使用本地文件路径，不重复检查（downloadFromCloudStorage 已经检查过了）
+            Logger.info(TAG, `准备播放本地文件: ${localFilePath}`);
+            // 创建新的 SongItem，使用本地文件路径
+            const localSongItem = new SongItem();
+            localSongItem.id = currentSong.id;
+            localSongItem.title = currentSong.title;
+            localSongItem.singer = currentSong.singer;
+            localSongItem.src = localFilePath;
+            localSongItem.isLocal = true;
+            localSongItem.label = currentSong.label;
+            localSongItem.script = currentSong.script;
+            localSongItem.lyric = currentSong.lyric;
+            localSongItem.mvUrl = currentSong.mvUrl;
+            localSongItem.isCollected = currentSong.isCollected;
+            localSongItem.isVip = currentSong.isVip;
+            localSongItem.mark = currentSong.mark;
+            // 使用 fd:// 协议播放本地文件（通过 loadAssetSandbox 方法）
+            await this.loadAssetSandbox(localSongItem);
+            Logger.info(TAG, `loadAssetHttp success, 已设置本地文件播放: ${localFilePath}`);
           } else {
             Logger.error(TAG, `avPlayer 未初始化，无法设置URL`);
           }

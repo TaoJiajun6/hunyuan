@@ -15,7 +15,6 @@
 import ImageUtils from '../utils/ImageUtils';
 import { SongItem } from '../viewmodel/SongItem';
 import { window } from '@kit.ArkUI';
-import { MusicInfo } from './MusicInfo';
 import { PlayerLyrics } from './PlayerLyrics';
 import { PlayerTopArea } from './PlayerTopArea';
 import { getMusicModel, MusicModel } from '../viewmodel/MusicModel';
@@ -72,24 +71,15 @@ export struct PlayerView {
       Image(this.imageLabel)
         .size({ height: '120%' })
         .aspectRatio(1)
-        .objectFit(ImageFit.Cover)
+        .objectFit(1) // ImageFit.Cover = 1
         .opacity(0.5)
 
       Row() {
         Stack({ alignContent: Alignment.TopStart }) {
-          Swiper() {
-            MusicInfo() //歌曲信息
-            PlayerLyrics() //歌词
-          }
-          .height('100%')
-          .indicator(
-            new DotIndicator()
-              .top(10)
-              .selectedColor(Color.White)
-              .color($r('sys.color.comp_background_secondary'))
-          )
-          .clip(false)
-          .loop(false)
+          // 只显示脚本/歌词页面
+          PlayerLyrics()
+            .height('100%')
+            .width('100%')
 
           // 顶部区域
           PlayerTopArea({
@@ -99,6 +89,7 @@ export struct PlayerView {
           })
         }
         .height('100%')
+        .width('100%')
       }
       .padding({
         bottom: this.naviIndicatorHeight,

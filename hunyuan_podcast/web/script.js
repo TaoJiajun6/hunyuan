@@ -1225,6 +1225,29 @@ function filterByCategory(category) {
   loadHistory();
 }
 
+// 切换更多分类显示
+function toggleMoreCategories(event) {
+  if (event) {
+    event.stopPropagation();
+  }
+  
+  const moreCategories = document.getElementById('more-categories');
+  const moreIcon = document.getElementById('more-category-icon');
+  
+  if (moreCategories) {
+    const isHidden = moreCategories.style.display === 'none' || !moreCategories.style.display;
+    moreCategories.style.display = isHidden ? 'flex' : 'none';
+    
+    if (moreIcon) {
+      if (isHidden) {
+        moreIcon.style.transform = 'rotate(180deg)';
+      } else {
+        moreIcon.style.transform = 'rotate(0deg)';
+      }
+    }
+  }
+}
+
 // 打开播客详情页
 function openPodcastDetail(podcastId, event) {
   if (event) {
