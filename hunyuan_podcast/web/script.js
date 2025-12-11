@@ -792,19 +792,18 @@ function playPodcast(audioUrl, podcastId, event) {
   if (player) {
     console.log('播放播客:', podcastId, '原始音频URL:', audioUrl);
     
-    // 如果URL包含中文字符，确保正确编码
-    // 后端应该已经编码了URL，但如果收到未编码的URL，这里进行编码
+    // 新版本使用job_id作为文件名，不再包含中文，直接使用URL
+    // 保留编码逻辑作为后备，以防有旧的URL包含中文文件名
     let finalUrl = audioUrl;
     
-    // 检查URL是否包含未编码的中文字符
+    // 检查URL是否包含未编码的中文字符（仅作为后备处理）
     if (/[\u4e00-\u9fa5]/.test(audioUrl) && !audioUrl.includes('%')) {
       try {
         // 分离URL的各个部分
         const urlObj = new URL(audioUrl);
         // 对路径部分进行编码（每个路径段单独编码，保留斜杠）
-        const pathParts = urlObj.pathname.split('/').filter(part => part); // 过滤空字符串
+        const pathParts = urlObj.pathname.split('/').filter(part => part);
         const encodedPath = '/' + pathParts.map(part => {
-          // 如果路径段已经编码（包含%），不再编码；否则编码
           if (part.includes('%')) {
             return part;
           }
@@ -812,24 +811,10 @@ function playPodcast(audioUrl, podcastId, event) {
         }).join('/');
         urlObj.pathname = encodedPath;
         finalUrl = urlObj.toString();
-        console.log('Web端编码后的音频URL:', finalUrl);
+        console.log('检测到中文文件名，已编码:', finalUrl);
       } catch (e) {
-        // 如果URL解析失败，尝试简单编码文件名部分
-        console.warn('URL解析失败，尝试简单编码文件名:', e);
-        // 尝试找到最后一个斜杠，只编码文件名部分
-        const lastSlash = audioUrl.lastIndexOf('/');
-        if (lastSlash > 0) {
-          const baseUrl = audioUrl.substring(0, lastSlash + 1);
-          const filename = audioUrl.substring(lastSlash + 1);
-          finalUrl = baseUrl + encodeURIComponent(filename);
-          console.log('简单编码文件名后的音频URL:', finalUrl);
-        } else {
-          finalUrl = audioUrl;
-        }
+        console.warn('URL解析失败，使用原始URL:', e);
       }
-    } else {
-      // URL已经编码或没有中文字符，直接使用
-      console.log('URL已编码或无需编码，直接使用');
     }
     
     player.src = finalUrl;

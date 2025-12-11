@@ -1583,32 +1583,14 @@ def do_agc_upload(output_path: str, storage_url: str, bucket: str, product_id: O
             
             # 上传成功后，更新进度中的 audio_url
             if job_id and res.get('status') == 'uploaded':
-                # 构建完整的访问 URL，对文件名部分进行URL编码（处理中文文件名）
-                from urllib.parse import quote
+                # 构建完整的访问 URL（使用job_id作为文件名，不再需要URL编码）
                 if object_name:
-                    # 分离路径和文件名，只对文件名部分进行编码
-                    path_parts = object_name.split('/')
-                    if len(path_parts) > 0:
-                        # 对最后一个部分（文件名）进行编码
-                        filename = path_parts[-1]
-                        encoded_filename = quote(filename, safe='')
-                        # 重新组合路径
-                        encoded_path = '/'.join(path_parts[:-1] + [encoded_filename])
-                        audio_url = f"{storage_url.rstrip('/')}/{bucket}/{encoded_path}"
-                    else:
-                        audio_url = f"{storage_url.rstrip('/')}/{bucket}/{object_name}"
+                    audio_url = f"{storage_url.rstrip('/')}/{bucket}/{object_name}"
                 else:
                     # 如果没有提供 object_name，从返回结果中获取
                     object_name = res.get('object')
                     if object_name:
-                        path_parts = object_name.split('/')
-                        if len(path_parts) > 0:
-                            filename = path_parts[-1]
-                            encoded_filename = quote(filename, safe='')
-                            encoded_path = '/'.join(path_parts[:-1] + [encoded_filename])
-                            audio_url = f"{storage_url.rstrip('/')}/{bucket}/{encoded_path}"
-                        else:
-                            audio_url = f"{storage_url.rstrip('/')}/{bucket}/{object_name}"
+                        audio_url = f"{storage_url.rstrip('/')}/{bucket}/{object_name}"
                     else:
                         audio_url = None
                 
