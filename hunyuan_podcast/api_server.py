@@ -2029,6 +2029,23 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 text_content = generated_text
                 roles = processor.extract_roles(text_content)
             
+            # 生成播客标题（在生成音频之前，用于文件命名）
+            # 优先使用用户提供的标题，否则从脚本内容生成
+            podcast_title = None
+            if request.podcast_name:
+                podcast_title = request.podcast_name
+            elif request.topic:
+                podcast_title = request.topic
+            elif text_content and len(text_content.strip()) > 20:
+                # 从脚本内容生成标题
+                try:
+                    podcast_title = processor.generate_title_from_script(text_content)
+                except Exception as e:
+                    logger.debug(f"生成标题失败: {e}，使用默认标题")
+                    podcast_title = text_content[:50] + "..." if len(text_content) > 50 else text_content
+            else:
+                podcast_title = "未命名播客"
+            
             # 自动选择背景音乐（在AI生成对话之后，使用完整的文本内容）
             try:
                 _update_progress(request.job_id, "selecting_music", 22, "正在选择背景音乐")
@@ -2145,7 +2162,8 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 background_music=background_music_path,
                 background_volume=request.background_volume,
                 background_mode="single",  # 单个背景音乐，使用single模式
-                verbose=True
+                verbose=True,
+                title=podcast_title  # 传递标题用于文件命名
             )
             generation_time = time.time() - generation_start
             logger.info("=" * 60)
@@ -2415,6 +2433,20 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
             
             cleaned_text = processor.clean_text(generated_text)
             
+            # 生成播客标题（在生成音频之前，用于文件命名）
+            podcast_title = None
+            if request.topic:
+                podcast_title = request.topic
+            elif cleaned_text and len(cleaned_text.strip()) > 20:
+                # 从脚本内容生成标题
+                try:
+                    podcast_title = processor.generate_title_from_script(cleaned_text)
+                except Exception as e:
+                    logger.debug(f"生成标题失败: {e}，使用默认标题")
+                    podcast_title = cleaned_text[:50] + "..." if len(cleaned_text) > 50 else cleaned_text
+            else:
+                podcast_title = "未命名播客"
+            
             # 解析对话并统计脚本信息
             dialogues = processor.parse_role_text(cleaned_text)
             dialogue_count = len(dialogues)
@@ -2513,7 +2545,8 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
                 background_music=background_music_path,
                 background_volume=request.background_volume,
                 background_mode="single",  # 单个背景音乐，使用single模式
-                verbose=True
+                verbose=True,
+                title=podcast_title  # 传递标题用于文件命名
             )
             generation_time = time.time() - generation_start
             logger.info(f"播客音频生成完成，耗时: {generation_time:.2f}s")
@@ -2748,6 +2781,20 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
             
             cleaned_text = processor.clean_text(generated_text)
             
+            # 生成播客标题（在生成音频之前，用于文件命名）
+            podcast_title = None
+            if request.topic:
+                podcast_title = request.topic
+            elif cleaned_text and len(cleaned_text.strip()) > 20:
+                # 从脚本内容生成标题
+                try:
+                    podcast_title = processor.generate_title_from_script(cleaned_text)
+                except Exception as e:
+                    logger.debug(f"生成标题失败: {e}，使用默认标题")
+                    podcast_title = cleaned_text[:50] + "..." if len(cleaned_text) > 50 else cleaned_text
+            else:
+                podcast_title = "未命名播客"
+            
             # 解析对话并统计脚本信息
             dialogues = processor.parse_role_text(cleaned_text)
             dialogue_count = len(dialogues)
@@ -2845,7 +2892,8 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
                 background_music=background_music_path,
                 background_volume=request.background_volume,
                 background_mode="single",  # 单个背景音乐，使用single模式
-                verbose=True
+                verbose=True,
+                title=podcast_title  # 传递标题用于文件命名
             )
             generation_time = time.time() - generation_start
             logger.info(f"播客音频生成完成，耗时: {generation_time:.2f}s")
@@ -3556,17 +3604,39 @@ async def get_podcast_history(limit: int = 50, category: Optional[str] = None, d
                             # 如果本地文件存在，使用本地文件API
                             audio_url = f"/api/v1/podcast/file/{local_filename}"
                         
+                        # 获取脚本内容
+                        script_content = task_info.get('script') if task_info else progress_data.get('script')
+                        
+                        # 确定标题：优先使用已有的title，如果title是默认消息（如"生成完成"、"上传完成"等），则使用AI生成
+                        title = progress_data.get('title') or progress_data.get('message', '未命名播客')
+                        
+                        # 检查标题是否是默认的系统消息
+                        default_messages = ['生成完成', '上传完成', '生成完成，已开始后台上传到云存储', 
+                                          '上传完成，音频已就绪', '任务完成', '未命名播客']
+                        is_default_title = title in default_messages or len(title) < 5
+                        
+                        # 如果标题是默认的且有脚本内容，使用AI生成标题
+                        if is_default_title and script_content and len(script_content.strip()) > 20:
+                            try:
+                                from .text_processor import TextProcessor
+                                text_processor = TextProcessor()
+                                generated_title = text_processor.generate_title_from_script(script_content)
+                                if generated_title and generated_title != "未命名播客":
+                                    title = generated_title
+                            except Exception as e:
+                                logger.debug(f"生成播客标题失败: {e}，使用原标题")
+                        
                         # 构建播客信息
                         podcast_info = {
                             'id': job_id,
-                            'title': progress_data.get('title') or progress_data.get('message', '未命名播客'),
+                            'title': title,
                             'audio_url': audio_url,
                             'local_file': local_filename if local_file_path else None,
                             'created_at': progress_data.get('ts', int(time.time())),
                             'duration': None,  # 时长需要从音频文件获取，暂时设为None
                             'category': progress_data.get('category'),
                             'status': 'completed',
-                            'script': task_info.get('script') if task_info else progress_data.get('script'),
+                            'script': script_content,
                             'file_size_mb': task_info.get('file_size_mb') if task_info else None,
                             'topic': task_info.get('topic') if task_info else progress_data.get('topic'),
                         }

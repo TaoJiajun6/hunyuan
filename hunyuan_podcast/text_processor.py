@@ -1928,6 +1928,82 @@ class TextProcessor:
                 "scene_types": ["自然互动交流"]
             }
     
+    def generate_title_from_script(self, script: str, api_client=None) -> str:
+        """
+        从播客脚本内容生成标题
+        
+        Args:
+            script: 播客脚本内容
+            api_client: API客户端实例，如果为None则创建新实例
+        
+        Returns:
+            生成的标题
+        """
+        if not script or len(script.strip()) < 10:
+            return "未命名播客"
+        
+        if api_client is None:
+            from .api_client import get_client
+            api_client = get_client()
+        
+        # 限制脚本长度，取前2000字符
+        script_preview = script[:2000] if len(script) > 2000 else script
+        if len(script) > 2000:
+            script_preview += "..."
+        
+        # 提取对话内容（去除角色标记）
+        dialogues = self.parse_role_text(script_preview)
+        dialogue_text = "\n".join([content for _, content in dialogues[:10]])  # 只取前10段对话
+        
+        if not dialogue_text or len(dialogue_text.strip()) < 20:
+            # 如果无法提取对话，使用原始脚本的前200字符
+            dialogue_text = script_preview[:200]
+        
+        title_prompt = f"""请根据以下播客对话内容，生成一个简洁、吸引人的播客标题。
+
+播客对话内容：
+{dialogue_text}
+
+要求：
+1. 标题要简洁有力，10-20个汉字
+2. 标题要能准确概括播客的核心主题或内容
+3. 标题要有吸引力，能引起听众兴趣
+4. 只返回标题，不要添加任何说明、引号或其他文字
+5. 如果内容不够清晰，可以生成一个通用的标题
+
+请直接返回标题："""
+        
+        try:
+            title = api_client.generate_text(
+                prompt=title_prompt,
+                temperature=0.7,
+                max_tokens=50
+            )
+            
+            # 清理标题：移除引号、多余空格、说明文字等
+            title = title.strip()
+            # 移除可能的引号
+            title = title.strip('"').strip("'").strip('"').strip("'")
+            # 移除可能的说明文字（如"标题："、"生成的标题："等）
+            title = re.sub(r'^(标题|生成的标题|播客标题)[：:]\s*', '', title, flags=re.IGNORECASE)
+            # 移除首尾空白
+            title = title.strip()
+            
+            # 如果标题太长，截断
+            if len(title) > 30:
+                title = title[:30] + "..."
+            
+            # 如果标题为空或太短，返回默认值
+            if not title or len(title) < 3:
+                return "未命名播客"
+            
+            return title
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"生成播客标题失败: {e}")
+            return "未命名播客"
+    
     def clean_text(self, text: str) -> str:
         """
         清理文本，移除多余的空格和换行，并尝试修复格式问题

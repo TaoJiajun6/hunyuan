@@ -30,20 +30,72 @@ def ensure_dir(directory: str) -> None:
     os.makedirs(directory, exist_ok=True)
 
 
-def get_output_path(filename: Optional[str] = None) -> str:
+def sanitize_filename(title: str, max_length: int = 50) -> str:
+    """
+    将标题转换为安全的文件名
+    
+    Args:
+        title: 原始标题
+        max_length: 最大长度（不包括扩展名）
+    
+    Returns:
+        安全的文件名（不含扩展名）
+    """
+    import re
+    # 移除或替换非法字符
+    # Windows 不允许的字符：< > : " / \ | ? *
+    # 也移除其他可能有问题的字符
+    filename = re.sub(r'[<>:"/\\|?*]', '', title)
+    # 移除首尾空格和点
+    filename = filename.strip(' .')
+    # 替换多个空格为单个下划线
+    filename = re.sub(r'\s+', '_', filename)
+    # 限制长度（保留一些空间用于可能的冲突后缀）
+    if len(filename) > max_length - 10:
+        filename = filename[:max_length - 10]
+    # 如果文件名为空，使用时间戳
+    if not filename:
+        import time
+        filename = f"podcast_{int(time.time())}"
+    return filename
+
+
+def get_output_path(filename: Optional[str] = None, title: Optional[str] = None) -> str:
     """
     获取输出文件路径
     
     Args:
-        filename: 文件名，如果为None则自动生成
+        filename: 文件名（不含扩展名），如果为None则自动生成
+        title: 播客标题（可选），如果提供且filename为None，将使用标题生成文件名
     
     Returns:
         完整的输出文件路径
     """
     ensure_dir(OUTPUT_DIR)
     if filename is None:
-        import time
-        filename = f"podcast_{int(time.time())}.wav"
+        if title:
+            # 使用标题生成文件名
+            safe_filename = sanitize_filename(title)
+            base_filename = f"{safe_filename}.wav"
+            file_path = os.path.join(OUTPUT_DIR, base_filename)
+            
+            # 如果文件已存在，添加时间戳后缀避免冲突
+            if os.path.exists(file_path):
+                import time
+                timestamp = int(time.time())
+                # 在文件名末尾（扩展名之前）添加时间戳
+                name_without_ext = safe_filename
+                filename = f"{name_without_ext}_{timestamp}.wav"
+            else:
+                filename = base_filename
+        else:
+            # 使用时间戳
+            import time
+            filename = f"podcast_{int(time.time())}.wav"
+    elif not filename.endswith('.wav'):
+        # 如果提供了文件名但没有扩展名，添加扩展名
+        filename = f"{filename}.wav"
+    
     return os.path.join(OUTPUT_DIR, filename)
 
 
