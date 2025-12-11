@@ -122,11 +122,6 @@ export default function PodcastPage() {
       onClick: () => navigate('/podcast/deep'),
     },
     {
-      title: '流式播客脚本',
-      description: '生成适配流式播放的单人播客脚本（信息精准、口语化）',
-      onClick: () => navigate('/podcast/streaming-script'),
-    },
-    {
       title: '背景音乐',
       description: '系统会根据播客分类自动选择背景音乐',
       onClick: handleUploadMusic,

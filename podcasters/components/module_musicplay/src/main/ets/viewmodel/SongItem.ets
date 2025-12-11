@@ -37,7 +37,7 @@ export class SongItem {
   /**
    * Music avatar information.
    */
-  @Trace label: string | Resource = $r('app.media.ic_music_icon');
+  @Trace label: string | Resource = $r('app.media.zhibozhong');
   /**
    * 为不同音质歌曲 URL  src默认为LOW音质
    */

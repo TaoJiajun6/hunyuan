@@ -4,7 +4,6 @@ import PodcastPage from './pages/PodcastPage';
 import MultiRolePage from './pages/podcast/MultiRolePage';
 import CharacterPage from './pages/podcast/CharacterPage';
 import DeepPage from './pages/podcast/DeepPage';
-import StreamingScriptPage from './pages/podcast/StreamingScriptPage';
 
 function App() {
   return (
@@ -16,7 +15,6 @@ function App() {
           <Route path="podcast/multi-role" element={<MultiRolePage />} />
           <Route path="podcast/character" element={<CharacterPage />} />
           <Route path="podcast/deep" element={<DeepPage />} />
-          <Route path="podcast/streaming-script" element={<StreamingScriptPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

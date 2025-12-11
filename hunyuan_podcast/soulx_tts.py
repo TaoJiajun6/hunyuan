@@ -7,7 +7,7 @@ import sys
 import re
 import torch
 import soundfile as sf
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Callable
 from pathlib import Path
 
 # 添加 SoulX-Podcast 路径到 sys.path
@@ -172,7 +172,8 @@ class SoulXTTS:
         dialogues: List[tuple],
         output_path: str,
         silence_interval: Optional[int] = None,
-        verbose: bool = False
+        verbose: bool = False,
+        on_chunk_generated: Optional[Callable[[int, torch.Tensor, int, bool], None]] = None
     ):
         """
         生成多角色播客音频
@@ -183,6 +184,8 @@ class SoulXTTS:
             output_path: 输出音频路径
             silence_interval: 角色切换静音间隔（毫秒），如果为None则使用默认值400ms
             verbose: 是否输出详细信息
+            on_chunk_generated: 可选的回调函数，每生成一个音频片段后调用
+                               函数签名: on_chunk_generated(chunk_index: int, audio_chunk: torch.Tensor, sample_rate: int, is_last: bool)
         
         Returns:
             输出音频路径
@@ -295,6 +298,14 @@ class SoulXTTS:
             # 直接添加音频片段，不进行任何trim操作
             processed_segments.append(wav)
             
+            # 如果提供了回调函数，立即发送当前片段（用于流式播放）
+            if on_chunk_generated:
+                try:
+                    on_chunk_generated(i, wav, sr, i == len(generated_wavs) - 1)
+                except Exception as e:
+                    if verbose:
+                        print(f"[WARNING] 回调函数执行失败: {e}")
+            
             # 在片段之间添加静音间隔（除了最后一个），确保在正确的设备上
             # 注意：静音间隔放在前一个片段之后，不会影响下一个片段的开头
             # 这样可以确保接话者的音频开头完整保留
@@ -302,6 +313,14 @@ class SoulXTTS:
                 silence_samples = int(sr * silence_interval_ms / 1000.0)
                 silence = torch.zeros(1, silence_samples, device=device)
                 processed_segments.append(silence)
+                
+                # 如果提供了回调函数，也发送静音片段
+                if on_chunk_generated:
+                    try:
+                        on_chunk_generated(-1, silence, sr, False)  # -1 表示静音片段
+                    except Exception as e:
+                        if verbose:
+                            print(f"[WARNING] 回调函数执行失败: {e}")
         
         # 拼接所有处理后的音频片段
         if len(processed_segments) == 1:
@@ -317,240 +336,4 @@ class SoulXTTS:
             print(f"[INFO] 音频已保存到: {output_path}")
         
         return output_path
-    
-    def infer_multi_speaker_streaming(
-        self,
-        speakers: Dict[str, Dict[str, str]],
-        dialogues: List[tuple],
-        silence_interval: Optional[int] = None,
-        verbose: bool = False
-    ):
-        """
-        流式生成多角色播客音频（逐段yield音频片段）
-        
-        Args:
-            speakers: 说话人信息字典，格式为 {角色名: {"prompt_audio": 路径, "prompt_text": 文本}}
-            dialogues: 对话列表，格式为 [(角色名, 文本), ...]
-            silence_interval: 角色切换静音间隔（毫秒），如果为None则使用默认值400ms
-            verbose: 是否输出详细信息
-        
-        Yields:
-            Tuple[int, torch.Tensor, bool, str]: (segment_index, audio_tensor, is_silence, role_name)
-                - segment_index: 片段索引
-                - audio_tensor: 音频张量 (1, samples)
-                - is_silence: 是否为静音片段
-                - role_name: 角色名称（静音片段为None）
-        """
-        # 确保模型已加载
-        self._ensure_model_loaded()
-        
-        # 构建播客格式数据
-        role_mapping = {}
-        podcast_speakers = {}
-        for idx, (role_name, role_info) in enumerate(speakers.items(), 1):
-            spk_id = f"S{idx}"
-            role_mapping[role_name] = spk_id
-            podcast_speakers[spk_id] = {
-                "prompt_audio": role_info["prompt_audio"],
-                "prompt_text": role_info.get("prompt_text", "这是一个参考音频。")
-            }
-        
-        # 转换对话格式
-        podcast_text = []
-        for role_name, text in dialogues:
-            spk_id = role_mapping.get(role_name, "S1")
-            podcast_text.append([spk_id, text])
-        
-        podcast_data = {
-            "speakers": podcast_speakers,
-            "text": podcast_text
-        }
-        
-        # 解析格式
-        inputs = podcast_format_parser(podcast_data)
-        
-        # 处理输入
-        data = process_single_input(
-            self.dataset,
-            inputs['text'],
-            inputs['prompt_wav'],
-            inputs['prompt_text'],
-            inputs.get('use_dialect_prompt', False),
-            inputs.get('dialect_prompt_text', [])
-        )
-        
-        if verbose:
-            print(f"[INFO] 开始流式生成多角色播客音频...")
-            print(f"      说话人数量: {len(speakers)}")
-            print(f"      对话轮数: {len(dialogues)}")
-        
-        # SoulX-Podcast 输出采样率为 24000
-        sr = 24000
-        silence_interval_ms = silence_interval if silence_interval is not None else 400
-        
-        # 使用自定义的流式生成方法
-        yield from self._stream_audio_generation(data, dialogues, sr, silence_interval_ms, verbose)
-    
-    def _stream_audio_generation(
-        self,
-        data: Dict,
-        dialogues: List[tuple],
-        sr: int,
-        silence_interval_ms: int,
-        verbose: bool
-    ):
-        """
-        内部方法：流式生成音频
-        
-        Yields:
-            Tuple[int, torch.Tensor, bool, str]: (segment_index, audio_tensor, is_silence, role_name)
-        """
-        import time
-        from itertools import chain
-        from transformers import DynamicCache
-        from soulxpodcast.config import AutoPretrainedConfig
-        
-        # 提取数据
-        prompt_mels_for_llm = data['prompt_mels_for_llm']
-        prompt_mels_lens_for_llm = data['prompt_mels_lens_for_llm']
-        prompt_text_tokens_for_llm = data['prompt_text_tokens_for_llm']
-        text_tokens_for_llm = data['text_tokens_for_llm']
-        prompt_mels_for_flow_ori = data['prompt_mels_for_flow_ori']
-        spk_emb_for_flow = data['spk_emb_for_flow']
-        spk_ids = data['spk_ids']
-        sampling_params = data.get('sampling_params', None)
-        use_dialect_prompt = data.get('use_dialect_prompt', False)
-        dialect_prompt_text_tokens_for_llm = data.get('dialect_prompt_text_tokens_for_llm', None)
-        dialect_prefix = data.get('dialect_prefix', None)
-        
-        # 如果没有提供sampling_params，使用默认值
-        if sampling_params is None:
-            from soulxpodcast.config import SamplingParams
-            sampling_params = SamplingParams()
-        
-        prompt_size, turn_size = len(prompt_mels_for_llm), len(text_tokens_for_llm)
-        
-        # Audio tokenization (与forward_longform相同)
-        prompt_speech_tokens_ori, prompt_speech_tokens_lens_ori = self.model.audio_tokenizer.quantize(
-            prompt_mels_for_llm.cuda(), prompt_mels_lens_for_llm.cuda()
-        )
-        
-        # align speech token with speech feat
-        prompt_speech_tokens = []
-        prompt_mels_for_flow, prompt_mels_lens_for_flow = [], []
-        
-        for prompt_index in range(prompt_size):
-            prompt_speech_token_len = prompt_speech_tokens_lens_ori[prompt_index].item()
-            prompt_speech_token = prompt_speech_tokens_ori[prompt_index, :prompt_speech_token_len]
-            prompt_mel = prompt_mels_for_flow_ori[prompt_index]
-            prompt_mel_len = prompt_mel.shape[0]
-            if prompt_speech_token_len * 2 > prompt_mel_len:
-                prompt_speech_token = prompt_speech_token[:int(prompt_mel_len/2)]
-                prompt_mel_len = torch.tensor([prompt_mel_len]).cuda()
-            else:
-                prompt_mel = prompt_mel.detach().clone()[:prompt_speech_token_len * 2].cuda()
-                prompt_mel_len = torch.tensor([prompt_speech_token_len * 2]).cuda()
-            prompt_speech_tokens.append(prompt_speech_token)
-            prompt_mels_for_flow.append(prompt_mel)
-            prompt_mels_lens_for_flow.append(prompt_mel_len)
-        
-        # Prepare LLM inputs
-        prompt_inputs = []
-        history_inputs = []
-        
-        for i in range(prompt_size):
-            speech_tokens_i = [token+self.model.config.hf_config.speech_token_offset for token in prompt_speech_tokens[i].tolist()]
-            speech_tokens_i += [self.model.config.hf_config.eos_token_id]
-            if use_dialect_prompt and dialect_prompt_text_tokens_for_llm and len(dialect_prompt_text_tokens_for_llm[i])>0:
-                dialect_prompt_input = prompt_text_tokens_for_llm[i] + speech_tokens_i + dialect_prompt_text_tokens_for_llm[i]
-                if i>0:
-                    dialect_prompt_input = dialect_prefix[0] + dialect_prompt_input
-                prompt_input = self.model.llm.generate(dialect_prompt_input, sampling_params, past_key_values=None)['token_ids']
-                prompt_inputs.append(dialect_prefix[i+1]+dialect_prompt_text_tokens_for_llm[i] + prompt_input)
-                history_inputs.append(dialect_prefix[i+1]+dialect_prompt_text_tokens_for_llm[i] + prompt_input)
-            else:
-                prompt_inputs.append(prompt_text_tokens_for_llm[i] + speech_tokens_i)
-                history_inputs.append(prompt_text_tokens_for_llm[i] + speech_tokens_i)
-        
-        # LLM generation (流式)
-        inputs = list(chain.from_iterable(prompt_inputs))
-        cache_config = AutoPretrainedConfig().from_dataclass(self.model.llm.config.hf_config)
-        past_key_values = DynamicCache(config=cache_config)
-        valid_turn_size = prompt_size
-        
-        segment_index = 0
-        
-        for i in range(turn_size):
-            # Cache management (与forward_longform相同)
-            if valid_turn_size > self.model.config.max_turn_size or len(inputs)>self.model.config.turn_tokens_threshold:
-                assert self.model.config.max_turn_size >= self.model.config.prompt_context + self.model.config.history_context, "Invalid Long history size setting"
-                prompt_text_bound = max(self.model.config.prompt_context, len(history_inputs)-self.model.config.history_text_context-self.model.config.history_context)
-                inputs = list(chain.from_iterable(
-                    history_inputs[:self.model.config.prompt_context]+ \
-                    history_inputs[prompt_text_bound:-self.model.config.history_context]+ \
-                    prompt_inputs[-self.model.config.history_context:]
-                ))
-                valid_turn_size = self.model.config.prompt_context + len(history_inputs) - prompt_text_bound
-                past_key_values = DynamicCache(config=cache_config)
-            valid_turn_size += 1
-            
-            inputs.extend(text_tokens_for_llm[i])
-            start_time = time.time()
-            llm_outputs = self.model.llm.generate(inputs, sampling_params, past_key_values=past_key_values)
-            
-            inputs.extend(llm_outputs['token_ids'])
-            prompt_inputs.append(text_tokens_for_llm[i]+llm_outputs['token_ids'])
-            history_inputs.append(text_tokens_for_llm[i][:-1])
-            
-            # Prepare Flow inputs
-            turn_spk = spk_ids[i]
-            generated_speech_tokens = [token - self.model.config.hf_config.speech_token_offset for token in llm_outputs['token_ids'][:-1]]
-            prompt_speech_token = prompt_speech_tokens[turn_spk].tolist()
-            flow_input = torch.tensor([prompt_speech_token + generated_speech_tokens])
-            flow_inputs_len = torch.tensor([len(prompt_speech_token) + len(generated_speech_tokens)])
-            
-            # Flow generation and HiFi-GAN generation
-            start_idx = spk_ids[i]
-            prompt_mels = prompt_mels_for_flow[start_idx][None]
-            prompt_mels_lens = prompt_mels_lens_for_flow[start_idx][None]
-            spk_emb = spk_emb_for_flow[start_idx:start_idx+1]
-            
-            # Flow generation
-            with torch.amp.autocast("cuda", dtype=torch.float16 if self.model.config.hf_config.fp16_flow else torch.float32):
-                generated_mels, generated_mels_lens = self.model.flow(
-                    flow_input.cuda(), flow_inputs_len.cuda(),
-                    prompt_mels, prompt_mels_lens, spk_emb.cuda(),
-                    streaming=False, finalize=True
-                )
-            
-            # HiFi-GAN generation
-            mel = generated_mels[:, :, prompt_mels_lens[0].item():generated_mels_lens[0].item()]
-            wav, _ = self.model.hift(speech_feat=mel)
-            
-            # 处理音频片段
-            if wav.dim() == 1:
-                wav = wav.unsqueeze(0)
-            elif wav.dim() > 1 and wav.shape[0] > 1:
-                wav = torch.mean(wav, dim=0, keepdim=True)
-            
-            wav = wav.clone()
-            device = wav.device
-            
-            # 获取角色名
-            role_name = dialogues[i][0] if i < len(dialogues) else None
-            
-            # Yield音频片段
-            yield (segment_index, wav, False, role_name)
-            segment_index += 1
-            
-            # 如果不是最后一个片段，添加静音间隔
-            if i < turn_size - 1:
-                silence_samples = int(sr * silence_interval_ms / 1000.0)
-                silence = torch.zeros(1, silence_samples, device=device)
-                yield (segment_index, silence, True, None)
-                segment_index += 1
-            
-            if verbose:
-                elapsed = time.time() - start_time
-                print(f"[INFO] 已生成第 {i+1}/{turn_size} 段对话，耗时: {elapsed:.2f}秒")
 

@@ -4,10 +4,18 @@ import { MusicPlayController } from 'module_musicplay';
 import { CloudStorageMusicUtils, CloudAudioFile } from '../../common/CloudStorageMusicUtils';
 import { MediaService, getMusicModel, SongItem, MusicModel } from 'module_musicplay';
 import { promptAction } from '@kit.ArkUI';
-import { FileUtils } from '../../utils/FileUtils';
+import { FileUtils, TextFileInfo } from '../../utils/FileUtils';
 import { picker } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
 import { Logger } from 'lib_common';
+import { podcastService, MultiRoleRequest } from 'lib_api';
+
+/**
+ * 多角色播客页面路由参数
+ */
+interface PodcastMultiRolePageParams {
+  initialInputType?: string;
+}
 
 @Builder
 export function PodcastPageBuilder() {
@@ -22,6 +30,8 @@ export struct PodcastPage {
   @Local recentPodcasts: SongItem[] = []; // 最近播客列表
   @Local isRefreshing: boolean = false; // 是否正在刷新
   @Local musicModel: MusicModel = getMusicModel(); // 音乐模型
+  @Local isShowUploadMenu: boolean = false; // 是否显示上传菜单
+  @Local isGenerating: boolean = false; // 是否正在生成播客
 
   /**
    * 页面加载时自动导入播放列表（如果为空）
@@ -29,14 +39,14 @@ export struct PodcastPage {
   async aboutToAppear(): Promise<void> {
     // 检查播放列表是否为空，如果为空则自动导入
     const songList = this.musicModel.getSongList();
-    
+
     if (songList.length === 0 && !this.hasAutoImported) {
       Logger.info('PodcastPage', '播放列表为空，自动从云存储导入音频');
       this.hasAutoImported = true;
       // 静默导入，不显示加载提示（避免影响用户体验）
       await this.importAudioFromCloudSilently();
     }
-    
+
     // 加载最近播客列表
     await this.loadRecentPodcasts();
   }
@@ -91,29 +101,29 @@ export struct PodcastPage {
 
     try {
       this.isUploadingMusic = true;
-      
+
       // 获取UIAbility上下文
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      
+
       // 使用文件选择器选择音频文件
       const filePicker = new picker.DocumentViewPicker();
       const documentSelectOptions = new picker.DocumentSelectOptions();
       documentSelectOptions.maxSelectNumber = 1;
       documentSelectOptions.fileSuffixFilters = ['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac'];
-      
+
       try {
         const documentSelectResult = await filePicker.select(documentSelectOptions);
         if (documentSelectResult && documentSelectResult.length > 0) {
           const fileUri = documentSelectResult[0];
-          
+
           promptAction.showToast({
             message: '正在上传背景音乐到云存储...',
             duration: 2000
           });
-          
+
           // 上传到云存储
           const cloudInfo = await FileUtils.uploadBackgroundMusicToCloud(context, fileUri);
-          
+
           if (cloudInfo && cloudInfo.cloudUrl) {
             promptAction.showToast({
               message: `背景音乐上传成功！\n文件已保存到云存储 music/ 目录`,
@@ -183,7 +193,7 @@ export struct PodcastPage {
         message: `成功导入 ${songItems.length} 个音频文件`,
         duration: 2000
       });
-      
+
       // 刷新最近播客列表
       await this.loadRecentPodcasts();
     } catch (error) {
@@ -203,12 +213,12 @@ export struct PodcastPage {
     try {
       this.isRefreshing = true;
       const songList = this.musicModel.getSongList();
-      
+
       if (songList.length === 0) {
         this.recentPodcasts = [];
         return;
       }
-      
+
       // 按时间排序，最新的在前（假设id包含时间戳）
       const sortedList = [...songList].sort((a, b) => {
         const getTimestamp = (id: string): number => {
@@ -217,7 +227,7 @@ export struct PodcastPage {
         };
         return getTimestamp(b.id) - getTimestamp(a.id);
       });
-      
+
       // 只显示最近20个
       this.recentPodcasts = sortedList.slice(0, 20);
     } catch (error) {
@@ -253,6 +263,249 @@ export struct PodcastPage {
    */
   playPodcast(song: SongItem): void {
     MediaService.getInstance().playSong(song);
+  }
+
+  /**
+   * 上传文字内容并生成播客
+   */
+  async uploadText(): Promise<void> {
+    // 跳转到多角色播客页面，预设输入类型为文字
+    const params: PodcastMultiRolePageParams = {
+      initialInputType: '文字'
+    };
+    RouterUtils.pushPathByName(RouterMap.PODCAST_MULTI_ROLE_PAGE, params);
+  }
+
+  /**
+   * 上传文件并生成播客
+   */
+  async uploadFile(): Promise<void> {
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+
+      // 选择文本文件（支持.txt、.doc、.docx、.pdf）
+      const textFileInfos = await FileUtils.pickTextFiles(context, true);
+      if (textFileInfos && textFileInfos.length > 0) {
+        // 获取云存储URL列表
+        const fileUrls: string[] = [];
+        for (let i = 0; i < textFileInfos.length; i++) {
+          const fileInfo = textFileInfos[i];
+          if (fileInfo && fileInfo.cloudUrl) {
+            fileUrls.push(fileInfo.cloudUrl);
+          }
+        }
+
+        if (fileUrls.length > 0) {
+          await this.generatePodcastFromFiles(fileUrls);
+        } else {
+          promptAction.showToast({
+            message: '文件上传失败，请重试',
+            duration: 2000
+          });
+        }
+      }
+    } catch (error) {
+      Logger.error('PodcastPage', `上传文件失败: ${error}`);
+      promptAction.showToast({
+        message: `上传文件失败: ${error}`,
+        duration: 2000
+      });
+    }
+  }
+
+  /**
+   * 上传链接并生成播客
+   */
+  async uploadLink(): Promise<void> {
+    // 跳转到多角色播客页面，预设输入类型为网页
+    const params: PodcastMultiRolePageParams = {
+      initialInputType: '网页'
+    };
+    RouterUtils.pushPathByName(RouterMap.PODCAST_MULTI_ROLE_PAGE, params);
+  }
+
+  /**
+   * 上传图片和视频并生成播客
+   */
+  async uploadImageAndVideo(): Promise<void> {
+    try {
+      promptAction.showToast({
+        message: '图片和视频功能开发中',
+        duration: 2000
+      });
+      // TODO: 实现图片和视频上传功能
+    } catch (error) {
+      Logger.error('PodcastPage', `上传图片和视频失败: ${error}`);
+      promptAction.showToast({
+        message: `上传失败: ${error}`,
+        duration: 2000
+      });
+    }
+  }
+
+  /**
+   * 从文字生成播客
+   */
+  async generatePodcastFromText(text: string): Promise<void> {
+    if (this.isGenerating) {
+      return;
+    }
+
+    try {
+      this.isGenerating = true;
+      promptAction.showToast({
+        message: '正在生成播客...',
+        duration: 2000
+      });
+
+      // 调用多角色播客生成API（使用默认角色）
+      const request: MultiRoleRequest = {
+        text: text,
+        input_type: '文字',
+        role_voice_urls: {
+          '角色A': '', // 使用默认音色
+          '角色B': ''
+        },
+        silence_interval: 800
+      };
+
+      const result = await podcastService.generateMultiRolePodcast(request);
+
+      if (result && result.success && result.data && result.data.audio_path) {
+        promptAction.showToast({
+          message: '播客生成成功！',
+          duration: 2000
+        });
+
+        // 刷新播客列表
+        await this.importAudioFromCloud();
+      } else {
+        promptAction.showToast({
+          message: '播客生成失败，请重试',
+          duration: 2000
+        });
+      }
+    } catch (error) {
+      Logger.error('PodcastPage', `生成播客失败: ${error}`);
+      promptAction.showToast({
+        message: `生成播客失败: ${error}`,
+        duration: 3000
+      });
+    } finally {
+      this.isGenerating = false;
+    }
+  }
+
+  /**
+   * 从文件生成播客
+   */
+  async generatePodcastFromFiles(fileUrls: string[]): Promise<void> {
+    if (this.isGenerating) {
+      return;
+    }
+
+    try {
+      this.isGenerating = true;
+      promptAction.showToast({
+        message: '正在生成播客...',
+        duration: 2000
+      });
+
+      // 调用多角色播客生成API
+      const request: MultiRoleRequest = {
+        text_file_url: fileUrls.length === 1 ? fileUrls[0] : fileUrls,
+        input_type: '文件',
+        role_voice_urls: {
+          '角色A': '',
+          '角色B': ''
+        },
+        silence_interval: 800
+      };
+
+      const result = await podcastService.generateMultiRolePodcast(request);
+
+      if (result && result.success && result.data && result.data.audio_path) {
+        promptAction.showToast({
+          message: '播客生成成功！',
+          duration: 2000
+        });
+
+        // 刷新播客列表
+        await this.importAudioFromCloud();
+      } else {
+        promptAction.showToast({
+          message: '播客生成失败，请重试',
+          duration: 2000
+        });
+      }
+    } catch (error) {
+      Logger.error('PodcastPage', `生成播客失败: ${error}`);
+      promptAction.showToast({
+        message: `生成播客失败: ${error}`,
+        duration: 3000
+      });
+    } finally {
+      this.isGenerating = false;
+    }
+  }
+
+  /**
+   * 从链接生成播客
+   */
+  async generatePodcastFromLink(url: string): Promise<void> {
+    if (this.isGenerating) {
+      return;
+    }
+
+    try {
+      this.isGenerating = true;
+      promptAction.showToast({
+        message: '正在生成播客...',
+        duration: 2000
+      });
+
+      // 判断链接类型（公众号或网页）
+      let inputType = '网页';
+      if (url.includes('mp.weixin.qq.com') || url.includes('weixin')) {
+        inputType = '公众号';
+      }
+
+      // 调用多角色播客生成API
+      const request: MultiRoleRequest = {
+        input_url: url,
+        input_type: inputType,
+        role_voice_urls: {
+          '角色A': '',
+          '角色B': ''
+        },
+        silence_interval: 800
+      };
+
+      const result = await podcastService.generateMultiRolePodcast(request);
+
+      if (result && result.success && result.data && result.data.audio_path) {
+        promptAction.showToast({
+          message: '播客生成成功！',
+          duration: 2000
+        });
+
+        // 刷新播客列表
+        await this.importAudioFromCloud();
+      } else {
+        promptAction.showToast({
+          message: '播客生成失败，请重试',
+          duration: 2000
+        });
+      }
+    } catch (error) {
+      Logger.error('PodcastPage', `生成播客失败: ${error}`);
+      promptAction.showToast({
+        message: `生成播客失败: ${error}`,
+        duration: 3000
+      });
+    } finally {
+      this.isGenerating = false;
+    }
   }
 
   build() {
@@ -338,7 +591,7 @@ export struct PodcastPage {
                 .padding({ left: 16, right: 16 })
               }
               .scrollable(ScrollDirection.Horizontal)
-              .scrollBar(BarState.Auto)
+              .scrollBar(BarState.Off)
             }
             .width('100%')
             .padding({ top: 16, bottom: 8 })
@@ -379,14 +632,15 @@ export struct PodcastPage {
           .width('100%')
         }
         .layoutWeight(1)
-        .scrollBar(BarState.Auto)
-        
+        .scrollBar(BarState.Off)
+
         // 播放器组件 - 放在底部导航栏上方
         MusicPlayController()
       }
       .width('100%')
       .height('100%')
       .backgroundColor($r('sys.color.background_primary'))
+
     }
     .hideTitleBar(true)
   }
@@ -397,6 +651,20 @@ export struct PodcastPage {
   @Builder
   headerRightBuilder() {
     Row({ space: 12 }) {
+      // 加号按钮（上传内容）
+      Button() {
+        Image($r('app.media.plus'))
+          .width(18)
+          .height(18)
+          .fillColor(Color.White)
+      }
+      .type(ButtonType.Normal)
+      .backgroundColor($r('sys.color.icon_emphasize'))
+      .borderRadius(20)
+      .width(40)
+      .height(40)
+      .bindMenu(this.MyMenu)
+
       // 搜索按钮
       Button() {
         SymbolGlyph($r('sys.symbol.magnifyingglass'))
@@ -432,6 +700,46 @@ export struct PodcastPage {
   }
 
   /**
+   * 上传菜单
+   */
+  @Builder
+  MyMenu() {
+    Menu() {
+      MenuItem({ 
+        startIcon: $r("sys.symbol.doc_text"), 
+        content: "文字" 
+      })
+      .onChange(() => {
+        this.uploadText();
+      })
+
+      MenuItem({ 
+        startIcon: $r("sys.symbol.folder"), 
+        content: "文件" 
+      })
+      .onChange(() => {
+        this.uploadFile();
+      })
+
+      MenuItem({ 
+        startIcon: $r("sys.symbol.link"), 
+        content: "链接" 
+      })
+      .onChange(() => {
+        this.uploadLink();
+      })
+
+      MenuItem({ 
+        startIcon: $r("sys.symbol.camera"), 
+        content: "图片和视频" 
+      })
+      .onChange(() => {
+        this.uploadImageAndVideo();
+      })
+    }
+  }
+
+  /**
    * 播客功能卡片
    */
   @Builder
@@ -439,7 +747,7 @@ export struct PodcastPage {
     Column({ space: 8 }) {
       // 图标区域
       Column() {
-        Image($r('app.media.ic_music_icon'))
+        Image($r('app.media.zhibozhong'))
           .width(40)
           .height(40)
           .fillColor($r('sys.color.icon_emphasize'))
@@ -524,7 +832,12 @@ export struct PodcastPage {
           Text('播客')
             .fontSize(11)
             .fontColor($r('sys.color.font_secondary'))
-            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+            .padding({
+              left: 6,
+              right: 6,
+              top: 2,
+              bottom: 2
+            })
             .borderRadius(4)
             .backgroundColor($r('sys.color.comp_background_tertiary'))
         }

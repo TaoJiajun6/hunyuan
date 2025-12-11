@@ -1,3 +1,8 @@
+/**
+ * 主题深度播客页面 - 带流式播放功能
+ * 
+ * 这个示例展示了如何集成 StreamingTTSPlayer 实现边生成边播放
+ */
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Play, Pause } from 'lucide-react';
@@ -32,12 +37,12 @@ const CATEGORY_OPTIONS = [
 const DEPTH_LEVELS = ['深度', '中等', '浅层'];
 const ROLE_NAMES = ['角色A', '角色B', '角色C'];
 
-export default function DeepPage() {
+export default function DeepPageWithStreaming() {
   const navigate = useNavigate();
   const [topic, setTopic] = useState('');
   const [category, setCategory] = useState('');
-  const [roleVoices, setRoleVoices] = useState<Record<string, string>>({}); // base64编码的音色数据
-  const [roleVoiceIds, setRoleVoiceIds] = useState<Record<string, string>>({}); // 音色ID，用于显示选中状态
+  const [roleVoices, setRoleVoices] = useState<Record<string, string>>({});
+  const [roleVoiceIds, setRoleVoiceIds] = useState<Record<string, string>>({});
   const [numCharacters, setNumCharacters] = useState(2);
   const [depthLevel, setDepthLevel] = useState('深度');
   const [isLoading, setIsLoading] = useState(false);
@@ -45,7 +50,6 @@ export default function DeepPage() {
   const [progressMessage, setProgressMessage] = useState('');
   
   // 流式播放相关状态
-  const [enableStreaming, setEnableStreaming] = useState(true); // 默认启用流式播放
   const [isStreaming, setIsStreaming] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -58,6 +62,7 @@ export default function DeepPage() {
   // 清理函数
   useEffect(() => {
     return () => {
+      // 组件卸载时清理资源
       if (playerRef.current) {
         playerRef.current.destroy();
         playerRef.current = null;
@@ -80,174 +85,137 @@ export default function DeepPage() {
       return;
     }
 
-      const roleNames = ROLE_NAMES.slice(0, numCharacters);
-      if (Object.keys(roleVoices).length !== numCharacters) {
-        alert(`请为所有${numCharacters}个角色选择音色`);
+    const roleNames = ROLE_NAMES.slice(0, numCharacters);
+    if (Object.keys(roleVoices).length !== numCharacters) {
+      alert(`请为所有${numCharacters}个角色选择音色`);
+      return;
+    }
+
+    for (const roleName of roleNames) {
+      if (!roleVoices[roleName]) {
+        alert(`缺少角色 ${roleName} 的音色数据`);
         return;
       }
-
-      for (const roleName of roleNames) {
-        if (!roleVoices[roleName]) {
-          alert(`缺少角色 ${roleName} 的音色数据`);
-          return;
-        }
-      }
+    }
 
     setIsLoading(true);
+    setIsStreaming(true);
     setProgressPercent(0);
     setProgressMessage('正在生成播客...');
 
     try {
+      // 创建流式播放器
+      const player = new StreamingTTSPlayer({
+        onEvent: (event, data) => {
+          console.log('播放器事件:', event, data);
+          
+          if (event === 'ready') {
+            console.log('播放器已就绪');
+          } else if (event === 'play') {
+            setIsPlaying(true);
+          } else if (event === 'pause') {
+            setIsPlaying(false);
+          } else if (event === 'timeupdate') {
+            if (data) {
+              setCurrentTime(data.currentTime || 0);
+              setDuration(data.duration || 0);
+            }
+          } else if (event === 'ended') {
+            setIsPlaying(false);
+            setIsStreaming(false);
+          } else if (event === 'error') {
+            console.error('播放器错误:', data);
+            alert('播放出错，请重试');
+          }
+        }
+      });
+      
+      playerRef.current = player;
+
       const jobId = `job_${Date.now()}`;
       const request: DeepPodcastRequest = {
         topic,
-        role_voices: roleVoices, // 使用base64编码的音色数据
+        role_voices: roleVoices,
         num_characters: numCharacters,
         depth_level: depthLevel,
         category: category || undefined,
         job_id: jobId,
       };
 
-      // 如果启用流式播放，创建播放器并启动流式监听
-      if (enableStreaming) {
-        setIsStreaming(true);
-        
-        // 创建流式播放器
-        const player = new StreamingTTSPlayer({
-          onEvent: (event, data) => {
-            if (event === 'ready') {
-              console.log('播放器已就绪');
-            } else if (event === 'play') {
-              setIsPlaying(true);
-            } else if (event === 'pause') {
-              setIsPlaying(false);
-            } else if (event === 'timeupdate') {
-              if (data) {
-                setCurrentTime(data.currentTime || 0);
-                setDuration(data.duration || 0);
-              }
-            } else if (event === 'ended') {
-              setIsPlaying(false);
-              setIsStreaming(false);
-            } else if (event === 'error') {
-              console.error('播放器错误:', data);
-            }
-          }
-        });
-        
-        playerRef.current = player;
-
-        // 启动流式进度监听
-        const stopStreaming = podcastService.startStreamingProgress(
-          jobId,
-          (progress: ProgressStatus) => {
-            setProgressPercent(progress.percent);
-            setProgressMessage(progress.message);
+      // 启动流式进度监听（支持音频块接收）
+      const stopStreaming = podcastService.startStreamingProgress(
+        jobId,
+        (progress: ProgressStatus) => {
+          // 处理普通进度更新
+          setProgressPercent(progress.percent);
+          setProgressMessage(progress.message);
+          
+          if (progress.done) {
+            setIsLoading(false);
             
-            if (progress.done) {
-              setIsLoading(false);
-              
-              if (progress.error) {
-                alert(`生成失败: ${progress.error}`);
-                setIsStreaming(false);
-                if (playerRef.current) {
-                  playerRef.current.destroy();
-                  playerRef.current = null;
-                }
-              }
-            }
-          },
-          (chunk) => {
-            // 处理音频块
-            if (playerRef.current) {
-              const audioBase64 = chunk.audio_base64.startsWith('data:') 
-                ? chunk.audio_base64 
-                : `data:audio/wav;base64,${chunk.audio_base64}`;
-              
-              playerRef.current.receiveBase64(audioBase64, true);
-              
-              if (chunk.is_last) {
-                setTimeout(() => {
-                  if (playerRef.current) {
-                    playerRef.current.endOfStream();
-                  }
-                  setIsStreaming(false);
-                }, 1000);
-              }
-            }
-          }
-        );
-        
-        stopStreamingRef.current = stopStreaming;
-      }
-
-      // 启动进度轮询（兼容非流式模式）
-      const stopPolling = podcastService.startProgressPolling(jobId, (progress: ProgressStatus) => {
-        setProgressPercent(progress.percent);
-        setProgressMessage(progress.message);
-        if (progress.done) {
-          setIsLoading(false);
-          stopPolling(); // 停止轮询
-          
-          // 如果使用流式播放，停止流式监听
-          if (enableStreaming && stopStreamingRef.current) {
-            stopStreamingRef.current();
-            stopStreamingRef.current = null;
-          }
-          
-          if (progress.error) {
-            alert(`生成失败: ${progress.error}`);
-            if (enableStreaming) {
+            if (progress.error) {
+              alert(`生成失败: ${progress.error}`);
               setIsStreaming(false);
               if (playerRef.current) {
                 playerRef.current.destroy();
                 playerRef.current = null;
               }
+            } else {
+              // 生成完成，等待最后一个音频块
+              console.log('生成完成，等待最后一个音频块...');
             }
-          } else if (progress.audio_url || progress.audio_base64) {
-            // 保存到最近播客列表
-            if (progress.audio_base64) {
-              saveRecentPodcast({
-                title: progress.topic || '主题深度播客',
-                type: 'deep',
-                audioBase64: progress.audio_base64,
-                script: progress.script,
-                topic: progress.topic,
-              });
-            } else if (progress.audio_url) {
-              saveRecentPodcast({
-                title: progress.topic || '主题深度播客',
-                type: 'deep',
-                audioUrl: progress.audio_url,
-                script: progress.script,
-                topic: progress.topic,
-              });
+          }
+        },
+        (chunk) => {
+          // 处理音频块
+          console.log(`收到音频块 ${chunk.chunk_index}, 是否最后: ${chunk.is_last}`);
+          
+          if (playerRef.current) {
+            // 将音频块发送给播放器
+            // 注意：如果后端发送的是 WAV 格式，需要确保 base64 数据包含正确的 data URL 前缀
+            const audioBase64 = chunk.audio_base64.startsWith('data:') 
+              ? chunk.audio_base64 
+              : `data:audio/wav;base64,${chunk.audio_base64}`;
+            
+            playerRef.current.receiveBase64(audioBase64, true); // 自动播放
+            
+            // 如果是最后一个块，结束流
+            if (chunk.is_last) {
+              console.log('收到最后一个音频块，结束流');
+              setTimeout(() => {
+                if (playerRef.current) {
+                  playerRef.current.endOfStream();
+                }
+                setIsStreaming(false);
+                
+                // 保存到最近播客列表（使用完整音频）
+                // 注意：流式播放时，完整音频会在生成完成后通过 progress.audio_base64 返回
+                // 这里可以保存播放器中的音频，或者等待完整音频返回
+              }, 1000);
             }
           }
         }
-      });
+      );
+      
+      stopStreamingRef.current = stopStreaming;
 
+      // 发送生成请求
       const result = await podcastService.generateDeepPodcast(request, (progress) => {
         setProgressPercent(progress.percent);
         setProgressMessage(progress.message);
       });
 
-      // 如果API调用失败，停止轮询和流式监听
+      // 如果API调用失败，停止流式监听
       if (!result.success) {
-        stopPolling();
-        if (enableStreaming && stopStreamingRef.current) {
-          stopStreamingRef.current();
-          stopStreamingRef.current = null;
-        }
-        if (enableStreaming && playerRef.current) {
+        stopStreaming();
+        setIsLoading(false);
+        setIsStreaming(false);
+        if (playerRef.current) {
           playerRef.current.destroy();
           playerRef.current = null;
         }
-        setIsLoading(false);
-        setIsStreaming(false);
-        const errorMsg = result.error || result.message || '未知错误';
         
-        // 检查是否是网络错误
+        const errorMsg = result.error || result.message || '未知错误';
         if (errorMsg.includes('Network Error') || errorMsg.includes('ERR_CONNECTION_REFUSED') || errorMsg.includes('网络')) {
           alert(`无法连接到服务器: ${errorMsg}\n\n请检查网络连接或联系管理员`);
         } else {
@@ -256,31 +224,24 @@ export default function DeepPage() {
         return;
       }
 
-      if (result.success && result.data) {
-        stopPolling();
+      // 如果API立即返回了完整音频（非流式模式），保存并导航
+      if (result.success && result.data && result.data.audio_base64) {
+        stopStreaming();
+        setIsLoading(false);
+        setIsStreaming(false);
         
         // 保存到最近播客列表
-        if (result.data.audio_base64) {
-          saveRecentPodcast({
-            title: result.data.topic || '主题深度播客',
-            type: 'deep',
-            audioBase64: result.data.audio_base64,
-            script: result.data.script,
-            topic: result.data.topic,
-            fileSizeMb: result.data.file_size_mb,
-          });
-        } else if (result.data.audio_url) {
-          saveRecentPodcast({
-            title: result.data.topic || '主题深度播客',
-            type: 'deep',
-            audioUrl: result.data.audio_url,
-            script: result.data.script,
-            topic: result.data.topic,
-            fileSizeMb: result.data.file_size_mb,
-          });
-        }
+        saveRecentPodcast({
+          title: result.data.topic || '主题深度播客',
+          type: 'deep',
+          audioBase64: result.data.audio_base64,
+          script: result.data.script,
+          topic: result.data.topic,
+          fileSizeMb: result.data.file_size_mb,
+        });
         
-        navigate('/podcast');
+        // 可以选择导航到播客列表，或者继续在当前页面播放
+        // navigate('/podcast');
       }
     } catch (error) {
       console.error('生成失败:', error);
@@ -339,7 +300,7 @@ export default function DeepPage() {
         >
           <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
         </button>
-        <h1 className="text-xl font-bold text-gray-900 dark:text-white">主题深度播客</h1>
+        <h1 className="text-xl font-bold text-gray-900 dark:text-white">主题深度播客（流式播放）</h1>
       </div>
 
       {/* 滚动内容区域 */}
@@ -387,7 +348,6 @@ export default function DeepPage() {
             onChange={(e) => {
               const newNum = parseInt(e.target.value);
               setNumCharacters(newNum);
-              // 清理多余角色的音色数据
               const newRoleNames = ROLE_NAMES.slice(0, newNum);
               const newRoleVoices: Record<string, string> = {};
               const newRoleVoiceIds: Record<string, string> = {};
@@ -430,39 +390,17 @@ export default function DeepPage() {
           </div>
         </div>
 
-        {/* 流式播放开关 */}
-        <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              流式播放
-            </label>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              启用后可以边生成边播放，大幅减少等待时间
-            </p>
-          </div>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={enableStreaming}
-              onChange={(e) => setEnableStreaming(e.target.checked)}
-              disabled={isLoading || isStreaming}
-              className="sr-only peer"
-            />
-            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-primary-600"></div>
-          </label>
-        </div>
-
         {/* 角色音色选择 */}
         <div className="space-y-4">
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
             角色音色（必需）
           </label>
           {currentRoleNames.map((roleName) => (
-              <VoiceSelector
+            <VoiceSelector
               key={roleName}
               roleName={roleName}
-              selectedVoiceUrl={roleVoices[roleName]} // base64数据
-              selectedVoiceId={roleVoiceIds[roleName]} // 音色ID，用于显示选中状态
+              selectedVoiceUrl={roleVoices[roleName]}
+              selectedVoiceId={roleVoiceIds[roleName]}
               onSelect={(voiceBase64, voiceId) => handleSelectVoice(roleName, voiceBase64, voiceId)}
               disabled={isLoading}
             />
@@ -531,4 +469,8 @@ export default function DeepPage() {
     </div>
   );
 }
+
+
+
+
 

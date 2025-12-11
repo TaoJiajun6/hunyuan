@@ -142,6 +142,27 @@ export interface AnalyzeTextResult {
 }
 
 /**
+ * 生成封面图请求
+ */
+export interface GenerateCoverRequest {
+  text?: string; // 播客文本内容
+  topic?: string; // 播客主题
+  podcast_name?: string; // 播客名称
+  category?: string; // 播客分类
+  characters?: string[]; // 角色列表
+}
+
+/**
+ * 封面图生成结果
+ */
+export interface CoverImageResult {
+  image_url: string; // 封面图URL（base64或云存储URL）
+  prompt: string; // 用于生成图像的提示词
+  note?: string; // 备注信息
+  error?: string; // 错误信息（如果有）
+}
+
+/**
  * 进度状态
  */
 export interface ProgressStatus {
@@ -372,6 +393,8 @@ export interface PodcastResult {
   characters?: string[];
   topic?: string;
   depth_level?: string;
+  podcast_name?: string; // 播客名称（可选）
+  category?: string; // 播客分类（可选）
 
   // 云存储直链（优先使用，避免响应体过大）
   audio_url?: string;
@@ -1264,6 +1287,74 @@ export class PodcastService {
         resolve({
           success: false,
           message: '查询任务状态失败',
+          error: errorMessage,
+        });
+      }
+    });
+  }
+
+  /**
+   * 生成播客封面图
+   * @param request 封面图生成请求
+   * @returns 封面图生成结果
+   */
+  async generateCoverImage(
+    request: GenerateCoverRequest
+  ): Promise<ApiResponse<CoverImageResult>> {
+    return new Promise<ApiResponse<CoverImageResult>>((resolve) => {
+      try {
+        Logger.info(TAG, `开始生成封面图: 主题=${request.topic || '无'}, 名称=${request.podcast_name || '无'}`);
+
+        const httpRequest = http.createHttp();
+        const requestData = JSON.stringify(request);
+        const options: http.HttpRequestOptions = {
+          method: http.RequestMethod.POST,
+          header: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          extraData: requestData,
+          connectTimeout: 60000, // 60秒超时（图像生成可能需要较长时间）
+          readTimeout: 60000,
+        };
+
+        const apiUrl = PodcastConfig.USE_CLOUD_FUNCTION
+          ? this.baseUrl
+          : this.buildApiUrl('/api/v1/podcast/generate_cover');
+
+        Logger.info(TAG, `请求URL: ${apiUrl}`);
+
+        httpRequest.request(
+          apiUrl,
+          options,
+          (err: BusinessError, data: http.HttpResponse) => {
+            httpRequest.destroy();
+            
+            const result = this.handleResponse<CoverImageResult>(err, data || null, '生成封面图失败');
+            if (result.success) {
+              Logger.info(TAG, '封面图生成成功');
+            } else {
+              Logger.error(TAG, `封面图生成失败: ${result.error || result.message}`);
+            }
+            resolve(result);
+          }
+        );
+      } catch (error) {
+        let errorMessage = '未知错误';
+        if (error instanceof Error) {
+          errorMessage = error.message || '错误对象没有消息';
+        } else if (error && typeof error === 'object') {
+          const businessError = error as BusinessError;
+          errorMessage = businessError.message || businessError.code?.toString() || '业务错误';
+        } else {
+          errorMessage = String(error) || '未知错误';
+        }
+        
+        Logger.error(TAG, `生成封面图异常: ${errorMessage}`);
+        
+        resolve({
+          success: false,
+          message: '生成封面图失败',
           error: errorMessage,
         });
       }

@@ -10,10 +10,6 @@ import logging
 import time
 import requests
 import json
-import io
-import numpy as np
-import torch
-import soundfile as sf
 from typing import Optional, List, Dict, Any, Union
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request, BackgroundTasks
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
@@ -26,6 +22,14 @@ import glob
 import base64 as _base64
 from typing import Tuple
 import concurrent.futures
+
+# 导入音频处理相关库
+try:
+    import torch
+    import soundfile as sf
+    HAS_AUDIO_LIBS = True
+except ImportError:
+    HAS_AUDIO_LIBS = False
 
 # 尝试导入我们在 tools 中实现的 AGC 上传工具（可选）
 try:
@@ -506,7 +510,7 @@ def get_task_manager() -> PodcastTaskManager:
 def _progress_path(job_id: str) -> str:
     return os.path.join(_PROGRESS_DIR, f"{job_id}.json")
 
-def _update_progress(job_id: Optional[str], phase: str, percent: int, message: str, done: bool = False, error: Optional[str] = None, audio_url: Optional[str] = None, audio_base64: Optional[str] = None):
+def _update_progress(job_id: Optional[str], phase: str, percent: int, message: str, done: bool = False, error: Optional[str] = None, audio_url: Optional[str] = None):
     """更新任务进度
     
     Args:
@@ -517,7 +521,6 @@ def _update_progress(job_id: Optional[str], phase: str, percent: int, message: s
         done: 是否完成
         error: 错误信息（可选）
         audio_url: 音频云存储URL（可选，生成完成后提供）
-        audio_base64: 音频base64编码（可选，web端生成完成后提供）
     """
     if not job_id:
         return
@@ -533,9 +536,6 @@ def _update_progress(job_id: Optional[str], phase: str, percent: int, message: s
     # 如果提供了 audio_url，添加到进度数据中（用于前端从云存储下载）
     if audio_url:
         data["audio_url"] = audio_url
-    # 如果提供了 audio_base64，添加到进度数据中（用于web端直接获取音频）
-    if audio_base64:
-        data["audio_base64"] = audio_base64
     _PROGRESS_CACHE[job_id] = data
     try:
         with open(_progress_path(job_id), 'w', encoding='utf-8') as f:
@@ -561,6 +561,36 @@ def _get_progress(job_id: str) -> Dict[str, Any]:
             return json.load(f)
     except Exception:
         return {"job_id": job_id, "phase": "unknown", "percent": 0, "message": "未开始或任务ID不存在", "done": False}
+
+def _send_audio_chunk(job_id: Optional[str], audio_chunk_base64: str, chunk_index: int, is_last: bool = False):
+    """发送音频块到SSE连接
+    
+    Args:
+        job_id: 任务ID
+        audio_chunk_base64: base64编码的音频块（MP3格式）
+        chunk_index: 块索引
+        is_last: 是否是最后一个块
+    """
+    if not job_id:
+        return
+    
+    # 如果有SSE连接，推送音频块
+    if job_id in _PROGRESS_SSE_QUEUES:
+        queue = _PROGRESS_SSE_QUEUES[job_id]
+        data = {
+            "job_id": job_id,
+            "type": "audio_chunk",
+            "audio_base64": audio_chunk_base64,
+            "chunk_index": chunk_index,
+            "is_last": is_last,
+            "ts": int(time.time())
+        }
+        try:
+            # 非阻塞方式放入队列
+            queue.put_nowait(data)
+        except asyncio.QueueFull:
+            # 队列满了，忽略
+            pass
 
 # 文件大小限制（字节）
 MAX_AUDIO_FILE_SIZE = 50 * 1024 * 1024  # 50MB
@@ -795,9 +825,8 @@ class CharacterInfo(BaseModel):
     catchphrase: Optional[str] = Field(None, description="口头禅/说话习惯")
     speaking_style: Optional[str] = Field(None, description="说话风格")
     relationship: Optional[str] = Field(None, description="与其他角色的关系")
-    voice_url: Optional[str] = Field(None, description="音色文件云存储URL（与voice_base64二选一）")
-    voice_base64: Optional[str] = Field(None, description="音色文件base64编码（与voice_url二选一，web端使用）")
-    voice: Optional[str] = Field(None, description="[已废弃] 音色文件，base64编码或URL（已废弃，请使用voice_url或voice_base64）")
+    voice_url: Optional[str] = Field(None, description="音色文件云存储URL（如果使用云存储）")
+    voice: Optional[str] = Field(None, description="音色文件，base64编码（如果使用base64，voice_url和voice至少提供一个）")
 
 
 class CharacterRequest(BaseModel):
@@ -1350,6 +1379,48 @@ def encode_file_to_base64(file_path: str) -> str:
             return base64.b64encode(f.read()).decode("utf-8")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"文件编码失败: {str(e)}")
+
+def encode_audio_tensor_to_base64(audio_tensor, sample_rate: int = 24000) -> str:
+    """将音频张量编码为base64 WAV格式
+    
+    Args:
+        audio_tensor: 音频张量，形状为 (1, samples) 或 (samples,)
+        sample_rate: 采样率，默认24000
+        
+    Returns:
+        base64编码的WAV音频数据
+    """
+    import tempfile
+    import soundfile as sf
+    
+    try:
+        # 确保音频格式正确
+        if audio_tensor.dim() == 1:
+            audio_np = audio_tensor.cpu().numpy()
+        elif audio_tensor.dim() == 2:
+            audio_np = audio_tensor.cpu().squeeze(0).numpy()
+        else:
+            raise ValueError(f"不支持的音频张量维度: {audio_tensor.dim()}")
+        
+        # 保存到临时文件
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
+            tmp_path = tmp_file.name
+            sf.write(tmp_path, audio_np, sample_rate)
+            
+            # 读取并编码
+            with open(tmp_path, 'rb') as f:
+                audio_bytes = f.read()
+            
+            # 清理临时文件
+            try:
+                os.unlink(tmp_path)
+            except:
+                pass
+            
+            return base64.b64encode(audio_bytes).decode('utf-8')
+    except Exception as e:
+        logger.error(f"音频编码失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"音频编码失败: {str(e)}")
 
 
 def calculate_upload_timeout(file_path: str, base_timeout: int = 120) -> int:
@@ -2050,54 +2121,50 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
             logger.info("=" * 60)
             _update_progress(request.job_id, "saving", 85, "保存音频文件")
             # 尝试启动 AGC 上传任务
-            # 如果是web端请求（使用base64音色），跳过云存储上传，直接返回音频
             agc_result = None
-            if not use_cloud_storage:
-                logger.info("检测到web端请求（使用base64音色），跳过云存储上传，直接返回音频")
-            else:
-                try:
-                    # 配置来源：优先环境变量，其次仓库中的 agc-apiclient-*.json
-                    agc_storage_url = os.getenv('AGC_STORAGE_URL')
-                    agc_bucket = os.getenv('AGC_BUCKET')
-                    agc_domain = os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
-                    agc_client_id = os.getenv('AGC_CLIENT_ID')
-                    agc_client_secret = os.getenv('AGC_CLIENT_SECRET')
-                    agc_product_id = os.getenv('AGC_PRODUCT_ID')
+            try:
+                # 配置来源：优先环境变量，其次仓库中的 agc-apiclient-*.json
+                agc_storage_url = os.getenv('AGC_STORAGE_URL')
+                agc_bucket = os.getenv('AGC_BUCKET')
+                agc_domain = os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
+                agc_client_id = os.getenv('AGC_CLIENT_ID')
+                agc_client_secret = os.getenv('AGC_CLIENT_SECRET')
+                agc_product_id = os.getenv('AGC_PRODUCT_ID')
 
-                    # 如果没有显式提供 client_id/secret，尝试在仓库中查找 agc-apiclient-*.json
-                    if not agc_client_id or not agc_client_secret:
-                        cfg_path = _find_agc_client_json()
-                        if cfg_path:
-                            cid, csecret, proj = _load_agc_credentials_from_file(cfg_path)
-                            agc_client_id = agc_client_id or cid
-                            agc_client_secret = agc_client_secret or csecret
-                            agc_product_id = agc_product_id or proj
+                # 如果没有显式提供 client_id/secret，尝试在仓库中查找 agc-apiclient-*.json
+                if not agc_client_id or not agc_client_secret:
+                    cfg_path = _find_agc_client_json()
+                    if cfg_path:
+                        cid, csecret, proj = _load_agc_credentials_from_file(cfg_path)
+                        agc_client_id = agc_client_id or cid
+                        agc_client_secret = agc_client_secret or csecret
+                        agc_product_id = agc_product_id or proj
 
-                    if agc_storage_url and agc_bucket:
-                        # 使用正斜杠构建云存储路径，避免 Windows 反斜杠问题
-                        object_name = f"outputs/podcasts/{os.path.basename(output_path)}"
-                        try:
-                            # 统一使用后台上传，避免阻塞和超时问题
-                            # 参考之前提交的实现：立即返回base64音频，上传在后台进行
-                            background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
-                                                      agc_product_id, agc_domain, agc_client_id, agc_client_secret)
-                            logger.info("已在后台启动 AGC 上传任务（不阻塞主流程）")
-                            agc_result = {
-                                'status': 'started',
-                                'bucket': agc_bucket,
-                                'object': object_name,
-                                'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
-                            }
-                            # 更新进度，包含音频URL（即使后台上传，也先返回URL以便前端从云存储下载）
-                            audio_url = agc_result.get('url') if isinstance(agc_result, dict) else None
-                            _update_progress(request.job_id, "uploading", 95, "生成完成，已开始后台上传到云存储", done=True, audio_url=audio_url)
-                        except Exception as e:
-                            logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
-                    else:
-                        logger.debug("未检测到 AGC 存储配置，跳过后台上传")
-                        _update_progress(request.job_id, "completed", 100, "生成完成", done=True)
-                except Exception as e:
-                    logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
+                if agc_storage_url and agc_bucket:
+                    # 使用正斜杠构建云存储路径，避免 Windows 反斜杠问题
+                    object_name = f"outputs/podcasts/{os.path.basename(output_path)}"
+                    try:
+                        # 统一使用后台上传，避免阻塞和超时问题
+                        # 参考之前提交的实现：立即返回base64音频，上传在后台进行
+                        background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
+                                                  agc_product_id, agc_domain, agc_client_id, agc_client_secret)
+                        logger.info("已在后台启动 AGC 上传任务（不阻塞主流程）")
+                        agc_result = {
+                            'status': 'started',
+                            'bucket': agc_bucket,
+                            'object': object_name,
+                            'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
+                        }
+                        # 更新进度，包含音频URL（即使后台上传，也先返回URL以便前端从云存储下载）
+                        audio_url = agc_result.get('url') if isinstance(agc_result, dict) else None
+                        _update_progress(request.job_id, "uploading", 95, "生成完成，已开始后台上传到云存储", done=True, audio_url=audio_url)
+                    except Exception as e:
+                        logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
+                else:
+                    logger.debug("未检测到 AGC 存储配置，跳过后台上传")
+                    _update_progress(request.job_id, "completed", 100, "生成完成", done=True)
+            except Exception as e:
+                logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
             
             # 编码输出音频
             logger.info("编码输出音频文件...")
@@ -2105,10 +2172,6 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
             file_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
             total_time = time.time() - start_time
             logger.info(f"多角色播客生成成功，总耗时: {total_time:.2f}s，输出文件大小: {file_size:.2f} MB")
-            
-            # 更新进度（web端请求时包含audio_base64，不等待上传）
-            if not use_cloud_storage:
-                _update_progress(request.job_id, "completed", 100, "生成完成", done=True, audio_base64=audio_base64)
             
             data = {
                     "audio_base64": audio_base64,
@@ -2170,7 +2233,8 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
     ### 必需参数
     - **characters** (必需): 角色列表（至少2个，最多4个），每个角色必须提供以下信息：
         - **name** (必需): 角色名称
-        - **voice_url** (必需): 音色文件云存储URL
+        - **voice_url** (可选): 音色文件云存储URL（如果使用云存储）
+        - **voice** (可选): 音色文件base64编码（如果使用base64，voice_url和voice至少提供一个）
         - **identity** (可选): 身份/职业
         - **personality** (可选): 核心性格
         - **catchphrase** (可选): 口头禅/说话习惯
@@ -2234,23 +2298,18 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
         character_descriptions = {}
         role_voices = {}
         
-        # 检测是否使用base64音色（web端请求）
-        use_cloud_storage = any(char.voice_url and not char.voice_base64 for char in request.characters)
-        
         try:
-            _update_progress(request.job_id, "downloading_voices", 5, "正在下载角色音色文件")
+            _update_progress(request.job_id, "downloading_voices", 5, "正在处理角色音色文件")
             for char in request.characters:
-                if char.voice_base64:
-                    # 从base64解码（web端请求）
-                    logger.info(f"从base64解码角色 '{char.name}' 的音频文件")
-                    temp_file = decode_base64_audio(char.voice_base64)
-                    use_cloud_storage = False
-                elif char.voice_url:
-                    # 从云存储URL下载
+                # 支持 voice_url（云存储URL）或 voice（base64编码）
+                if char.voice_url:
                     logger.info(f"从云存储下载角色 '{char.name}' 的音频文件: {char.voice_url}")
                     temp_file = download_audio_from_url(char.voice_url)
+                elif char.voice:
+                    logger.info(f"从base64解码角色 '{char.name}' 的音频文件")
+                    temp_file = decode_base64_audio(char.voice)
                 else:
-                    raise HTTPException(status_code=400, detail=f"角色 '{char.name}' 缺少音色数据（voice_url 或 voice_base64）")
+                    raise HTTPException(status_code=400, detail=f"角色 '{char.name}' 缺少音色文件（voice_url 或 voice）")
                 
                 temp_files.append(temp_file)
                 role_voices[char.name] = temp_file
@@ -2430,53 +2489,48 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
             logger.info(f"自定义角色播客生成成功，总耗时: {total_time:.2f}s，输出文件大小: {file_size:.2f} MB")
             
             # 尝试启动后台 AGC 上传任务（不阻塞主请求）
-            # 如果是web端请求（使用base64音色），跳过云存储上传，直接返回音频
             agc_result = None
-            if not use_cloud_storage:
-                logger.info("检测到web端请求（使用base64音色），跳过云存储上传，直接返回音频")
-                _update_progress(request.job_id, "completed", 100, "生成完成", done=True, audio_base64=audio_base64)
-            else:
-                try:
-                    agc_storage_url = os.getenv('AGC_STORAGE_URL')
-                    agc_bucket = os.getenv('AGC_BUCKET')
-                    agc_domain = os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
-                    agc_client_id = os.getenv('AGC_CLIENT_ID')
-                    agc_client_secret = os.getenv('AGC_CLIENT_SECRET')
-                    agc_product_id = os.getenv('AGC_PRODUCT_ID')
+            try:
+                agc_storage_url = os.getenv('AGC_STORAGE_URL')
+                agc_bucket = os.getenv('AGC_BUCKET')
+                agc_domain = os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
+                agc_client_id = os.getenv('AGC_CLIENT_ID')
+                agc_client_secret = os.getenv('AGC_CLIENT_SECRET')
+                agc_product_id = os.getenv('AGC_PRODUCT_ID')
 
-                    if not agc_client_id or not agc_client_secret:
-                        cfg_path = _find_agc_client_json()
-                        if cfg_path:
-                            cid, csecret, proj = _load_agc_credentials_from_file(cfg_path)
-                            agc_client_id = agc_client_id or cid
-                            agc_client_secret = agc_client_secret or csecret
-                            agc_product_id = agc_product_id or proj
+                if not agc_client_id or not agc_client_secret:
+                    cfg_path = _find_agc_client_json()
+                    if cfg_path:
+                        cid, csecret, proj = _load_agc_credentials_from_file(cfg_path)
+                        agc_client_id = agc_client_id or cid
+                        agc_client_secret = agc_client_secret or csecret
+                        agc_product_id = agc_product_id or proj
 
-                    if agc_storage_url and agc_bucket:
-                        # 使用正斜杠构建云存储路径，避免 Windows 反斜杠问题
-                        object_name = f"outputs/podcasts/{os.path.basename(output_path)}"
-                        try:
-                            # 统一使用后台上传，避免阻塞和超时问题
-                            # 参考之前提交的实现：立即返回base64音频，上传在后台进行
-                            background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
-                                                      agc_product_id, agc_domain, agc_client_id, agc_client_secret)
-                            logger.info("已在后台启动 AGC 上传任务（不阻塞主流程）")
-                            agc_result = {
-                                'status': 'started',
-                                'bucket': agc_bucket,
-                                'object': object_name,
-                                'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
-                            }
-                            # 更新进度，包含音频URL（即使后台上传，也先返回URL以便前端从云存储下载）
-                            audio_url = agc_result.get('url') if isinstance(agc_result, dict) else None
-                            _update_progress(request.job_id, "uploading", 95, "生成完成，已开始后台上传到云存储", done=True, audio_url=audio_url)
-                        except Exception as e:
-                            logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
-                    else:
-                        logger.debug("未检测到 AGC 存储配置，跳过后台上传")
-                        _update_progress(request.job_id, "completed", 100, "生成完成", done=True)
-                except Exception as e:
-                    logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
+                if agc_storage_url and agc_bucket:
+                    # 使用正斜杠构建云存储路径，避免 Windows 反斜杠问题
+                    object_name = f"outputs/podcasts/{os.path.basename(output_path)}"
+                    try:
+                        # 统一使用后台上传，避免阻塞和超时问题
+                        # 参考之前提交的实现：立即返回base64音频，上传在后台进行
+                        background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
+                                                  agc_product_id, agc_domain, agc_client_id, agc_client_secret)
+                        logger.info("已在后台启动 AGC 上传任务（不阻塞主流程）")
+                        agc_result = {
+                            'status': 'started',
+                            'bucket': agc_bucket,
+                            'object': object_name,
+                            'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
+                        }
+                        # 更新进度，包含音频URL（即使后台上传，也先返回URL以便前端从云存储下载）
+                        audio_url = agc_result.get('url') if isinstance(agc_result, dict) else None
+                        _update_progress(request.job_id, "uploading", 95, "生成完成，已开始后台上传到云存储", done=True, audio_url=audio_url)
+                    except Exception as e:
+                        logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
+                else:
+                    logger.debug("未检测到 AGC 存储配置，跳过后台上传")
+                    _update_progress(request.job_id, "completed", 100, "生成完成", done=True)
+            except Exception as e:
+                logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
 
             data = {
                     "audio_base64": audio_base64,
@@ -2575,18 +2629,11 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
     _update_progress(request.job_id, "queued", 1, "任务已提交，准备开始处理")
     start_time = time.time()
     
-    # 验证音色数据（role_voice_urls或role_voices至少有一个）
-    has_voice_urls = request.role_voice_urls and len(request.role_voice_urls) > 0
-    has_voices = request.role_voices and len(request.role_voices) > 0
+    # 验证云存储URL
+    if not request.role_voice_urls or len(request.role_voice_urls) == 0:
+        raise HTTPException(status_code=400, detail="至少需要提供一个角色的音色文件URL（role_voice_urls）")
     
-    if not has_voice_urls and not has_voices:
-        raise HTTPException(status_code=400, detail="至少需要提供一个角色的音色数据（role_voice_urls或role_voices）")
-    
-    # 确定使用哪个字段
-    use_cloud_storage = has_voice_urls
-    role_voice_data = request.role_voice_urls if use_cloud_storage else request.role_voices
-    
-    logger.info(f"开始生成主题深度播客: 主题={request.topic}, 角色数量={request.num_characters}, 深度级别={request.depth_level}, 使用云存储={use_cloud_storage}")
+    logger.info(f"开始生成主题深度播客: 主题={request.topic}, 角色数量={request.num_characters}, 深度级别={request.depth_level}, 使用云存储")
     
     try:
         gen = get_generator()
@@ -2601,22 +2648,16 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
             _update_progress(request.job_id, "downloading_voices", 5, "正在下载角色音色文件")
             role_names = ["角色A", "角色B", "角色C"][:request.num_characters]
             for i, role_name in enumerate(role_names):
-                if role_name in role_voice_data:
-                    voice_data = role_voice_data[role_name]
-                    if use_cloud_storage:
-                        # 从云存储URL下载
-                        logger.info(f"从云存储下载角色 '{role_name}' 的音频文件: {voice_data}")
-                        temp_file = download_audio_from_url(voice_data)
-                    else:
-                        # 从base64解码（web端请求）
-                        logger.info(f"从base64解码角色 '{role_name}' 的音频文件")
-                        temp_file = decode_base64_audio(voice_data)
-                    
+                if role_name in request.role_voice_urls:
+                    voice_url = request.role_voice_urls[role_name]
+                    logger.info(f"从云存储下载角色 '{role_name}' 的音频文件: {voice_url}")
+                    # 从云存储URL下载
+                    temp_file = download_audio_from_url(voice_url)
                     temp_files.append(temp_file)
                     role_voices[role_name] = temp_file
-                    logger.info(f"角色 '{role_name}' 音频文件处理完成")
+                    logger.info(f"角色 '{role_name}' 音频文件下载完成")
                 else:
-                    raise HTTPException(status_code=400, detail=f"缺少角色 '{role_name}' 的音色数据")
+                    raise HTTPException(status_code=400, detail=f"缺少角色 '{role_name}' 的音色文件URL")
             
             # 生成对话文本
             logger.info("调用混元大模型生成深度对话文本...")
@@ -2779,53 +2820,48 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
             logger.info(f"主题深度播客生成成功，总耗时: {total_time:.2f}s，输出文件大小: {file_size:.2f} MB")
             
             # 尝试启动后台 AGC 上传任务（不阻塞主请求）
-            # 如果是web端请求（使用base64音色），跳过云存储上传，直接返回音频
             agc_result = None
-            if not use_cloud_storage:
-                logger.info("检测到web端请求（使用base64音色），跳过云存储上传，直接返回音频")
-                _update_progress(request.job_id, "completed", 100, "生成完成", done=True, audio_base64=audio_base64)
-            else:
-                try:
-                    agc_storage_url = os.getenv('AGC_STORAGE_URL')
-                    agc_bucket = os.getenv('AGC_BUCKET')
-                    agc_domain = os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
-                    agc_client_id = os.getenv('AGC_CLIENT_ID')
-                    agc_client_secret = os.getenv('AGC_CLIENT_SECRET')
-                    agc_product_id = os.getenv('AGC_PRODUCT_ID')
+            try:
+                agc_storage_url = os.getenv('AGC_STORAGE_URL')
+                agc_bucket = os.getenv('AGC_BUCKET')
+                agc_domain = os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
+                agc_client_id = os.getenv('AGC_CLIENT_ID')
+                agc_client_secret = os.getenv('AGC_CLIENT_SECRET')
+                agc_product_id = os.getenv('AGC_PRODUCT_ID')
 
-                    if not agc_client_id or not agc_client_secret:
-                        cfg_path = _find_agc_client_json()
-                        if cfg_path:
-                            cid, csecret, proj = _load_agc_credentials_from_file(cfg_path)
-                            agc_client_id = agc_client_id or cid
-                            agc_client_secret = agc_client_secret or csecret
-                            agc_product_id = agc_product_id or proj
+                if not agc_client_id or not agc_client_secret:
+                    cfg_path = _find_agc_client_json()
+                    if cfg_path:
+                        cid, csecret, proj = _load_agc_credentials_from_file(cfg_path)
+                        agc_client_id = agc_client_id or cid
+                        agc_client_secret = agc_client_secret or csecret
+                        agc_product_id = agc_product_id or proj
 
-                    if agc_storage_url and agc_bucket:
-                        # 使用正斜杠构建云存储路径，避免 Windows 反斜杠问题
-                        object_name = f"outputs/podcasts/{os.path.basename(output_path)}"
-                        try:
-                            # 统一使用后台上传，避免阻塞和超时问题
-                            # 参考之前提交的实现：立即返回base64音频，上传在后台进行
-                            background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
-                                                      agc_product_id, agc_domain, agc_client_id, agc_client_secret)
-                            logger.info("已在后台启动 AGC 上传任务（不阻塞主流程）")
-                            agc_result = {
-                                'status': 'started',
-                                'bucket': agc_bucket,
-                                'object': object_name,
-                                'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
-                            }
-                            # 更新进度，包含音频URL（即使后台上传，也先返回URL以便前端从云存储下载）
-                            audio_url = agc_result.get('url') if isinstance(agc_result, dict) else None
-                            _update_progress(request.job_id, "uploading", 95, "生成完成，已开始后台上传到云存储", done=True, audio_url=audio_url)
-                        except Exception as e:
-                            logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
-                    else:
-                        logger.debug("未检测到 AGC 存储配置，跳过后台上传")
-                        _update_progress(request.job_id, "completed", 100, "生成完成", done=True)
-                except Exception as e:
-                    logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
+                if agc_storage_url and agc_bucket:
+                    # 使用正斜杠构建云存储路径，避免 Windows 反斜杠问题
+                    object_name = f"outputs/podcasts/{os.path.basename(output_path)}"
+                    try:
+                        # 统一使用后台上传，避免阻塞和超时问题
+                        # 参考之前提交的实现：立即返回base64音频，上传在后台进行
+                        background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
+                                                  agc_product_id, agc_domain, agc_client_id, agc_client_secret)
+                        logger.info("已在后台启动 AGC 上传任务（不阻塞主流程）")
+                        agc_result = {
+                            'status': 'started',
+                            'bucket': agc_bucket,
+                            'object': object_name,
+                            'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
+                        }
+                        # 更新进度，包含音频URL（即使后台上传，也先返回URL以便前端从云存储下载）
+                        audio_url = agc_result.get('url') if isinstance(agc_result, dict) else None
+                        _update_progress(request.job_id, "uploading", 95, "生成完成，已开始后台上传到云存储", done=True, audio_url=audio_url)
+                    except Exception as e:
+                        logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
+                else:
+                    logger.debug("未检测到 AGC 存储配置，跳过后台上传")
+                    _update_progress(request.job_id, "completed", 100, "生成完成", done=True)
+            except Exception as e:
+                logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
 
             data = {
                     "audio_base64": audio_base64,
@@ -2868,12 +2904,6 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
             error=str(e),
             data={"traceback": error_detail}
         )
-
-
-class StreamingScriptRequest(BaseModel):
-    """流式播客脚本生成请求"""
-    text_material: str = Field(..., description="输入内容（报告、文章、访谈稿、数据手册、故事素材等）")
-    instruction: Optional[str] = Field(None, description="可选指令（用于控制生成过程，如'生成3分钟播客'、'使用轻松风格'等）")
 
 
 class AnalyzeTextRequest(BaseModel):
@@ -2920,85 +2950,210 @@ async def analyze_text_for_podcast(request: AnalyzeTextRequest):
         )
 
 
-@app.post("/api/v1/podcast/streaming_script", response_model=ApiResponse)
-async def generate_streaming_podcast_script(request: StreamingScriptRequest):
+class GenerateCoverRequest(BaseModel):
+    """生成封面图请求"""
+    text: Optional[str] = Field(None, description="播客文本内容")
+    topic: Optional[str] = Field(None, description="播客主题")
+    podcast_name: Optional[str] = Field(None, description="播客名称")
+    category: Optional[str] = Field(None, description="播客分类")
+    characters: Optional[List[str]] = Field(None, description="角色列表")
+
+
+@app.post("/api/v1/podcast/generate_cover", response_model=ApiResponse)
+async def generate_podcast_cover(request: GenerateCoverRequest):
     """
-    生成流式播客脚本（单人播客，适配流式播放）
+    根据播客内容生成封面图
     
-    ## 功能说明
+    根据提供的文本、主题、播客名称等信息，使用AI生成播客封面图
     
-    基于任意输入内容（报告、文章、访谈稿、数据手册、故事素材等），生成适配音频流式播放的专业播客脚本。
-    核心特点是：信息精准不偏差、语言口语好理解、节奏适配碎片化收听。
+    - **text**: 播客文本内容（可选）
+    - **topic**: 播客主题（可选）
+    - **podcast_name**: 播客名称（可选）
+    - **category**: 播客分类（可选）
+    - **characters**: 角色列表（可选）
     
-    ## 请求参数
-    
-    ### 必需参数
-    - **text_material** (必需): 输入内容（报告、文章、访谈稿、数据手册、故事素材等）
-    
-    ### 可选参数
-    - **instruction** (可选): 指令内容（用于控制生成过程，如"生成3分钟播客"、"使用轻松风格"等）
-    
-    ## 响应格式
-    
-    成功时返回：
-    ```json
-    {
-        "success": true,
-        "message": "脚本生成成功",
-        "data": {
-            "script": "生成的播客脚本内容"
-        }
-    }
-    ```
-    
-    ## 注意事项
-    
-    - 生成的脚本是单人播客格式，适合流式播放
-    - 脚本内容严格基于输入内容，不添加无关信息
-    - 语言风格完全口语化，适配碎片化收听
-    - 脚本结构包含：开场白、核心总览、分模块拆解、结尾总结
+    返回：
+    - **image_url**: 生成的封面图URL（base64编码或云存储URL）
+    - **prompt**: 用于生成图像的提示词
     """
     try:
-        processor = TextProcessor()
+        import requests
+        import base64
+        from io import BytesIO
+        from PIL import Image
+        
+        # 构建图像生成提示词
         api_client = get_client()
         
-        logger.info(f"开始生成流式播客脚本: 输入内容长度={len(request.text_material)}")
+        # 收集所有可用信息
+        info_parts = []
+        if request.podcast_name:
+            info_parts.append(f"播客名称：{request.podcast_name}")
+        if request.topic:
+            info_parts.append(f"主题：{request.topic}")
+        if request.category:
+            info_parts.append(f"分类：{request.category}")
+        if request.characters:
+            info_parts.append(f"角色：{', '.join(request.characters)}")
+        if request.text:
+            # 截取文本前200字作为内容摘要
+            text_summary = request.text[:200] + "..." if len(request.text) > 200 else request.text
+            info_parts.append(f"内容摘要：{text_summary}")
         
-        # 构建提示词
-        prompt = processor.build_streaming_podcast_prompt(
-            text_material=request.text_material,
-            instruction=request.instruction
-        )
+        info_text = "\n".join(info_parts) if info_parts else "播客内容"
         
-        # 调用混元大模型生成脚本
-        logger.info("调用混元大模型生成播客脚本...")
-        text_generation_start = time.time()
-        generated_text = api_client.generate_text(
-            prompt=prompt,
-            temperature=0.7,
-            max_tokens=3000
-        )
-        text_generation_time = time.time() - text_generation_start
-        logger.info(f"脚本生成完成，耗时: {text_generation_time:.2f}s，文本长度: {len(generated_text)}")
+        # 使用混元大模型生成图像提示词
+        prompt_generation_prompt = f"""根据以下播客信息，生成一个简洁、吸引人的英文图像生成提示词（prompt），用于生成播客封面图。
+
+播客信息：
+{info_text}
+
+要求：
+1. 提示词应该是英文，简洁明了（不超过50个单词）
+2. 应该包含播客的主题、风格和氛围
+3. 适合作为播客封面图，具有视觉吸引力
+4. 风格应该是现代、专业、简洁
+5. 只返回提示词，不要其他解释
+
+图像生成提示词："""
+
+        logger.info(f"开始生成封面图提示词: {info_text[:100]}...")
         
-        # 清理生成的文本
-        cleaned_script = processor.clean_text(generated_text)
+        try:
+            image_prompt = api_client.generate_text(
+                prompt=prompt_generation_prompt,
+                temperature=0.7,
+                max_tokens=200
+            ).strip()
+            
+            # 清理提示词（移除可能的引号或多余内容）
+            image_prompt = image_prompt.strip('"').strip("'").strip()
+            
+            logger.info(f"生成的图像提示词: {image_prompt}")
+        except Exception as e:
+            logger.warning(f"使用混元模型生成提示词失败，使用默认提示词: {e}")
+            # 如果生成失败，使用默认提示词
+            if request.topic:
+                image_prompt = f"Podcast cover art, {request.topic}, modern, professional, minimalist design, vibrant colors"
+            elif request.podcast_name:
+                image_prompt = f"Podcast cover art, {request.podcast_name}, modern, professional, minimalist design"
+            else:
+                image_prompt = "Podcast cover art, modern, professional, minimalist design, vibrant colors"
         
-        return ApiResponse(
-            success=True,
-            message="脚本生成成功",
-            data={
-                "script": cleaned_script
+        # 使用SiliconFlow的图像生成API（Stable Diffusion）
+        # 注意：这里需要配置SiliconFlow的API Key
+        siliconflow_api_key = os.getenv("SILICONFLOW_API_KEY", "sk-tpoapasxdwjyexqfagbiigtvwsoydwravbptrmrrmwjfdwbh")
+        siliconflow_api_base = "https://api.siliconflow.cn/v1"
+        
+        if not siliconflow_api_key:
+            logger.warning("未配置SILICONFLOW_API_KEY，返回提示词和base64占位图")
+            # 如果没有配置API Key，返回提示词和一个占位图
+            # 创建一个简单的占位图
+            img = Image.new('RGB', (512, 512), color=(73, 109, 137))
+            buffered = BytesIO()
+            img.save(buffered, format="PNG")
+            img_base64 = base64.b64encode(buffered.getvalue()).decode()
+            
+            return ApiResponse(
+                success=True,
+                message="封面图提示词已生成（未配置图像生成API，返回占位图）",
+                data={
+                    "image_url": f"data:image/png;base64,{img_base64}",
+                    "prompt": image_prompt,
+                    "note": "请配置SILICONFLOW_API_KEY以启用真实图像生成"
+                }
+            )
+        
+        # 调用SiliconFlow的图像生成API
+        try:
+            headers = {
+                "Authorization": f"Bearer {siliconflow_api_key}",
+                "Content-Type": "application/json"
             }
-        )
+            
+            # 使用Stable Diffusion模型
+            payload = {
+                "model": "stabilityai/stable-diffusion-xl-base-1.0",
+                "prompt": image_prompt,
+                "negative_prompt": "blurry, low quality, distorted, ugly, bad anatomy",
+                "width": 512,
+                "height": 512,
+                "num_inference_steps": 20,
+                "guidance_scale": 7.5
+            }
+            
+            logger.info(f"调用SiliconFlow图像生成API: {image_prompt[:50]}...")
+            
+            response = requests.post(
+                f"{siliconflow_api_base}/images/generations",
+                headers=headers,
+                json=payload,
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if "data" in result and len(result["data"]) > 0:
+                    # 获取生成的图像URL或base64
+                    image_data = result["data"][0]
+                    image_url = image_data.get("url") or image_data.get("b64_json")
+                    
+                    if image_url and image_url.startswith("data:"):
+                        # 已经是base64格式
+                        final_image_url = image_url
+                    elif image_url:
+                        # 是URL，需要下载并转换为base64（或直接返回URL）
+                        final_image_url = image_url
+                    else:
+                        # 如果返回的是b64_json字段
+                        b64_data = image_data.get("b64_json")
+                        if b64_data:
+                            final_image_url = f"data:image/png;base64,{b64_data}"
+                        else:
+                            raise Exception("API返回的数据格式不正确")
+                    
+                    logger.info("封面图生成成功")
+                    return ApiResponse(
+                        success=True,
+                        message="封面图生成成功",
+                        data={
+                            "image_url": final_image_url,
+                            "prompt": image_prompt
+                        }
+                    )
+                else:
+                    raise Exception("API返回的数据为空")
+            else:
+                error_msg = response.text
+                logger.error(f"SiliconFlow API调用失败: HTTP {response.status_code}, {error_msg}")
+                raise Exception(f"图像生成API调用失败: {error_msg}")
+                
+        except Exception as e:
+            logger.error(f"调用图像生成API失败: {e}")
+            # 如果API调用失败，返回提示词和占位图
+            img = Image.new('RGB', (512, 512), color=(73, 109, 137))
+            buffered = BytesIO()
+            img.save(buffered, format="PNG")
+            img_base64 = base64.b64encode(buffered.getvalue()).decode()
+            
+            return ApiResponse(
+                success=True,
+                message="封面图提示词已生成（图像生成API调用失败，返回占位图）",
+                data={
+                    "image_url": f"data:image/png;base64,{img_base64}",
+                    "prompt": image_prompt,
+                    "error": str(e)
+                }
+            )
+            
     except Exception as e:
         import traceback
         error_detail = traceback.format_exc()
-        logger.error(f"流式播客脚本生成失败: {str(e)}")
+        logger.error(f"生成封面图失败: {str(e)}")
         logger.error(f"错误详情:\n{error_detail}")
         return ApiResponse(
             success=False,
-            message="脚本生成失败",
+            message="生成封面图失败",
             error=str(e),
             data={"traceback": error_detail}
         )
@@ -3313,285 +3468,6 @@ async def stream_progress(job_id: str):
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no"  # 禁用nginx缓冲
-        }
-    )
-
-
-@app.post("/api/v1/podcast/stream")
-async def stream_podcast_audio(request: MultiRoleRequest):
-    """
-    流式生成并推送播客音频（边生成边播放）
-    
-    使用 Server-Sent Events (SSE) 实时推送音频片段，实现边生成边播放的效果。
-    每个音频片段会以base64编码的形式通过SSE推送，前端可以实时解码并播放。
-    
-    ## 请求参数
-    
-    与 `/api/v1/podcast/multi_role` 接口相同，但不需要等待完整生成完成。
-    
-    ## 响应格式（SSE流）
-    
-    每个事件包含一个JSON对象：
-    ```json
-    {
-        "type": "audio_segment" | "progress" | "error" | "complete",
-        "segment_index": 0,  // 片段索引（仅audio_segment类型）
-        "audio_base64": "base64编码的音频数据",  // 仅audio_segment类型
-        "is_silence": false,  // 是否为静音片段（仅audio_segment类型）
-        "role_name": "角色A",  // 角色名称（仅audio_segment类型，静音片段为null）
-        "progress": 50,  // 进度百分比（仅progress类型）
-        "message": "正在生成第3段对话...",  // 进度消息（仅progress类型）
-        "error": "错误信息"  // 错误信息（仅error类型）
-    }
-    ```
-    
-    ## 使用示例（JavaScript）
-    
-    ```javascript
-    const eventSource = new EventSource('/api/v1/podcast/stream', {
-        method: 'POST',
-        body: JSON.stringify({
-            text: "播客文本内容",
-            role_voice_urls: {
-                "角色A": "https://...",
-                "角色B": "https://..."
-            }
-        }),
-        headers: {
-            'Content-Type': 'application/json'
-        }
-    });
-    
-    const audioContext = new AudioContext();
-    let audioQueue = [];
-    let isPlaying = false;
-    
-    eventSource.onmessage = async (event) => {
-        const data = JSON.parse(event.data);
-        
-        if (data.type === 'audio_segment') {
-            // 解码base64音频
-            const audioData = atob(data.audio_base64);
-            const arrayBuffer = new ArrayBuffer(audioData.length);
-            const view = new Uint8Array(arrayBuffer);
-            for (let i = 0; i < audioData.length; i++) {
-                view[i] = audioData.charCodeAt(i);
-            }
-            
-            // 解码音频并添加到队列
-            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-            audioQueue.push(audioBuffer);
-            
-            // 如果当前没有播放，开始播放
-            if (!isPlaying) {
-                playAudioQueue();
-            }
-        } else if (data.type === 'progress') {
-            console.log('进度:', data.progress, data.message);
-        } else if (data.type === 'error') {
-            console.error('错误:', data.error);
-            eventSource.close();
-        } else if (data.type === 'complete') {
-            console.log('生成完成');
-            eventSource.close();
-        }
-    };
-    
-    async function playAudioQueue() {
-        if (audioQueue.length === 0) {
-            isPlaying = false;
-            return;
-        }
-        
-        isPlaying = true;
-        const audioBuffer = audioQueue.shift();
-        const source = audioContext.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(audioContext.destination);
-        source.onended = () => playAudioQueue();
-        source.start();
-    }
-    ```
-    
-    ## 注意事项
-    
-    - 音频片段采样率为24000Hz，单声道WAV格式
-    - 每个片段会立即推送，无需等待完整生成
-    - 前端需要实现音频队列管理，确保连续播放
-    - 建议使用Web Audio API进行音频解码和播放
-    """
-    async def audio_stream_generator():
-        try:
-            # 验证输入
-            has_text = request.text and request.text.strip()
-            if isinstance(request.text_file_url, list):
-                has_text_file = len(request.text_file_url) > 0 and any(url and url.strip() for url in request.text_file_url)
-            else:
-                has_text_file = request.text_file_url and request.text_file_url.strip()
-            has_input_url = request.input_url and request.input_url.strip()
-            
-            if not (has_text or has_text_file or has_input_url):
-                yield f"data: {json.dumps({'type': 'error', 'error': '至少需要提供text、text_file_url或input_url之一'}, ensure_ascii=False)}\n\n"
-                return
-            
-            # 验证角色音色
-            if not request.role_voice_urls or len(request.role_voice_urls) < 2:
-                yield f"data: {json.dumps({'type': 'error', 'error': '至少需要提供2个角色的音色URL'}, ensure_ascii=False)}\n\n"
-                return
-            
-            # 发送开始消息
-            yield f"data: {json.dumps({'type': 'progress', 'progress': 0, 'message': '开始处理输入文本...'}, ensure_ascii=False)}\n\n"
-            
-            # 处理输入文本
-            processor = get_processor()
-            input_type = request.input_type or "文字"
-            
-            if has_input_url:
-                processed_text = await asyncio.get_event_loop().run_in_executor(
-                    None, processor.process_input, input_type, request.input_url, request.instruction
-                )
-            elif has_text_file:
-                if isinstance(request.text_file_url, list):
-                    text_file_url = request.text_file_url[0]
-                else:
-                    text_file_url = request.text_file_url
-                processed_text = await asyncio.get_event_loop().run_in_executor(
-                    None, processor.process_input, input_type, text_file_url, request.instruction
-                )
-            else:
-                processed_text = await asyncio.get_event_loop().run_in_executor(
-                    None, processor.process_input, input_type, request.text, request.instruction
-                )
-            
-            if not processed_text or not processed_text.strip():
-                yield f"data: {json.dumps({'type': 'error', 'error': '未能从输入中提取有效文本'}, ensure_ascii=False)}\n\n"
-                return
-            
-            yield f"data: {json.dumps({'type': 'progress', 'progress': 20, 'message': '文本处理完成，开始下载音色文件...'}, ensure_ascii=False)}\n\n"
-            
-            # 下载音色文件
-            role_voices = {}
-            for role_name, voice_url in request.role_voice_urls.items():
-                try:
-                    # 下载音色文件到临时目录
-                    temp_dir = tempfile.mkdtemp()
-                    voice_file = os.path.join(temp_dir, f"{role_name}_voice.wav")
-                    
-                    response = requests.get(voice_url, timeout=30, stream=True)
-                    response.raise_for_status()
-                    
-                    with open(voice_file, 'wb') as f:
-                        for chunk in response.iter_content(chunk_size=8192):
-                            f.write(chunk)
-                    
-                    role_voices[role_name] = voice_file
-                except Exception as e:
-                    logger.error(f"下载音色文件失败 {role_name}: {e}")
-                    yield f"data: {json.dumps({'type': 'error', 'error': f'下载角色{role_name}的音色文件失败: {str(e)}'}, ensure_ascii=False)}\n\n"
-                    return
-            
-            yield f"data: {json.dumps({'type': 'progress', 'progress': 30, 'message': '音色文件下载完成，开始生成音频...'}, ensure_ascii=False)}\n\n"
-            
-            # 获取生成器实例
-            gen = get_generator()
-            
-            # 使用流式生成
-            total_segments = 0
-            current_segment = 0
-            
-            # 在后台线程中运行流式生成（因为TTS生成是同步的）
-            def generate_audio():
-                nonlocal total_segments, current_segment
-                try:
-                    for segment_index, audio_tensor, is_silence, role_name in gen.generate_from_text_streaming(
-                        text=processed_text,
-                        role_voices=role_voices,
-                        silence_interval=request.silence_interval or 800,
-                        verbose=True
-                    ):
-                        # 将音频张量转换为numpy数组
-                        audio_np = audio_tensor.cpu().squeeze(0).numpy()
-                        
-                        # 转换为WAV格式的字节流
-                        wav_buffer = io.BytesIO()
-                        sf.write(wav_buffer, audio_np, 24000, format='WAV')
-                        wav_bytes = wav_buffer.getvalue()
-                        
-                        # 编码为base64
-                        audio_base64 = base64.b64encode(wav_bytes).decode('utf-8')
-                        
-                        # 发送音频片段
-                        segment_data = {
-                            'type': 'audio_segment',
-                            'segment_index': segment_index,
-                            'audio_base64': audio_base64,
-                            'is_silence': is_silence,
-                            'role_name': role_name
-                        }
-                        yield segment_data
-                        current_segment = segment_index + 1
-                        
-                except Exception as e:
-                    logger.error(f"流式生成音频失败: {e}", exc_info=True)
-                    yield {'type': 'error', 'error': str(e)}
-            
-            # 创建生成器队列
-            audio_queue = asyncio.Queue()
-            
-            # 在后台线程中运行生成器
-            def run_generator():
-                for segment_data in generate_audio():
-                    asyncio.run_coroutine_threadsafe(audio_queue.put(segment_data), asyncio.get_event_loop())
-                asyncio.run_coroutine_threadsafe(audio_queue.put({'type': 'complete'}), asyncio.get_event_loop())
-            
-            import threading
-            generator_thread = threading.Thread(target=run_generator, daemon=True)
-            generator_thread.start()
-            
-            # 从队列中读取并推送数据
-            while True:
-                try:
-                    segment_data = await asyncio.wait_for(audio_queue.get(), timeout=1.0)
-                    
-                    if segment_data.get('type') == 'error':
-                        yield f"data: {json.dumps(segment_data, ensure_ascii=False)}\n\n"
-                        break
-                    elif segment_data.get('type') == 'complete':
-                        yield f"data: {json.dumps({'type': 'complete', 'message': '音频生成完成'}, ensure_ascii=False)}\n\n"
-                        break
-                    else:
-                        # 计算进度（估算）
-                        progress = 30 + int((segment_data['segment_index'] + 1) * 70 / max(1, segment_data['segment_index'] + 10))
-                        segment_data['progress'] = min(progress, 99)
-                        segment_data['message'] = f"已生成第{segment_data['segment_index'] + 1}段音频"
-                        yield f"data: {json.dumps(segment_data, ensure_ascii=False)}\n\n"
-                        
-                except asyncio.TimeoutError:
-                    # 发送心跳
-                    yield f": heartbeat {int(time.time())}\n\n"
-                    continue
-            
-            # 清理临时文件
-            for voice_file in role_voices.values():
-                try:
-                    if os.path.exists(voice_file):
-                        os.remove(voice_file)
-                    if os.path.exists(os.path.dirname(voice_file)):
-                        os.rmdir(os.path.dirname(voice_file))
-                except:
-                    pass
-                    
-        except Exception as e:
-            logger.error(f"流式音频生成异常: {e}", exc_info=True)
-            yield f"data: {json.dumps({'type': 'error', 'error': str(e)}, ensure_ascii=False)}\n\n"
-    
-    return StreamingResponse(
-        audio_stream_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
         }
     )
 

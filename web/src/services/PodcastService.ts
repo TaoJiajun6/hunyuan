@@ -98,15 +98,6 @@ export interface ApiResponse<T = any> {
   error?: string;
 }
 
-export interface StreamingScriptRequest {
-  text_material: string;
-  instruction?: string;
-}
-
-export interface StreamingScriptResult {
-  script: string;
-}
-
 export interface AnalyzeTextRequest {
   text: string;
 }
@@ -189,7 +180,62 @@ class PodcastService {
   }
 
   /**
-   * 启动进度轮询
+   * 启动 SSE 流式进度监听（支持音频块流式传输）
+   */
+  startStreamingProgress(
+    jobId: string,
+    onProgress: (progress: ProgressStatus) => void,
+    onAudioChunk?: (chunk: { audio_base64: string; chunk_index: number; is_last: boolean }) => void
+  ): () => void {
+    const baseURL = API_BASE_URL.replace(/\/+$/, '');
+    const eventSource = new EventSource(`${baseURL}/api/v1/podcast/progress/${jobId}/stream`);
+    let isClosed = false;
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        
+        // 检查是否是音频块
+        if (data.type === 'audio_chunk' && onAudioChunk) {
+          onAudioChunk({
+            audio_base64: data.audio_base64,
+            chunk_index: data.chunk_index,
+            is_last: data.is_last || false
+          });
+        } else {
+          // 普通进度更新
+          onProgress(data as ProgressStatus);
+        }
+      } catch (error) {
+        console.error('解析 SSE 消息失败:', error);
+      }
+    };
+
+    eventSource.onerror = (error) => {
+      console.error('SSE 连接错误:', error);
+      if (!isClosed) {
+        eventSource.close();
+        // 通知错误
+        onProgress({
+          job_id: jobId,
+          phase: 'error',
+          percent: 0,
+          message: 'SSE 连接失败，请检查网络连接',
+          done: true,
+          error: 'SSE 连接失败'
+        });
+      }
+    };
+
+    // 返回关闭函数
+    return () => {
+      isClosed = true;
+      eventSource.close();
+    };
+  }
+
+  /**
+   * 启动进度轮询（兼容旧版本）
    */
   startProgressPolling(
     jobId: string,
@@ -474,36 +520,6 @@ class PodcastService {
       return {
         success: false,
         message: '主题深度播客生成失败',
-        error: error.response?.data?.error || error.message || '未知错误',
-      };
-    }
-  }
-
-  /**
-   * 生成流式播客脚本
-   */
-  async generateStreamingScript(
-    request: StreamingScriptRequest
-  ): Promise<ApiResponse<StreamingScriptResult>> {
-    try {
-      if (!request.text_material || request.text_material.trim().length === 0) {
-        return {
-          success: false,
-          message: '输入内容不能为空',
-          error: 'text_material为空',
-        };
-      }
-
-      const response = await this.axiosInstance.post<ApiResponse<StreamingScriptResult>>(
-        '/api/v1/podcast/streaming_script',
-        request
-      );
-
-      return response.data;
-    } catch (error: any) {
-      return {
-        success: false,
-        message: '流式播客脚本生成失败',
         error: error.response?.data?.error || error.message || '未知错误',
       };
     }

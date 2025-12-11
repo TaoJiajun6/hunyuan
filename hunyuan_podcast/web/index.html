@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>混元 AI 播客生成 (Web)</title>
+  <link rel="stylesheet" href="/web/static/style.css" />
+</head>
+<body>
+  <div class="container">
+    <h1>混元 AI 播客生成</h1>
+    
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('multi')">多角色播客</button>
+      <button class="tab" onclick="switchTab('character')">自定义角色</button>
+      <button class="tab" onclick="switchTab('deep')">主题深度</button>
+      <button class="tab" onclick="switchTab('analyze')">文本分析</button>
+    </div>
+
+    <!-- 多角色播客 -->
+    <div id="tab-multi" class="tab-content active">
+      <div class="card">
+        <h2>多角色互动播客</h2>
+        <label>播客文本</label>
+        <textarea id="text" rows="6" placeholder="支持含角色标记的文本，或普通叙述文本"></textarea>
+        <div class="row">
+          <div>
+            <label>角色1 名称</label>
+            <input id="role1" type="text" value="角色A" />
+            <label>角色1 音色文件</label>
+            <input id="voice1" type="file" accept=".wav,.mp3,.flac,.m4a" />
+          </div>
+          <div>
+            <label>角色2 名称</label>
+            <input id="role2" type="text" value="角色B" />
+            <label>角色2 音色文件</label>
+            <input id="voice2" type="file" accept=".wav,.mp3,.flac,.m4a" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>静音间隔 (毫秒)</label>
+            <input id="silence" type="text" value="800" />
+          </div>
+          <div>
+            <label>背景音乐</label>
+            <input type="text" value="自动选择" disabled style="opacity: 0.6;" />
+            <small style="display: block; margin-top: 4px; opacity: 0.7; font-size: 12px;">系统会根据播客内容自动选择背景音乐</small>
+          </div>
+        </div>
+        <button onclick="generateMultiRole()">生成播客</button>
+        <div class="log" id="log-multi">等待提交...</div>
+        <div class="progress" id="progress-multi" style="display:none;"><div class="progress-bar" id="progress-bar-multi"></div></div>
+        <audio id="player-multi" controls style="display:none;"></audio>
+      </div>
+    </div>
+
+    <!-- 自定义角色播客 -->
+    <div id="tab-character" class="tab-content">
+      <div class="card">
+        <h2>自定义角色播客</h2>
+        <label>文本素材</label>
+        <textarea id="char-text" rows="6" placeholder="输入文本素材"></textarea>
+        <label>播客主题（可选）</label>
+        <input id="char-topic" type="text" placeholder="例如：人工智能的未来" />
+        <h3>角色配置</h3>
+        <div id="characters-list"></div>
+        <button class="btn-add" onclick="addCharacter()">+ 添加角色</button>
+        <div style="margin-top: 16px;">
+          <label>静音间隔 (毫秒)</label>
+          <input id="char-silence" type="text" value="800" />
+        </div>
+        <button onclick="generateCharacter()">生成播客</button>
+        <div class="log" id="log-character">等待提交...</div>
+        <div class="progress" id="progress-character" style="display:none;"><div class="progress-bar" id="progress-bar-character"></div></div>
+        <audio id="player-character" controls style="display:none;"></audio>
+      </div>
+    </div>
+
+    <!-- 主题深度播客 -->
+    <div id="tab-deep" class="tab-content">
+      <div class="card">
+        <h2>主题深度播客</h2>
+        <label>播客主题</label>
+        <input id="deep-topic" type="text" placeholder="例如：人工智能对社会的影响" />
+        <div class="row">
+          <div>
+            <label>角色数量</label>
+            <select id="deep-num-chars">
+              <option value="1">1个角色</option>
+              <option value="2" selected>2个角色</option>
+              <option value="3">3个角色</option>
+            </select>
+          </div>
+          <div>
+            <label>深度级别</label>
+            <select id="deep-level">
+              <option value="浅层">浅层</option>
+              <option value="中等">中等</option>
+              <option value="深度" selected>深度</option>
+            </select>
+          </div>
+        </div>
+        <h3>角色音色</h3>
+        <div id="deep-voices"></div>
+        <div style="margin-top: 16px;">
+          <label>静音间隔 (毫秒)</label>
+          <input id="deep-silence" type="text" value="800" />
+        </div>
+        <button onclick="generateDeep()">生成播客</button>
+        <div class="log" id="log-deep">等待提交...</div>
+        <div class="progress" id="progress-deep" style="display:none;"><div class="progress-bar" id="progress-bar-deep"></div></div>
+        <audio id="player-deep" controls style="display:none;"></audio>
+      </div>
+    </div>
+
+    <!-- 文本分析 -->
+    <div id="tab-analyze" class="tab-content">
+      <div class="card">
+        <h2>文本分析</h2>
+        <label>文本素材</label>
+        <textarea id="analyze-text" rows="8" placeholder="输入要分析的文本素材，系统会自动推断播客名称、主题、角色设定和互动场景"></textarea>
+        <button onclick="analyzeText()">分析文本</button>
+        <div class="log" id="log-analyze">等待分析...</div>
+        <div id="analyze-result" class="analyze-result" style="display:none;"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/web/static/script.js"></script>
+</body>
+</html>
+

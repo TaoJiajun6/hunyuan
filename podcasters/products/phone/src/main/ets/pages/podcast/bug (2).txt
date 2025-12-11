@@ -1,0 +1,608 @@
+Device info:nova 12 Ultra 星耀版
+Build info:ADE-AL10 6.0.0.115(SP16C00E115R2P5)
+Fingerprint:36c7eb5674d46a8862a7789bfb4d4cebe06fb658b436451713955f263a0c73ae
+Timestamp:2025-12-10 22:00:07.140
+Module name:com.gavin.podcasters
+Version:1.0.0
+VersionCode:1000001
+PreInstalled:No
+Foreground:Yes
+Pid:20088
+Uid:20020366
+Process Memory(kB): 131661(Rss)
+Device Memory(kB): Total 11863792, Free 863712, Available 2617344
+Page switch history:
+  22:00:06.931 :enters foreground
+Reason:TypeError
+Error name:TypeError
+Error message:Cannot read property bind of undefined
+Stacktrace:
+    at anonymous phone (products/phone/src/main/ets/pages/podcast/PodcastPage.ets:667:39)
+    at updateFunc (/usr1/hmos_for_system/src/increment/sourcecode/out/generic_generic_arm_64only/general_all_phone_standard/obj/foundation/arkui/ace_engine/frameworks/bridge/declarative_frontend/stateMgmt.js:11943:1)
+    at observeComponentCreation2 (/usr1/hmos_for_system/src/increment/sourcecode/out/generic_generic_arm_64only/general_all_phone_standard/obj/foundation/arkui/ace_engine/frameworks/bridge/declarative_frontend/stateMgmt.js:11970:1)
+    at headerRightBuilder phone (products/phone/src/main/ets/pages/podcast/PodcastPage.ets:654:22)
+    at anonymous lib_widget (components/lib_widget/src/main/ets/components/NavHeaderBar.ets:54:11)
+    at ifElseBranchUpdateFunction (/usr1/hmos_for_system/src/increment/sourcecode/out/generic_generic_arm_64only/general_all_phone_standard/obj/foundation/arkui/ace_engine/frameworks/bridge/declarative_frontend/stateMgmt.js:5049:1)
+    at anonymous lib_widget (components/lib_widget/src/main/ets/components/NavHeaderBar.ets:53:36)
+    at updateFunc (/usr1/hmos_for_system/src/increment/sourcecode/out/generic_generic_arm_64only/general_all_phone_standard/obj/foundation/arkui/ace_engine/frameworks/bridge/declarative_frontend/stateMgmt.js:11943:1)
+    at observeComponentCreation2 (/usr1/hmos_for_system/src/increment/sourcecode/out/generic_generic_arm_64only/general_all_phone_standard/obj/foundation/arkui/ace_engine/frameworks/bridge/declarative_frontend/stateMgmt.js:11970:1)
+    at initialRender lib_widget (components/lib_widget/src/main/ets/components/NavHeaderBar.ets:28:12)
+    at initialRenderView (/usr1/hmos_for_system/src/increment/sourcecode/out/generic_generic_arm_64only/general_all_phone_standard/obj/foundation/arkui/ace_engine/frameworks/bridge/declarative_frontend/stateMgmt.js:11888:1)
+
+HiLog:
+12-10 22:00:06.738 20088 20088 I C02C11/appspawn/APPSPAWN: AppSpawnChild id 3678 flags:0xc
+12-10 22:00:06.738 20088 20088 I C02C02/PARAM: ResetParamSecurityLabel Fd:17
+12-10 22:00:06.740 20088 20088 I C02D33/com.gavin.podcasters/HitraceOption: FilterAppTrace com.gavin.podcasters 20088
+12-10 22:00:06.750 20088 20088 W C02C11/com.gavin.podcasters/APPSPAWN: errno:2 bind mount /system/data to /mnt/sandbox/100/com.gavin.podcasters/system/data
+12-10 22:00:06.751 20088 20088 I C02C11/com.gavin.podcasters/APPSPAWN: file /mnt/sandbox/100/com.gavin.podcasters/data/service/el1/public/hosts_user/hosts already exist
+12-10 22:00:06.751 20088 20088 W C02C11/com.gavin.podcasters/APPSPAWN: errno:2 bind mount /system/etc/hosts to /mnt/sandbox/100/com.gavin.podcasters/data/service/el1/public/hosts_user/hosts
+12-10 22:00:06.751 20088 20088 W C02C11/com.gavin.podcasters/APPSPAWN: errno:2 bind mount /vendor/lib to /mnt/sandbox/100/com.gavin.podcasters/vendor/lib
+12-10 22:00:06.753 20088 20088 W C02C11/com.gavin.podcasters/APPSPAWN: errno:2 bind mount /data/app/el1/public/aot_compiler/ark_cache/com.gavin.podcasters to /mnt/sandbox/100/com.gavin.podcasters/data/storage/ark-cache
+12-10 22:00:06.753 20088 20088 W C02C11/com.gavin.podcasters/APPSPAWN: check dir /data/app/el1/public/aot_compiler/ark_cache/com.gavin.podcasters failed,strerror:No such file or directory
+12-10 22:00:06.755 20088 20088 W C02C11/com.gavin.podcasters/APPSPAWN: errno:13 private mount to /mnt/sandbox/100/com.gavin.podcasters/data/service/el0/public/for-all-app '524288' failed
+12-10 22:00:06.757 20088 20088 W C02C11/com.gavin.podcasters/APPSPAWN: errno:2 bind mount /chip_prod/etc/passthrough to /mnt/sandbox/100/com.gavin.podcasters/chip_prod/etc/passthrough
+12-10 22:00:06.758 20088 20088 W C02C11/com.gavin.podcasters/APPSPAWN: errno:13 private mount to /mnt/sandbox/100/com.gavin.podcasters/vendor/etc/vulkan '524288' failed
+12-10 22:00:06.758 20088 20088 W C02C11/com.gavin.podcasters/APPSPAWN: errno:2 bind mount /vendor/etc/silk to /mnt/sandbox/100/com.gavin.podcasters/vendor/etc/silk
+12-10 22:00:06.758 20088 20088 W C02C11/com.gavin.podcasters/APPSPAWN: errno:2 bind mount /system/asan/lib64 to /mnt/sandbox/100/com.gavin.podcasters/system/asan/lib64
+12-10 22:00:06.758 20088 20088 W C02C11/com.gavin.podcasters/APPSPAWN: errno:2 bind mount /vendor/asan/lib64 to /mnt/sandbox/100/com.gavin.podcasters/vendor/asan/lib64
+12-10 22:00:06.758 20088 20088 W C02C11/com.gavin.podcasters/APPSPAWN: errno:13 private mount to /mnt/sandbox/100/com.gavin.podcasters/chip_prod/lib64/passthrough '524288' failed
+12-10 22:00:06.759 20088 20088 W C02C11/com.gavin.podcasters/APPSPAWN: errno:2 bind mount /system/app/ohos.global.systemres to /mnt/sandbox/100/com.gavin.podcasters/data/global/systemResources
+12-10 22:00:06.762 20088 20088 W C02C11/com.gavin.podcasters/APPSPAWN: errno:2 bind mount /data/preload/app to /mnt/sandbox/100/com.gavin.podcasters/data/preload/app
+12-10 22:00:06.768 20088 20088 I C02C11/com.gavin.podcasters/APPSPAWN: path /storage/Users/currentUser/Download/com.gavin.podcasters mode 0x3
+12-10 22:00:06.768 20088 20088 E C05A06/com.gavin.podcasters/CODE_SIGN: [XpmIoctl]:Ioctl cmd 40087803 failed: Invalid argument (ignore)
+12-10 22:00:06.774 20088 20088 I C05A05/com.gavin.podcasters/SecCompEnhanceClient: [RegisterCheckCallback]Register secComp: sessionId=43849788, seqNum=******162.
+12-10 22:00:06.776 20088 20088 I C02D0B/com.gavin.podcasters/HICHECKER: hichecker param is empty.
+12-10 22:00:06.776 20088 20088 I C04500/com.gavin.podcasters/webview: SelectWebcoreBeforeProcessRun: SelectWebcoreBeforeProcessRun for app com.gavin.podcasters.
+12-10 22:00:06.776 20088 20088 I C02C11/com.gavin.podcasters/APPSPAWN: ClearEnvAndReturnSuccess 4
+12-10 22:00:06.776 20088 20088 I C01317/com.gavin.podcasters/AppKit: [MAINTHD3029]mainthread start, pid:20088
+12-10 22:00:06.779 20088 20088 I C01719/com.gavin.podcasters/ffrt: 2:QueueMonitor:46 timeout:30000000 us
+12-10 22:00:06.783 20088 20088 I C01317/com.gavin.podcasters/AppKit: [MAINTHD420]attach
+12-10 22:00:06.787 20088 20187 I C01317/com.gavin.podcasters/AppKit: [MAINTHD814]ScheduleLaunchAbility called, ability EntryAbility, type is 1.
+12-10 22:00:06.788 20088 20088 I C03900/com.gavin.podcasters/ACE_UIContent: [69]AceForwardCompatibility [com.gavin.podcasters] force:1 newpipe:1
+12-10 22:00:06.798 20088 20088 I C01317/com.gavin.podcasters/AppKit: [MAINTHD1734]SmartGC: process is start. enable warm startup SmartGC: 0
+12-10 22:00:06.799 20088 20088 I C03F00/com.gavin.podcasters/ArkCompiler: [ecmascript] asmint: 1, aot: 0, jit: 1, baseline jit: 0, bundle name: com.gavin.podcasters
+12-10 22:00:06.799 20088 20088 I C03F00/com.gavin.podcasters/ArkCompiler: [ecmascript] multi-thread check enabled: 0
+12-10 22:00:06.799 20088 20088 I C03F00/com.gavin.podcasters/ArkCompiler: [pgo] reset pgo profiler, pgo profiler is disabled
+12-10 22:00:06.800 20088 20088 I C03F00/com.gavin.podcasters/ArkCompiler: [gc] SmartGC: startup GC restrain, phase 1 threshold: local 448MB, shared 355MB; phase 2 threshold: local 112MB, shared 145MB
+12-10 22:00:06.805 20088 20088 I C03301/com.gavin.podcasters/LIBUV: init:4800
+12-10 22:00:06.805 20088 20088 I C03301/com.gavin.podcasters/LIBUV: init:4800, backend_fd:24
+12-10 22:00:06.805 20088 20088 I C03301/com.gavin.podcasters/LIBUV: open:4800, pipefd[0]:28
+12-10 22:00:06.805 20088 20088 I C03F00/com.gavin.podcasters/ArkCompiler: [ecmascript] can not find aot file
+12-10 22:00:06.806 20088 20088 I C03F00/com.gavin.podcasters/ArkCompiler: [ecmascript] ModuleSnapshotInterface::Deserialize: /data/storage/system_optimize/ark_startup_cache/ is not exists
+12-10 22:00:06.807 20088 20193 W C01719/com.gavin.podcasters/ffrt: 3:operator():110 [-1563330168] set priority warn ret[1] eno[0]
+12-10 22:00:06.807 20088 20088 I C01E00/com.gavin.podcasters/GLOBAL_I18N: RegisterIntl: Replace buildin Intl Success.
+12-10 22:00:06.808 20088 20088 I C03F00/com.gavin.podcasters/ArkCompiler: StartServer, componentName = <private>
+12-10 22:00:06.808 20088 20088 W C01321/com.gavin.podcasters/JsRuntime: [CSM162]not Connected
+12-10 22:00:06.808 20088 20088 I C03F00/com.gavin.podcasters/ArkCompiler: [ecmascript] JSNApi::NotifyDebugMode, tid = 20088, debugApp = 1, isDebugMode = 0, instanceId = 0
+12-10 22:00:06.811 20088 20088 I C03F00/com.gavin.podcasters/ArkCompiler: [compiler] __jit_debug_register_code() is called.
+12-10 22:00:06.811 20088 20088 I C03F00/com.gavin.podcasters/ArkCompiler: [compiler] success to register stub.an to debugger.
+12-10 22:00:06.813 20088 20088 W C01E00/com.gavin.podcasters/ResourceManager: update userId, currentUserId_= 0, userId= 100
+12-10 22:00:06.814 20088 20192 I C01317/com.gavin.podcasters/AppKit: [DRH395]File existed. dir: /data/storage/el2/base/cache/rawheap
+12-10 22:00:06.817 20088 20192 I C01317/com.gavin.podcasters/AppKit: [DRH375]success to AclSetAccess, path: /data/storage/el2/base/cache/rawheap
+12-10 22:00:06.818 20088 20201 W C01653/com.gavin.podcasters/NativePreferences: LoadFromDisk: The settingXml /***/el1/***/i18*** load failed.
+12-10 22:00:06.823 20088 20088 E C01301/com.gavin.podcasters/CompatiblePolicyDeviceType: [calculateResourceType:81]deviceType is empty.
+12-10 22:00:06.823 20088 20199 I C02C03/PARAM_WATCHER: Add watcher keyPrefix persist.hdc.jdwp remoteWatcherId 3825 success
+12-10 22:00:06.823 20088 20199 I C02D13/com.gavin.podcasters/HDC_LOG: AddWatchHdcdJdwp rc:0
+12-10 22:00:06.824 20088 20088 I C01317/com.gavin.podcasters/AppKit: [application_cleaner94]ClearTempData
+12-10 22:00:06.826 20088 20199 I C02D13/com.gavin.podcasters/HDC_LOG: connect success cfd:36
+12-10 22:00:06.826 20088 20199 I C02D13/com.gavin.podcasters/HDC_LOG: Send2Jdwp send pid:20088, pp:com.gavin.podcasters, isDebug:1, msglen:32
+12-10 22:00:06.829 20088 20088 I C01317/com.gavin.podcasters/AppKit: [js_ability_stage189]AbilityStage::LoadModule
+12-10 22:00:06.829 20088 20088 W C01317/com.gavin.podcasters/AppKit: [js_ability_stage932]null stage
+12-10 22:00:06.829 20088 20088 W C01317/com.gavin.podcasters/AppKit: [js_ability_stage232]Not found AbilityStage.js
+12-10 22:00:06.830 20088 20088 I C01332/com.gavin.podcasters/UIAbility: [JUA348]called
+12-10 22:00:06.830 20088 20088 I C03F00/com.gavin.podcasters/ArkCompiler: [ecmascript] start to execute module buffer with secure memory: /data/storage/el1/bundle/phone/ets/entryability/EntryAbility.abc
+12-10 22:00:06.831 20088 20195 W C03F00/com.gavin.podcasters/ArkCompiler: [ecmascript] set label failed! level: s1, file: /data/storage/ark-profile/rt_phone.ap
+12-10 22:00:06.831 20088 20195 I C03F00/com.gavin.podcasters/ArkCompiler: [pgo] will save profiler to file /data/storage/ark-profile/rt_phone.ap
+12-10 22:00:06.837 20088 20088 I C03F01/com.gavin.podcasters/NAPI: [RegisterByBuffer] Module name is 'arkui.StateManagement'
+12-10 22:00:06.839 20088 20088 I C03F01/com.gavin.podcasters/NAPI: [RegisterByBuffer] Module name is 'arkui.node'
+12-10 22:00:06.852 20088 20088 W C02D07/com.gavin.podcasters/Verify: invalid configName=
+12-10 22:00:06.852 20088 20088 I C02D07/com.gavin.podcasters/ObserverMgr: succ to register application state callback
+12-10 22:00:06.854 20088 20088 I C04707/com.gavin.podcasters/HaAppEvent: ==============HaAppEventInit====================
+12-10 22:00:06.854 20088 20088 I C02D07/com.gavin.podcasters/ModuleLoader: succ to load module=/system/lib64/libha_app_event.z.so.
+12-10 22:00:06.855 20088 20204 W C01650/com.gavin.podcasters/Rdb: RdbStoreManager[IsConfigInvalidChanged]: no bundleName
+12-10 22:00:06.856 20088 20204 E C01650/com.gavin.podcasters/Rdb: RdbStoreManager[IsSupportSilentFromService]: GetRdbService failed, err is 27394049.
+12-10 22:00:06.857 20088 20204 I C01630/com.gavin.podcasters/DistributedDB: [TimeHelper] init
+12-10 22:00:06.857 20088 20204 I C01630/com.gavin.podcasters/DistributedDB: [TimeHelper] init
+12-10 22:00:06.858 20088 20204 I C01650/com.gavin.podcasters/Rdb: Config[Log]: Error(283) recovered 86 frames from WAL file /dat***/sto***/e**/bas***/fil***/hia***ent/dat***ses/app***.db-wal 
+12-10 22:00:06.861 20088 20204 I C01650/com.gavin.podcasters/Rdb: ConnectionPool[Create]: code:0 app[:] area[el2] cfg[0,0,0,0,1,0,0]app***.db:<DB,0x1ccde5,45056,100660><DWR,0x1cf993,12288,100660><SHM,0x1d470d,32768,100660><WAL,0x1d33e2,428512,100660>
+12-10 22:00:06.862 20088 20204 I C02D07/com.gavin.podcasters/Store: create db store successfully
+12-10 22:00:06.863 20088 20204 I C02D07/com.gavin.podcasters/ObserverDao: succ to query observer seq=1, name=ha_app_event, hash=1915457907267372477
+12-10 22:00:06.866 20088 20088 I C02D07/com.gavin.podcasters/ObserverMgr: register processor=1 successfully
+12-10 22:00:06.870 20088 20088 E C01F10/com.gavin.podcasters/CallManagerApi: [RegisterCallBack-(call_manager_proxy.cpp:161)] register callback to call manager service failed,result: 83886109
+12-10 22:00:06.876 20088 20088 I C015B0/com.gavin.podcasters/NetMgrSubSystem: newId = 1, id = 2
+12-10 22:00:06.879 20088 20088 I C015B0/com.gavin.podcasters/NETSTACK: [napi_utils.cpp:759] newId = 1, id = 2
+12-10 22:00:06.882 20088 20088 I C015B0/com.gavin.podcasters/NETSTACK: [http_module.cpp:64] IsAtomicService bundleName is com.gavin.podcasters, isAtomicService is 0
+12-10 22:00:06.883 20088 20208 W C02D07/com.gavin.podcasters/Verify: invalid configName=
+12-10 22:00:06.883 20088 20208 I C02D07/com.gavin.podcasters/ObserverMgr: register processor=1 exit
+12-10 22:00:06.883 20088 20088 I C03F01/com.gavin.podcasters/NAPI: [RegisterByBuffer] Module name is 'file.photoAccessHelper'
+12-10 22:00:06.885 20088 20088 W C03F01/com.gavin.podcasters/NAPI: [FindNativeModuleByDisk] mismatch: moduleName is file.photoAccessHelperNative, name is file.photoAccessHelper
+12-10 22:00:06.892 20088 20088 I C01D10/com.gavin.podcasters/accessibility_napi: [(AccessibleAbilityConstructorStyle:1240)]
+12-10 22:00:06.892 20088 20088 E C01D02/com.gavin.podcasters/accessibility_asacfwk: [(AccessibilitySystemAbilityClientImpl:57)]accessibility service is ready.
+12-10 22:00:06.893 20088 20088 I C02C03/PARAM_WATCHER: Add watcher keyPrefix accessibility.config.ready remoteWatcherId 3825 success
+12-10 22:00:06.893 20088 20088 I C01D10/com.gavin.podcasters/accessibility_napi: [(Init:283)]-----Init end------
+12-10 22:00:06.897 20088 20088 I C03F01/com.gavin.podcasters/NAPI: [RegisterByBuffer] Module name is 'arkui.theme'
+12-10 22:00:06.898 20088 20088 I C01320/com.gavin.podcasters/JsEnv: [js_environment290]timing: 67
+12-10 22:00:06.898 20088 20088 I C01320/com.gavin.podcasters/JSENV: Callee constructor is OK string
+12-10 22:00:06.898 20088 20088 I C01320/com.gavin.podcasters/JSENV: Ability::constructor callee is object [object Object]
+12-10 22:00:06.899 20088 20088 I C01332/com.gavin.podcasters/UIAbility: [JUA393]End
+12-10 22:00:06.899 20088 20088 I C01332/com.gavin.podcasters/UIAbility: [ui_ability_thread169]Lifecycle:Attach
+12-10 22:00:06.904 20088 20088 I C01317/com.gavin.podcasters/AppKit: [MAINTHD2673]called
+12-10 22:00:06.904 20088 20088 I C03F00/com.gavin.podcasters/ArkCompiler: [gc] app is not inBackground
+12-10 22:00:06.907 20088 20189 I C01332/com.gavin.podcasters/UIAbility: [ui_ability_thread317]name:EntryAbility,targeState:5,isNewWant:0
+12-10 22:00:06.907 20088 20088 I C01332/com.gavin.podcasters/UIAbility: [ui_ability_thread236]Lifecycle:name EntryAbility
+12-10 22:00:06.907 20088 20088 I C04201/com.gavin.podcasters/DMS: AddDisplayIdFromAms: abilityToken and display[0] has been added.
+12-10 22:00:06.909 20088 20088 I C01332/com.gavin.podcasters/UIAbility: [JUA1853]JsUIAbility call js, name: onCreate
+12-10 22:00:06.909 20088 20088 I A0FF00/com.gavin.podcasters/AIOffice: [EntryAbility], Ability onCreate
+12-10 22:00:06.909 20088 20088 I C01332/com.gavin.podcasters/UIAbility: [JUA1898]end, name: onCreate, time: 0
+12-10 22:00:06.909 20088 20088 E C01332/com.gavin.podcasters/UIAbility: [ui_ability_impl305]hasSaveData_: false
+12-10 22:00:06.909 20088 20088 W C01332/com.gavin.podcasters/UIAbility: [JUA1088]formatRegex: []
+12-10 22:00:06.909 20088 20088 I C04202/com.gavin.podcasters/WMSMain: Init: WindowScene with window session!
+12-10 22:00:06.909 20088 20088 I C04202/com.gavin.podcasters/WMSMain: Init: set isModuleAbilityHookEnd
+12-10 22:00:06.910 20088 20088 I C04204/com.gavin.podcasters/WMSScb: RS multi-instance enabled: 1, deviceType phone
+12-10 22:00:06.910 20088 20088 I C01406/com.gavin.podcasters/OHOS::RS: multi-instance, create RSUIContextManager, isMultiInstanceOpen_ 1
+12-10 22:00:06.910 20088 20088 I C04204/com.gavin.podcasters/WMSScb: InitRSUIDirector: Create RSUIDirector: RSUIDirector's RSUIContext [token: 86277303042049, tid: 20088], rsUIContext: RSUIContext is null
+12-10 22:00:06.912 20088 20088 I C01406/com.gavin.podcasters/OHOS::RS: RSLogManager init log flag: 0x0(0)
+12-10 22:00:06.912 20088 20088 I C01406/com.gavin.podcasters/OHOS::RS: RSFrameRateLinker::Create id: 86277303042048
+12-10 22:00:06.912 20088 20088 I C04202/com.gavin.podcasters/WMSMain: VsyncStation: id 86277303042050 created
+12-10 22:00:06.912 20088 20088 I C04200/com.gavin.podcasters/WindowSceneSessionImpl: WindowSceneSessionImpl: [WMSCom] Constructor podcasters0
+12-10 22:00:06.912 20088 20088 E C04200/com.gavin.podcasters/WMS: SetWindowType: permission denied!
+12-10 22:00:06.912 20088 20088 I C0420A/com.gavin.podcasters/WMSLife: Create: Window Create name:podcasters0, state:0, mode:0
+12-10 22:00:06.913 20088 20088 I C0420A/com.gavin.podcasters/WMSLife: Create: SetIsAbilityHookOff 0
+12-10 22:00:06.913 20088 20088 W C0420A/com.gavin.podcasters/WMSLife: IsWindowSessionInvalid: already destroyed or not created! id: 0 state_: 0
+12-10 22:00:06.913 20088 20088 W C04200/com.gavin.podcasters/WindowSceneSessionImpl: AdjustWindowAnimationFlag: session invalid!
+12-10 22:00:06.913 20088 20088 I C04200/com.gavin.podcasters/WindowSceneSessionImpl: Remove window flag WINDOW_FLAG_SHOW_WHEN_LOCKED
+12-10 22:00:06.913 20088 20088 I C0420A/com.gavin.podcasters/WMSLife: Connect: in
+12-10 22:00:06.914 20088 20189 I C04208/com.gavin.podcasters/WMSLayout: NotifyAppHookWindowInfoUpdated: in
+12-10 22:00:06.915 20088 20088 I C04208/com.gavin.podcasters/WMSLayout: Connect: updateRect when connect.preRect:[0,0,0,0]rect:[0,0,1224,2776]
+12-10 22:00:06.915 20088 20088 I C0420A/com.gavin.podcasters/WMSLife: Connect: Window Connect [name:podcasters0, id:411, type:1], ret:0
+12-10 22:00:06.916 20088 20189 I C04208/com.gavin.podcasters/WMSLayout: SetAppHookWindowInfo: Id:411, preHookWindowInfo:[enableHookWindow: false, widthHookRatio: 1.000000], newHookWindowInfo:[enableHookWindow: false, widthHookRatio: 1.000000]
+12-10 22:00:06.916 20088 20189 I C0421D/com.gavin.podcasters/WMSRotation: SetCurrentRotation: currentRotation: 0
+12-10 22:00:06.916 20088 20088 I C04208/com.gavin.podcasters/WMSLayout: NotifyWindowStatusChange: id:411, windowMode:1, windowStatus:1, lastWindowStatus:0, skipRedundantWindowStatusNotifications:0
+12-10 22:00:06.916 20088 20189 I C04208/com.gavin.podcasters/WMSLayout: UpdateRect: id:411 name:podcasters0 rect:[0 0 1224 2776]->[0 0 1224 2776] reason:23 displayId:0
+12-10 22:00:06.916 20088 20189 W C04208/com.gavin.podcasters/WMSLayout: NotifySingleHandTransformChange: id:411, uiContent is nullptr
+12-10 22:00:06.916 20088 20088 I C04208/com.gavin.podcasters/WMSLayout: SetConfigWindowLimitsVP: id:411, windowLimits:[0 0 0 0 0.000000 0.000000 1.000000]
+12-10 22:00:06.916 20088 20088 I C04208/com.gavin.podcasters/WMSLayout: GetSystemSizeLimits: min[1080,810] max[6480,6480] configMax:1920 vpr:3.375000
+12-10 22:00:06.917 20088 20088 I C0421A/com.gavin.podcasters/WMSLayoutPc: GetSupportedWindowModesConfiguration: winId: 411, windowModeSupportType: 15
+12-10 22:00:06.917 20088 20088 I C0420F/com.gavin.podcasters/WMSRecover: RegisterSessionRecoverCallbackFunc: persistentId=411
+12-10 22:00:06.917 20088 20088 I C04209/com.gavin.podcasters/WMSImms: UpdateDefaultStatusBarColor: win 411 type 1 hasDarkRes 1 colorMode light
+12-10 22:00:06.917 20088 20088 I C04209/com.gavin.podcasters/WMSImms: SetSpecificBarProperty: win [411 podcasters0] type 2108 1 ffffff ff000000 0 4
+12-10 22:00:06.917 20088 20088 I C04200/com.gavin.podcasters/WMS: IsMainHandlerAvailable: id:411, isAvailable:1
+12-10 22:00:06.917 20088 20088 I C04200/com.gavin.podcasters/WMS: IsMainHandlerAvailable: id:411, isAvailable:1
+12-10 22:00:06.917 20088 20088 I C02800/com.gavin.podcasters/InputManagerImpl: [][SetWindowInputEventConsumer:364] enter
+12-10 22:00:06.920 20088 20088 I C02800/com.gavin.podcasters/MMIClient: [][OnConnected:267] Connection to server succeeded, fd:56
+12-10 22:00:06.920 20088 20088 I C02800/com.gavin.podcasters/MMIClient: [][AddFdListener:166] Server was listening
+12-10 22:00:06.920 20088 20088 I C02800/com.gavin.podcasters/MMIClient: [][StartEventRunner:127] reuse current event handler, thread name:
+12-10 22:00:06.920 20088 20088 I C02800/com.gavin.podcasters/MMIClient: [][StartEventRunner:130] File fd is in listening
+12-10 22:00:06.920 20088 20088 I C02800/com.gavin.podcasters/InputManagerImpl: [][SetWindowInputEventConsumer] leave
+12-10 22:00:06.920 20088 20088 I C0420C/com.gavin.podcasters/WMSEvent: AddInputWindow: SetWindowInputEventConsumer success, wid:411
+12-10 22:00:06.920 20088 20088 I C0420C/com.gavin.podcasters/WMSEvent: LoadGameController: in
+12-10 22:00:06.922 20088 20088 I C04732/com.gavin.podcasters/GameController: [(RegisterEntryModule:24)]begin load gamecontroller_event
+12-10 22:00:06.922 20088 20088 I C04732/com.gavin.podcasters/GameController: [(StartInputToTouch:55)]Begin StartInputToTouch
+12-10 22:00:06.922 20088 20088 I C0420C/com.gavin.podcasters/WMSEvent: LoadGameController: dlopen GameController success
+12-10 22:00:06.922 20088 20088 I C04217/com.gavin.podcasters/WMSAttribute: ConnectServer: start connect
+12-10 22:00:06.923 20088 20088 I C04217/com.gavin.podcasters/WMSAttribute: ConnectServer: end connect
+12-10 22:00:06.923 20088 20088 W C04217/com.gavin.podcasters/WMSAttribute: RegisterGetWMSWindowListCallback: callback has registered
+12-10 22:00:06.923 20088 20088 I C04217/com.gavin.podcasters/WMSAttribute: RegisterGetWMSWindowListCallback: winId: 411
+12-10 22:00:06.923 20088 20088 I C04217/com.gavin.podcasters/WMSAttribute: UpdateColorMode: winId: 411, colorMode: light
+12-10 22:00:06.923 20088 20088 I C04217/com.gavin.podcasters/WMSAttribute: UpdateColorMode: winId: 411, colorMode: light, hasDarkRes: 1
+12-10 22:00:06.923 20088 20088 I C0421C/com.gavin.podcasters/WMSCompat: SetPcAppInpadSpecificSystemBarInvisible: isPcAppInpadSpecificSystemBarInvisible: 0
+12-10 22:00:06.923 20088 20088 I C0421C/com.gavin.podcasters/WMSCompat: SetPcAppInpadOrientationLandscape: isPcAppInpadOrientationLandscape: 0
+12-10 22:00:06.923 20088 20088 E C04200/com.gavin.podcasters/WMS: singleton_container.cpp GetSingleton: cant get OHOS::Rosen::WindowInfoReporter
+12-10 22:00:06.923 20088 20088 I C01332/com.gavin.podcasters/UIAbility: [JUA1853]JsUIAbility call js, name: onWindowStageCreate
+12-10 22:00:06.923 20088 20088 I A0FF00/com.gavin.podcasters/AIOffice: [EntryAbility], Ability onWindowStageCreate
+12-10 22:00:06.924 20088 20088 I C04200/com.gavin.podcasters/JsWindow: CreateJsWindow podcasters0
+12-10 22:00:06.924 20088 20088 I C0420A/com.gavin.podcasters/WMSLife: JsWindow: window: podcasters0, ctorCnt: 1
+12-10 22:00:06.925 20088 20088 I C0420A/com.gavin.podcasters/WMSLife: CreateJsWindowObject: Add window podcasters0
+12-10 22:00:06.925 20088 20088 I C04200/com.gavin.podcasters/JsWindowStage: LoadContent: [NAPI]
+12-10 22:00:06.925 20088 20088 I C01332/com.gavin.podcasters/UIAbility: [JUA1898]end, name: onWindowStageCreate, time: 1
+12-10 22:00:06.925 20088 20088 I C01332/com.gavin.podcasters/UIAbility: [JUA1853]JsUIAbility call js, name: onWillForeground
+12-10 22:00:06.925 20088 20088 I C01332/com.gavin.podcasters/UIAbility: [JUA1898]end, name: onWillForeground, time: 0
+12-10 22:00:06.925 20088 20088 I C04202/com.gavin.podcasters/WMSMain: GoForeground: reason: 4
+12-10 22:00:06.925 20088 20088 I C0420A/com.gavin.podcasters/WMSLife: Show: Window show [name: podcasters0, id: 411, type: 1], reason: 4, state:1, requestState:1
+12-10 22:00:06.925 20088 20088 I C04208/com.gavin.podcasters/WMSLayout: GetSystemSizeLimits: min[1080,810] max[6480,6480] configMax:1920 vpr:3.375000
+12-10 22:00:06.925 20088 20088 I C04208/com.gavin.podcasters/WMSLayout: UpdateNewSize: fullscreen or compatible mode could not update new size, Id: 411
+12-10 22:00:06.926 20088 20088 I C04217/com.gavin.podcasters/WMSAttribute: IsSystemDensityChanged: windowId: 411, lastDensity: -1.000000, currDensity: 3.375000
+12-10 22:00:06.926 20088 20088 W C04200/com.gavin.podcasters/WindowSessionImpl: UpdateViewportConfig: uiContent is null!
+12-10 22:00:06.927 20088 20088 I C01332/com.gavin.podcasters/UIAbility: [ui_ability_impl430]wnd call, AfterForeground
+12-10 22:00:06.927 20088 20088 W C0420A/com.gavin.podcasters/WMSLife: GetAttachStateSyncResult: lifecycleCallback is null
+12-10 22:00:06.927 20088 20088 I C01406/com.gavin.podcasters/OHOS::RS: RSFrameRateLinker::Create id: 86277303042049
+12-10 22:00:06.928 20088 20088 I C01706/com.gavin.podcasters/RsFrameReportExt: RsFrameReportExt:[LoadLibrary] load library success!
+12-10 22:00:06.928 20088 20088 I C01706/com.gavin.podcasters/RsFrameReportExt: RsFrameReportExt:[Init] dlopen libframe_ui_intf.so success!
+12-10 22:00:06.930 20088 20088 I C01706/com.gavin.podcasters/ueaClient-FrameUiIntf: [Init]:ret:1, inited:1
+12-10 22:00:06.931 20088 20088 I C04217/com.gavin.podcasters/WMSAttribute: InitWaterfallMode: winId: 411
+12-10 22:00:06.931 20088 20088 I C04217/com.gavin.podcasters/WMSAttribute: NotifyWaterfallModeChange: winId: 411, waterfall: 0, stat: 2
+12-10 22:00:06.931 20088 20088 I C0420A/com.gavin.podcasters/WMSLife: NotifyAfterDidForeground: reason: 4
+12-10 22:00:06.931 20088 20088 I C04202/com.gavin.podcasters/WMSMain: NotifyFreeMultiWindowModeResume: IsPcMode 0, isColdStart 1
+12-10 22:00:06.931 20088 20088 I C0420A/com.gavin.podcasters/WMSLife: Show: Window show success [name:podcasters0, id:411, type:1]
+12-10 22:00:06.931 20088 20088 I C04208/com.gavin.podcasters/WMSLayout: NotifyWindowStatusChange: id:411, windowMode:1, windowStatus:1, lastWindowStatus:1, skipRedundantWindowStatusNotifications:0
+12-10 22:00:06.931 20088 20088 I C04208/com.gavin.podcasters/WMSLayout: NotifyWindowStatusDidChange: Id:411, WindowMode:1, windowStatus:1, lastWindowStatus:0, listenerSize:0, rect:[0 0 1224 2776]
+12-10 22:00:06.931 20088 20088 W C04201/com.gavin.podcasters/DMS: OnDisplayInfoChange: data is not changed.
+12-10 22:00:06.931 20088 20088 I C01332/com.gavin.podcasters/UIAbility: [JUA1853]JsUIAbility call js, name: onForeground
+12-10 22:00:06.931 20088 20088 I C01332/com.gavin.podcasters/UIAbility: [JUA1898]end, name: onForeground, time: 1
+12-10 22:00:06.932 20088 20088 I C0420A/com.gavin.podcasters/WMSLife: NotifyAfterDidForeground execute
+12-10 22:00:06.932 20088 20088 I C01332/com.gavin.podcasters/UIAbility: [JUA1853]JsUIAbility call js, name: onDidForeground
+12-10 22:00:06.932 20088 20088 I C01332/com.gavin.podcasters/UIAbility: [JUA1898]end, name: onDidForeground, time: 0
+12-10 22:00:06.932 20088 20088 I C04202/com.gavin.podcasters/WMSMain: GoResume: in
+12-10 22:00:06.932 20088 20088 I C0420A/com.gavin.podcasters/WMSLife: Resume: in, isColdStart: 1, isDidForeground: 0
+12-10 22:00:06.932 20088 20088 I C0420A/com.gavin.podcasters/WMSLife: NotifyAfterLifecycleResumed: in
+12-10 22:00:06.932 20088 20088 I C04209/com.gavin.podcasters/WMSImms: SetLayoutFullScreenByApiVersion: win 411 status 1
+12-10 22:00:06.934 20088 20088 I C04209/com.gavin.podcasters/WMSImms: GetAvoidAreaByType: win [411 podcasters0] type 0 times 1 area top [0 0 1224 148] 
+12-10 22:00:06.934 20088 20187 I C04207/com.gavin.podcasters/WMSFocus: UpdateFocus: focus: 1, id: 411
+12-10 22:00:06.934 20088 20088 I C04209/com.gavin.podcasters/WMSImms: GetAvoidAreaByType: win [411 podcasters0] type 4 times 2 area bottom [397 2682 430 94] 
+12-10 22:00:06.934 20088 20088 I C04209/com.gavin.podcasters/WMSImms: RegisterAvoidAreaChangeListener: win 411
+12-10 22:00:06.935 20088 20088 E C04201/com.gavin.podcasters/IMockSessionManager: [nodict]Read result failed, code is: 3.
+12-10 22:00:06.936 20088 20088 E C04201/com.gavin.podcasters/IMockSessionManager: [nodict]Read result failed, code is: 5.
+12-10 22:00:06.939 20088 20187 I C04207/com.gavin.podcasters/WMSFocus: NotifyHighlightChange: windowId: 411, isHighlight: 1,
+12-10 22:00:06.940 20088 20189 W C04208/com.gavin.podcasters/WMSLayout: NotifySingleHandTransformChange: id:411, uiContent is nullptr
+12-10 22:00:06.940 20088 20186 I C04208/com.gavin.podcasters/WMSLayout: UpdateRect: id:411 name:podcasters0 rect:[0 0 1224 2776]->[0 0 1224 2776] reason:23 displayId:0
+12-10 22:00:06.940 20088 20088 I C04200/com.gavin.podcasters/WMS: RegisterListener: [avoidAreaChange, 1]
+12-10 22:00:06.940 20088 20088 I C04200/com.gavin.podcasters/WMS: OnRegisterWindowCallback: Id=411, type=avoidAreaChange
+12-10 22:00:06.941 20088 20088 I C0420A/com.gavin.podcasters/WMSLife: SetUIContentInner: pages/Index, state:2, persistentId: 411
+12-10 22:00:06.941 20088 20088 I C0420A/com.gavin.podcasters/WMSLife: SetUIContentComplete: persistentId=411
+12-10 22:00:06.941 20088 20088 I C03900/com.gavin.podcasters/Ace: [(-1:-1:undefined)] CreateUIContent.
+12-10 22:00:06.941 20088 20088 I C03934/com.gavin.podcasters/AceUIEvent: [(-1:-1:undefined)] report ace loaded
+12-10 22:00:06.941 20088 20088 I C04707/com.gavin.podcasters/HaAceEngine: OnAceLoaded end
+12-10 22:00:06.942 20088 20088 W C0391F/com.gavin.podcasters/AceImage: [(-2:-1:undefined)] mkdir cache file path failed.
+12-10 22:00:06.942 20088 20088 I C03900/com.gavin.podcasters/Ace: [(-2:-1:undefined)] Init RenderService UniRender Type:0
+12-10 22:00:06.942 20088 20088 I C03900/com.gavin.podcasters/Ace: [(-2:-1:undefined)] [com.gavin.podcasters][phone][-1]: UIContent: apiCompatibleVersion: 50005017, apiTargetVersion: 50005017, and apiReleaseType: Release, useNewPipe: 1
+12-10 22:00:06.942 20088 20213 I C04732/com.gavin.podcasters/GameController: [(GetSelfBundleName:49)]The current bundleName [com.gavin.podcasters]. version [1.0.0]
+12-10 22:00:06.942 20088 20213 I C04732/com.gavin.podcasters/GameController: [(IsCommonApp:87)]The [com.gavin.podcasters] is a common app.
+12-10 22:00:06.943 20088 20088 I C02C03/PARAM_WATCHER: Add watcher keyPrefix persist.sys.arkui.animationscale remoteWatcherId 3825 success
+12-10 22:00:06.943 20088 20088 E C03900/com.gavin.podcasters/Ace: [(-2:-1:undefined)] ConfigXMLParserBase ParseInternalWithBundleName failed
+12-10 22:00:06.943 20088 20088 W C03900/com.gavin.podcasters/Ace: [(-2:-1:undefined)] ArkUiFeatureParamManager failed to parse xml file
+12-10 22:00:06.943 20088 20088 I C03900/com.gavin.podcasters/Ace: [(-2:-1:undefined)] SetLocale language tag: zh-CN, select language: zh-CN
+12-10 22:00:06.943 20088 20088 I C03900/com.gavin.podcasters/Ace: [(-2:-1:undefined)] [com.gavin.podcasters][phone][-1]: SetLanguage: zh, colorMode: light, deviceAccess: 0
+12-10 22:00:06.943 20088 20088 I C03900/com.gavin.podcasters/Ace: [(-2:-1:undefined)] [com.gavin.podcasters][phone][-1]: Initialize UIContent isModelJson:true
+12-10 22:00:06.946 20088 20088 I C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] SetHapPath, Use hap path to load resource
+12-10 22:00:06.946 20088 20088 I C04217/com.gavin.podcasters/WMSAttribute: RegisterWaterfallModeChangeListener: winId: 411
+12-10 22:00:06.947 20088 20088 I C04200/com.gavin.podcasters/WMS: GetSurfaceNode: name:podcasters0, id:411
+12-10 22:00:06.947 20088 20088 I C04200/com.gavin.podcasters/WMS: GetSurfaceNode: name:podcasters0, id:411
+12-10 22:00:06.947 20088 20088 I C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] SetRSSurfaceNode 86277303042050 with rs multi
+12-10 22:00:06.948 20088 20088 W C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] Invalid config:zh_CN-long-notround-vertical-light-phone-xxhdpi
+12-10 22:00:06.949 20088 20088 I C01406/com.gavin.podcasters/OHOS::RS: RSSurfaceNode::SetAbilityState, surfaceNodeId:[86277303042050], ability state: background
+12-10 22:00:06.949 20088 20088 I C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] set translateManager to pipeline, instanceId:100000
+12-10 22:00:06.949 20088 20088 I C0421D/com.gavin.podcasters/WMSRotation: RegisterOrientationChangeListener: in
+12-10 22:00:06.949 20088 20088 I C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] AddPersistAfterLayoutTask size: 1
+12-10 22:00:06.949 20088 20088 I C03919/com.gavin.podcasters/AceInputTracking: [(100000:100000:scope)] Debug touch pass mode 0
+12-10 22:00:06.952 20088 20088 W C03F00/MUSL-LDSO: load absolute_path /system/lib64/libtransform_interaction_ext.z.so: check ns accessible failed namespace=ndk.
+12-10 22:00:06.952 20088 20088 W C03F00/MUSL-LDSO: load /system/lib64/libtransform_interaction_ext.z.so failed, namespace=ndk no inherits, errno=2
+12-10 22:00:06.952 20088 20088 W C03F00/MUSL-LDSO: load /system/lib64/libtransform_interaction_ext.z.so failed, namespace=default, errno=2
+12-10 22:00:06.952 20088 20088 W C03F00/MUSL-LDSO: dlopen_impl load library header failed for /system/lib64/libtransform_interaction_ext.z.so
+12-10 22:00:06.952 20088 20088 E C03934/com.gavin.podcasters/AceUIEvent: [(100000:100000:scope)] AceTransform load failed: Error loading shared library /system/lib64/libtransform_interaction_ext.z.so: No such file or directory
+12-10 22:00:06.952 20088 20088 I C03937/com.gavin.podcasters/AceResource: [(100000:100000:scope)] ResourceAdapter UpdateResConfig with colorMode light
+12-10 22:00:06.952 20088 20088 W C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] not found systemTheme in HapModuleInfo, loading default OHOS_THEME
+12-10 22:00:06.952 20088 20213 I C04732/com.gavin.podcasters/GameController: [(ReadJsonFromFile:223)]load game_support_key_mapping.json file success.
+12-10 22:00:06.952 20088 20088 I C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] Cannot Get File List from resources/styles/
+12-10 22:00:06.952 20088 20088 W C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] GetAsset failed: resources/styles/default.json
+12-10 22:00:06.952 20088 20213 I C04732/com.gavin.podcasters/GameController: [(DoAsyncTask:69)]The app does not support input-to-touch feature.
+12-10 22:00:06.960 20088 20088 I C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] root node OnAttachToFrameNode, id:0
+12-10 22:00:06.960 20088 20088 I C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] Rosenwindow set root, rsId:86277303042051
+12-10 22:00:06.960 20088 20088 I C02220/com.gavin.podcasters/IntentionClient: in Connect, enter
+12-10 22:00:06.960 20088 20088 I C02220/com.gavin.podcasters/IntentionClient: in Connect, Connecting IntentionService success
+12-10 22:00:06.960 20088 20088 I C02220/com.gavin.podcasters/IntentionClient: in Connect, leave
+12-10 22:00:06.961 20088 20088 I C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] focusWindowId: 0, realHostWindowId: 0
+12-10 22:00:06.961 20088 20088 I C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] [com.gavin.podcasters][phone][100000]: window focus
+12-10 22:00:06.962 20088 20088 I C02C03/PARAM_WATCHER: Add watcher keyPrefix debug.graphic.frame remoteWatcherId 3825 success
+12-10 22:00:06.962 20088 20088 E C03D00/cpu_boost: dev/flo open failed.
+12-10 22:00:06.962 20088 20088 I C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] font path exist
+12-10 22:00:06.975 20088 20088 I C0390C/com.gavin.podcasters/AceFont: [(100000:100000:scope)] LoadThemeFont:luomofengshenshixiankaishu.ttf
+12-10 22:00:06.983 20088 20088 I C01406/com.gavin.podcasters/OHOS::RS: RSInterfaces:Succeed in reg typeface, family name:LMFSSXKS, uniqueid:149
+12-10 22:00:07.012 20088 20088 I C01408/com.gavin.podcasters/Text: RegisterTypeface: Succeed in registering typeface, family name: OhosThemeFont, hash: 1304385353
+12-10 22:00:07.015 20088 20088 I C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] ArkUIInvisibleFreeze: 0
+12-10 22:00:07.015 20088 20088 I C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] [com.gavin.podcasters][phone][100000]: SetMinPlatformVersion is 50005017
+12-10 22:00:07.015 20088 20088 I C04209/com.gavin.podcasters/WMSImms: RegisterAvoidAreaChangeListener: win 411
+12-10 22:00:07.015 20088 20088 I C04209/com.gavin.podcasters/WMSImms: GetAvoidAreaByType: win [411 podcasters0] type 0 times 3 area top [0 0 1224 148] 
+12-10 22:00:07.016 20088 20088 I C04209/com.gavin.podcasters/WMSImms: GetAvoidAreaByType: win [411 podcasters0] type 1 times 4 area top [475 48 274 86] 
+12-10 22:00:07.016 20088 20088 I C04209/com.gavin.podcasters/WMSImms: GetAvoidAreaByType: win [411 podcasters0] type 4 times 5 area bottom [397 2682 430 94] 
+12-10 22:00:07.016 20088 20088 I C03917/com.gavin.podcasters/AceSafeArea: [(100000:100000:scope)] InitializeSafeArea systemInsets:SafeAreaInsets left_: [start: 0, end: 0], top_: [start: 0, end: 148], right_: [start: 0, end: 0], bottom_: [start: 0, end: 0], cutoutInsets:SafeAreaInsets left_: [start: 0, end: 0], top_: [start: 48, end: 134], right_: [start: 0, end: 0], bottom_: [start: 0, end: 0], navInsets:SafeAreaInsets left_: [start: 0, end: 0], top_: [start: 0, end: 0], right_: [start: 0, end: 0], bottom_: [start: 2682, end: 2776]
+12-10 22:00:07.017 20088 20088 I C0394E/com.gavin.podcasters/AceWindow: [(100000:100000:scope)] Initialize displayId: 0, availableRect: [0, 0, 1224, 2776]
+12-10 22:00:07.018 20088 20088 I C02504/com.gavin.podcasters/thp_extra: GetStringFromFile[73]ThpExtraRunCommand fileData={
+12-10 22:00:07.018 20088 20088 I C02504/com.gavin.podcasters/thp_extra:     "hotzone" : {
+12-10 22:00:07.018 20088 20088 I C02504/com.gavin.podcasters/thp_extra:         "enable" : true,
+12-10 22:00:07.018 20088 20088 I C02504/com.gavin.podcasters/thp_extra:         "height" : 250,
+12-10 22:00:07.018 20088 20088 I C02504/com.gavin.podcasters/thp_extra:         "width" : 250
+12-10 22:00:07.018 20088 20088 I C02504/com.gavin.podcasters/thp_extra:     }
+12-10 22:00:07.018 20088 20088 I C02504/com.gavin.podcasters/thp_extra: }
+12-10 22:00:07.018 20088 20088 I C03900/com.gavin.podcasters/Ace: [(-2:100000:singleton)] [com.gavin.podcasters][phone][100000]: Initialize: pages/Index
+12-10 22:00:07.018 20088 20088 I C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] RunPage:pages/Index
+12-10 22:00:07.018 20088 20088 W C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] GetAsset failed: manifest.json
+12-10 22:00:07.018 20088 20204 I C03951/com.gavin.podcasters/InputKeyFlow: [(-1:100000:singleton)] Subscribe touch.events.pass.through Event
+12-10 22:00:07.018 20088 20088 I C04200/com.gavin.podcasters/WMS: InitUIContent: [0, 0]
+12-10 22:00:07.018 20088 20088 I C04208/com.gavin.podcasters/WMSLayout: SetUIContentInner: single hand, id:411, posX:0, posY:0, scaleX:1.000000, scaleY:1.000000
+12-10 22:00:07.018 20088 20088 I C04209/com.gavin.podcasters/WMSImms: SetLayoutFullScreenByApiVersion: win 411 status 1
+12-10 22:00:07.018 20088 20088 I C03917/com.gavin.podcasters/AceSafeArea: [(-2:100000:singleton)] [com.gavin.podcasters][phone][100000]: SetIgnoreViewSafeArea:1
+12-10 22:00:07.018 20088 20088 I C03917/com.gavin.podcasters/AceSafeArea: [(100000:100000:scope)] SetIgnoreSafeArea 1
+12-10 22:00:07.018 20088 20088 I C04219/com.gavin.podcasters/WMSDecor: UpdateDecorEnable: decorVisible:0, id: 411
+12-10 22:00:07.018 20088 20088 I C03900/com.gavin.podcasters/Ace: [(-2:100000:singleton)] [com.gavin.podcasters][phone][100000]: UpdateWindowVisible: 0, hasDecor: 0
+12-10 22:00:07.018 20088 20088 I C03900/com.gavin.podcasters/Ace: [(-2:100000:singleton)] [com.gavin.podcasters][phone][100000]: NotifyWindowMode mode = 1
+12-10 22:00:07.019 20088 20088 I C03900/com.gavin.podcasters/Ace: [(-2:100000:singleton)] [com.gavin.podcasters][phone][100000]: window foreground
+12-10 22:00:07.019 20088 20088 I C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] Update application state , state: ON_SHOW
+12-10 22:00:07.019 20088 20088 I C01406/com.gavin.podcasters/OHOS::RS: RSSurfaceNode::SetAbilityState, surfaceNodeId:[86277303042050], ability state: foreground
+12-10 22:00:07.019 20088 20088 I C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] ArkUI requests first Vsync.
+12-10 22:00:07.019 20088 20088 I C04202/com.gavin.podcasters/WMSMain: RequestVsync: First vsync has requested, nodeId: 86277303042050
+12-10 22:00:07.019 20088 20088 I C04208/com.gavin.podcasters/WMSLayout: UpdateViewportConfig: Id: 411, reason: 0, windowRect: [0 0 1224 2776], displayOrientation: 0, config[0, 0, 0, 3.375000]
+12-10 22:00:07.019 20088 20088 I C03900/com.gavin.podcasters/Ace: [(-2:100000:singleton)] [com.gavin.podcasters][phone][100000]: window focus
+12-10 22:00:07.019 20088 20088 I C03900/com.gavin.podcasters/Ace: [(-2:100000:singleton)] [com.gavin.podcasters][phone][100000]:window active
+12-10 22:00:07.020 20088 20088 I A0FF00/com.gavin.podcasters/AIOffice: [EntryAbility], Succeeded in loading the content.
+12-10 22:00:07.020 20088 20088 I C03917/com.gavin.podcasters/AceSafeArea: [(100000:100000:scope)] SetKeyBoardAvoidMode 1
+12-10 22:00:07.020 20088 20088 I C03933/com.gavin.podcasters/AceKeyboard: [(100000:100000:scope)] keyboardAvoid Mode update:1
+12-10 22:00:07.021 20088 20088 W C03937/com.gavin.podcasters/AceResource: [(-2:100000:singleton)] Get color by name error, name=sys.color.comp_background_primary_tran, errorCode=9001003
+12-10 22:00:07.022 20088 20201 I C01653/com.gavin.podcasters/NativePreferences: XmlReadFile: file:/***/el2/***/pers***rage, m:0.
+12-10 22:00:07.022 20088 20230 I C02C03/PARAM_WATCHER: Add watcher keyPrefix persist.ace.trace.layout.enabled remoteWatcherId 3825 success
+12-10 22:00:07.022 20088 20201 W C01653/com.gavin.podcasters/NativePreferences: LoadFromDisk: The settingXml /***/el1/***/pers***rage load failed.
+12-10 22:00:07.022 20088 20201 W C01653/com.gavin.podcasters/NativePreferences: LoadFromDisk: The settingXml /***/el2/***/pers***rage load failed.
+12-10 22:00:07.023 20088 20201 W C01653/com.gavin.podcasters/NativePreferences: LoadFromDisk: The settingXml /***/el3/***/pers***rage load failed.
+12-10 22:00:07.023 20088 20201 W C01653/com.gavin.podcasters/NativePreferences: LoadFromDisk: The settingXml /***/el4/***/pers***rage load failed.
+12-10 22:00:07.023 20088 20230 I C02C03/PARAM_WATCHER: Add watcher keyPrefix persist.ace.trace.inputevent.enabled remoteWatcherId 3825 success
+12-10 22:00:07.023 20088 20088 E C01317/com.gavin.podcasters/AppKit: [context_impl1401]create dir /data/storage/el5/base/files failed, errno is 13
+12-10 22:00:07.023 20088 20088 E C01317/com.gavin.podcasters/AppKit: [context_impl1401]create dir /data/storage/el5/base/files failed, errno is 13
+12-10 22:00:07.023 20088 20088 E C01653/com.gavin.podcasters/NativePreferences: GetPreferences: The path is invalid, prefName is /***/el5/***/fil***.
+12-10 22:00:07.023 20088 20201 W C01653/com.gavin.podcasters/NativePreferences: LoadFromDisk: The settingXml /***/el5/***/pers***rage load failed.
+12-10 22:00:07.023 20088 20088 I A0FF00/com.gavin.podcasters/AIOffice: AppUtils, setColorMode PersistenceV2 keys: ["SettingModel","UserInfoModel"]
+12-10 22:00:07.024 20088 20230 I C02C03/PARAM_WATCHER: Add watcher keyPrefix const.security.developermode.state remoteWatcherId 3825 success
+12-10 22:00:07.025 20088 20230 I C02C03/PARAM_WATCHER: Add watcher keyPrefix persist.ace.debug.statemgr.enabled remoteWatcherId 3825 success
+12-10 22:00:07.025 20088 20088 I C01317/com.gavin.podcasters/AppKit: [ohos_application1111]current 2, pre 0
+12-10 22:00:07.025 20088 20088 W C01317/com.gavin.podcasters/AppKit: [ohos_application1140]fontSize empty
+12-10 22:00:07.025 20088 20088 I C01317/com.gavin.podcasters/AppKit: [ohos_application1171]current 2, pre 0
+12-10 22:00:07.025 20088 20088 W C01317/com.gavin.podcasters/AppKit: [ohos_application1175]language empty
+12-10 22:00:07.025 20088 20088 W C01317/com.gavin.podcasters/AppKit: [ohos_application1194]language and locale empty
+12-10 22:00:07.025 20088 20088 I C01317/com.gavin.podcasters/AppKit: [ohos_application287]configuration_: {"0#const.build.characteristics":"phone","0#input.pointer.device":"false","0#ohos.app.fontSizeScale":"nonFollowSystem","0#ohos.application.densitydpi":"xxxldpi","0#ohos.application.direction":"vertical","0#ohos.application.displayid":"0","0#ohos.system.colorMode":"light","0#ohos.system.colorMode.isSetByApp":"isSetByApp","0#ohos.system.fontSizeScale":"1.0","0#ohos.system.fontWeightScale":"1.130000","0#ohos.system.hour":"true","0#ohos.system.language":"zh-Hans-CN","0#ohos.system.locale":"zh-Hans-CN","0#ohos.system.mcc":"460","0#ohos.system.mnc":"00"}, config: {"0#ohos.system.colorMode":"light","0#ohos.system.colorMode.isSetByApp":"isSetByApp"}
+12-10 22:00:07.025 20088 20088 I C04217/com.gavin.podcasters/WMSAttribute: UpdateConfigurationSync: notify ace scene win=411, display=0
+12-10 22:00:07.025 20088 20088 I C03900/com.gavin.podcasters/Ace: [(-2:100000:singleton)] [100000][com.gavin.podcasters][phone] UpdateConfigurationSyncForAll, name:{"0#ohos.system.colorMode":"light","0#ohos.system.colorMode.isSetByApp":"isSetByApp"}
+12-10 22:00:07.025 20088 20088 I C04217/com.gavin.podcasters/WMSAttribute: UpdateColorMode: winId: 411, colorMode: light
+12-10 22:00:07.025 20088 20088 E C04217/com.gavin.podcasters/WMSAttribute: UpdateConfigurationSyncForAll: root is null
+12-10 22:00:07.025 20088 20088 I C01332/com.gavin.podcasters/UIAbility: [JUA1853]JsUIAbility call js, name: onConfigurationUpdated
+12-10 22:00:07.025 20088 20088 I C01332/com.gavin.podcasters/UIAbility: [JUA1898]end, name: onConfigurationUpdated, time: 0
+12-10 22:00:07.025 20088 20088 I C01332/com.gavin.podcasters/UIAbility: [JUA1853]JsUIAbility call js, name: onConfigurationUpdate
+12-10 22:00:07.026 20088 20088 I C01332/com.gavin.podcasters/UIAbility: [JUA1898]end, name: onConfigurationUpdate, time: 0
+12-10 22:00:07.026 20088 20088 W C01317/com.gavin.podcasters/AppKit: [js_ability_stage819]Not found AbilityStage.js
+12-10 22:00:07.026 20088 20088 W C01317/com.gavin.podcasters/AppKit: [js_ability_stage819]Not found AbilityStage.js
+12-10 22:00:07.026 20088 20088 I C01317/com.gavin.podcasters/AppKit: [ohos_application311]ignoreWindowContext size 0
+12-10 22:00:07.026 20088 20088 I C04217/com.gavin.podcasters/WMSAttribute: UpdateConfiguration: notify ace scene win=411, display=0
+12-10 22:00:07.026 20088 20088 I C04217/com.gavin.podcasters/WMSAttribute: UpdateColorMode: winId: 411, colorMode: light
+12-10 22:00:07.026 20088 20088 I C04217/com.gavin.podcasters/WMSAttribute: UpdateDefaultStatusBarColor: win=411, appColor=light
+12-10 22:00:07.026 20088 20088 I C04209/com.gavin.podcasters/WMSImms: SetSpecificBarProperty: win [411 podcasters0] type 2108 1 ffffff ff000000 0 4
+12-10 22:00:07.027 20088 20088 E C04217/com.gavin.podcasters/WMSAttribute: UpdateConfigurationForAll: root is null
+12-10 22:00:07.029 20088 20088 I A0FF00/com.gavin.podcasters/AIOffice: [NetworkUtil], getDefaultNetSync: {"netId":100}
+12-10 22:00:07.031 20088 20230 I C02C03/PARAM_WATCHER: Add watcher keyPrefix persist.ace.debug.boundary.enabled remoteWatcherId 3825 success
+12-10 22:00:07.031 20088 20088 I A0FF00/com.gavin.podcasters/AIOffice: [NetworkUtil], getConnectNetAddress, get current netAddress is: ["10.16.4.166","10.8.100.16","10.8.100.17","10.8.100.18","223.5.5.5"]
+12-10 22:00:07.032 20088 20230 I C02C03/PARAM_WATCHER: Add watcher keyPrefix persist.ace.performance.monitor.enabled remoteWatcherId 3825 success
+12-10 22:00:07.032 20088 20088 W C02D07/com.gavin.podcasters/Verify: invalid configName=
+12-10 22:00:07.032 20088 20088 I C02D07/com.gavin.podcasters/ObserverMgr: register processor=1 exit
+12-10 22:00:07.032 20088 20186 W C01C41/com.gavin.podcasters/TimeClient: OnAddSystemAbility# recoverTimer count:0
+12-10 22:00:07.032 20088 20088 I C015B0/com.gavin.podcasters/NETSTACK: [hi_app_event_report.cpp:75] AddProcessor enter
+12-10 22:00:07.032 20088 20088 W C02D07/com.gavin.podcasters/Verify: invalid configName=
+12-10 22:00:07.032 20088 20088 I C02D07/com.gavin.podcasters/ObserverMgr: register processor=1 exit
+12-10 22:00:07.034 20088 20231 I C02D07/com.gavin.podcasters/Config: get free size=136826769408
+12-10 22:00:07.035 20088 20230 I C02C03/PARAM_WATCHER: Add watcher keyPrefix persist.gesture.smart_gesture_enable remoteWatcherId 3825 success
+12-10 22:00:07.036 20088 20217 I C04208/com.gavin.podcasters/WMSLayout: UpdateRect: id:411 name:podcasters0 rect:[0 0 1224 2776]->[0 0 1224 2776] reason:23 displayId:0
+12-10 22:00:07.037 20088 20088 I C015B5/com.gavin.podcasters/NetMgrEnhanced: On, register begin.
+12-10 22:00:07.038 20088 20088 I C015B5/com.gavin.podcasters/NetMgrEnhanced: Register event = netSceneChange
+12-10 22:00:07.038 20088 20088 I C015B5/com.gavin.podcasters/NetMgrEnhanced: RegisterNetworkQualityCallback success, save callback
+12-10 22:00:07.038 20088 20088 I C04200/com.gavin.podcasters/JsWindowStage: Window [411, podcasters0] load content end, ret=0
+12-10 22:00:07.039 20088 20088 I C04209/com.gavin.podcasters/WMSImms: SetSpecificBarProperty: win [411 podcasters0] type 2108 1 ffffff ff090909 0 5
+12-10 22:00:07.039 20088 20088 I C04209/com.gavin.podcasters/WMSImms: NotifyAvoidAreaChange: win 411 api 17 type 0 area top [0 0 1224 148] 
+12-10 22:00:07.040 20088 20088 I C04209/com.gavin.podcasters/WMSImms: NotifyAvoidAreaChange: win 411 api 17 type 1 area top [475 48 274 86] 
+12-10 22:00:07.040 20088 20088 I C04209/com.gavin.podcasters/WMSImms: NotifyAvoidAreaChange: win 411 api 17 type 2 area empty
+12-10 22:00:07.040 20088 20088 I C04209/com.gavin.podcasters/WMSImms: NotifyAvoidAreaChange: win 411 api 17 type 3 area empty
+12-10 22:00:07.040 20088 20088 I C04209/com.gavin.podcasters/WMSImms: NotifyAvoidAreaChange: win 411 api 17 type 4 area bottom [397 2682 430 94] 
+12-10 22:00:07.040 20088 20088 I C04208/com.gavin.podcasters/WMSLayout: UpdateViewportConfig: Id: 411, reason: 23, windowRect: [0 0 1224 2776], displayOrientation: 0, config[0, 0, 0, 3.375000]
+12-10 22:00:07.040 20088 20088 I C04209/com.gavin.podcasters/WMSImms: GetAvoidAreaByType: win [411 podcasters0] type 0 times 6 area top [0 0 1224 148] 
+12-10 22:00:07.040 20088 20231 I C02D07/com.gavin.podcasters/ObserverMgr: init watchers
+12-10 22:00:07.040 20088 20088 I C04209/com.gavin.podcasters/WMSImms: GetAvoidAreaByType: win [411 podcasters0] type 4 times 7 area bottom [397 2682 430 94] 
+12-10 22:00:07.040 20088 20088 I C04209/com.gavin.podcasters/WMSImms: GetAvoidAreaByType: win [411 podcasters0] type 0 times 8 area top [0 0 1224 148] 
+12-10 22:00:07.041 20088 20088 I C04209/com.gavin.podcasters/WMSImms: GetAvoidAreaByType: win [411 podcasters0] type 4 times 9 area bottom [397 2682 430 94] 
+12-10 22:00:07.041 20088 20088 I C04209/com.gavin.podcasters/WMSImms: GetAvoidAreaByType: win [411 podcasters0] type 0 times 10 area top [0 0 1224 148] 
+12-10 22:00:07.041 20088 20088 I C04209/com.gavin.podcasters/WMSImms: GetAvoidAreaByType: win [411 podcasters0] type 4 times 11 area bottom [397 2682 430 94] 
+12-10 22:00:07.041 20088 20088 I C04209/com.gavin.podcasters/WMSImms: GetAvoidAreaByType: win [411 podcasters0] type 0 times 12 area top [0 0 1224 148] 
+12-10 22:00:07.042 20088 20088 I C04209/com.gavin.podcasters/WMSImms: GetAvoidAreaByType: win [411 podcasters0] type 4 times 13 area bottom [397 2682 430 94] 
+12-10 22:00:07.042 20088 20088 I C04209/com.gavin.podcasters/WMSImms: GetAvoidAreaByType: win [411 podcasters0] type 0 times 14 area top [0 0 1224 148] 
+12-10 22:00:07.042 20088 20088 I C04209/com.gavin.podcasters/WMSImms: GetAvoidAreaByType: win [411 podcasters0] type 4 times 15 area bottom [397 2682 430 94] 
+12-10 22:00:07.042 20088 20088 I A0FF00/com.gavin.podcasters/AIOffice: [NetworkUtil], netAvailable, get data: {"netId":100}
+12-10 22:00:07.042 20088 20088 I A0FF00/com.gavin.podcasters/AIOffice: [NetworkUtil], netCapabilitiesChange, get data: {"netHandle":{"netId":100},"netCap":{"linkUpBandwidthKbps":0,"linkDownBandwidthKbps":0,"networkCap":[12,15,16],"bearerTypes":[1]}}
+12-10 22:00:07.043 20088 20192 I C015B0/com.gavin.podcasters/NetMgrSubSystem: Register result 0
+12-10 22:00:07.044 20088 20088 I A0FF00/com.gavin.podcasters/AIOffice: [NetworkUtil], netConnectionPropertiesChange, current netAddress is: ["10.16.4.166","10.8.100.16","10.8.100.17","10.8.100.18","223.5.5.5"]
+12-10 22:00:07.044 20088 20088 E A0FF00/com.gavin.podcasters/AIOffice: [NetworkUtil], network register error: undefined
+12-10 22:00:07.046 20088 20088 I C04208/com.gavin.podcasters/WMSLayout: UpdateViewportConfig: Id: 411, reason: 23, windowRect: [0 0 1224 2776], displayOrientation: 0, config[0, 0, 0, 3.375000]
+12-10 22:00:07.046 20088 20088 I C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] Update application state , state: ON_ACTIVE
+12-10 22:00:07.046 20088 20088 I C01D02/com.gavin.podcasters/accessibility_asacfwk: [(SubscribeStateObserver:551)]Observer has subscribed!
+12-10 22:00:07.046 20088 20088 I C01D02/com.gavin.podcasters/accessibility_asacfwk: [(SubscribeStateObserver:551)]Observer has subscribed!
+12-10 22:00:07.046 20088 20088 I C01D02/com.gavin.podcasters/accessibility_asacfwk: [(SubscribeStateObserver:551)]Observer has subscribed!
+12-10 22:00:07.046 20088 20088 I C0391C/com.gavin.podcasters/AceFocus: [(100000:100000:scope)] Window: 411 get focus.
+12-10 22:00:07.046 20088 20088 W C0391C/com.gavin.podcasters/AceFocus: [(100000:100000:scope)] Current focus view can not found!
+12-10 22:00:07.046 20088 20088 I C0391C/com.gavin.podcasters/AceFocus: [(100000:100000:scope)] Request focus on rootFocusHub: root/0
+12-10 22:00:07.046 20088 20088 I C03925/com.gavin.podcasters/AceRouter: [(100000:100000:scope)] Page router manager is creating page[1]: url: pages/Index path: pages/Index.js, recoverable: yes, namedRouter: no
+12-10 22:00:07.048 20088 20233 W C02D07/com.gavin.podcasters/Verify: invalid configName=
+12-10 22:00:07.048 20088 20233 I C02D07/com.gavin.podcasters/ObserverMgr: register processor=1 exit
+12-10 22:00:07.048 20088 20233 I C015B5/com.gavin.podcasters/NetMgrEnhanced: RegisterNetworkHandoverListener success, save callback
+12-10 22:00:07.049 20088 20233 I C015B0/com.gavin.podcasters/ConnectivityExt:  RegisterHandoverChangeCallback success
+12-10 22:00:07.050 20088 20233 I C015B0/com.gavin.podcasters/ConnectivityExt:  Handover manager init success, stack name http
+12-10 22:00:07.050 20088 20233 I C015B0/com.gavin.podcasters/ConnectivityExt:  HMS_NetworkBoost_HttpHandoverManagerInit success
+12-10 22:00:07.051 20088 20088 I A0FF00/com.gavin.podcasters/AIOffice: [PodcastService], 初始化PodcastService，Base URL: http://123.207.14.127:8000
+12-10 22:00:07.056 20088 20088 I C01653/com.gavin.podcasters/PreferencesJsKit: GetContextMode: set gContextNode: 1, status: 0,
+12-10 22:00:07.056 20088 20088 I A0FF00/com.gavin.podcasters/AIOffice: [PreferenceUtils], PreferenceUtil: default init: true
+12-10 22:00:07.056 20088 20201 I C01653/com.gavin.podcasters/NativePreferences: XmlReadFile: file:/***/el2/***/def***, m:0.
+12-10 22:00:07.056 20088 20088 I A0FF00/com.gavin.podcasters/AIOffice: [PreferenceUtils], PreferenceUtil: get: isAgreePrivacy = true
+12-10 22:00:07.056 20088 20088 I C04200/com.gavin.podcasters/WMS: RegisterListener: [windowStageEvent, 1]
+12-10 22:00:07.056 20088 20088 I C04200/com.gavin.podcasters/JsWindowStage: Window [411, podcasters0] register event windowStageEvent
+12-10 22:00:07.058 20088 20088 I A0FF00/com.gavin.podcasters/AIOffice: BreakpointUtils, register breakpoint listener.
+12-10 22:00:07.058 20088 20088 I C03957/com.gavin.podcasters/AceMediaQuery: [<private>(<private>)] on:(width<600vp) num=1
+12-10 22:00:07.058 20088 20088 I C03957/com.gavin.podcasters/AceMediaQuery: [<private>(<private>)] on:(width>=600vp) and (width<840vp) num=1
+12-10 22:00:07.058 20088 20088 I C03957/com.gavin.podcasters/AceMediaQuery: [<private>(<private>)] on:(width>=840vp) and (width<1440vp) num=1
+12-10 22:00:07.058 20088 20088 I C03957/com.gavin.podcasters/AceMediaQuery: [<private>(<private>)] on:(width>=1440vp) num=1
+12-10 22:00:07.058 20088 20088 I C04201/com.gavin.podcasters/DMS: js_display_manager.cpp IfCallbackRegistered: change not registered!
+12-10 22:00:07.058 20088 20088 I C04201/com.gavin.podcasters/DMS: js_display_listener.cpp JsDisplayListener: Constructor
+12-10 22:00:07.060 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style 125829872 not contains navigation_bar_pattern!
+12-10 22:00:07.061 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style navigation_bar_pattern not contains title_sapce_vertical!
+12-10 22:00:07.062 20088 20088 E C01E00/com.gavin.podcasters/ResourceManager: GetColorById error id = -1
+12-10 22:00:07.062 20088 20088 W C03937/com.gavin.podcasters/AceResource: [(100000:100000:scope)] Get color by id error, id=4294967295
+12-10 22:00:07.062 20088 20088 E C01E00/com.gavin.podcasters/ResourceManager: GetColorById error id = -1
+12-10 22:00:07.062 20088 20088 W C03937/com.gavin.podcasters/AceResource: [(100000:100000:scope)] Get color by id error, id=4294967295
+12-10 22:00:07.062 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style navigation_bar_pattern not contains title_sapce_vertical!
+12-10 22:00:07.063 20088 20088 I C03922/com.gavin.podcasters/AceNavigation: [(100000:100000:scope)] navigation necessary to immediately trigger a refresh
+12-10 22:00:07.063 20088 20088 I C03922/com.gavin.podcasters/AceNavigation: [(100000:100000:scope)] AvoidInfoManager register listener
+12-10 22:00:07.064 20088 20088 I C0391C/com.gavin.podcasters/AceFocus: [(100000:100000:scope)] view: page/2 show
+12-10 22:00:07.064 20088 20088 I C03922/com.gavin.podcasters/AceNavigation: [(100000:100000:scope)] Set NavBar Visible State as true
+12-10 22:00:07.064 20088 20088 I A0FF00/com.gavin.podcasters/AIOffice: [PreferenceUtils], PreferenceUtil: get: isAgreePrivacy = true
+12-10 22:00:07.064 20088 20088 I C03933/com.gavin.podcasters/AceKeyboard: [(100000:100000:scope)] StageManager FrameNode notNeedSoftKeyboard.
+12-10 22:00:07.064 20088 20088 I C03933/com.gavin.podcasters/AceKeyboard: [(100000:100000:scope)] Container not SceneBoardWindow.
+12-10 22:00:07.064 20088 20088 I C03925/com.gavin.podcasters/AceRouter: [(100000:100000:scope)] LoadPage Success
+12-10 22:00:07.065 20088 20088 I C0392A/com.gavin.podcasters/AceUiExtensionComponent: [(-2:100000:singleton)] NotifyWindowMode aliveUIExtensions = 0
+12-10 22:00:07.065 20088 20088 I C0394E/com.gavin.podcasters/AceWindow: [(100000:100000:scope)] Update displayWindowRect in UpdateViewportConfig to : Rect (0.00, 0.00) - [1224.00 x 2776.00]
+12-10 22:00:07.065 20088 20088 I C03917/com.gavin.podcasters/AceSafeArea: [(100000:100000:scope)] SetIsFullScreen 1
+12-10 22:00:07.065 20088 20088 I A0FF00/com.gavin.podcasters/AIOffice: BreakpointUtils, updateBreakpoint: sm
+12-10 22:00:07.065 20088 20088 I C03922/com.gavin.podcasters/AceNavigation: [(100000:100000:scope)] sync with js stack, id: , UINodeId: 5, preStackSize: 0, newStackSize: 1
+12-10 22:00:07.066 20088 20088 I C03922/com.gavin.podcasters/AceNavigation: [(100000:100000:scope)] find in nowhere, navigation stack create new node, index: 0, removeSize: 0, name: IndexPage.
+12-10 22:00:07.066 20088 20088 W C03922/com.gavin.podcasters/AceNavigation: [(100000:100000:scope)] Builder function is empty
+12-10 22:00:07.066 20088 20088 I C03922/com.gavin.podcasters/AceNavigation: [(100000:100000:scope)] load navdestination com.gavin.podcasters, ohmurl: phone
+12-10 22:00:07.066 20088 20088 I C03F00/com.gavin.podcasters/ArkCompiler: [ecmascript] Route jump to non-singleton page: &phone/src/main/ets/pages/IndexPage&
+12-10 22:00:07.071 20088 20088 I C03F01/com.gavin.podcasters/NAPI: [RegisterByBuffer] Module name is 'arkui.shape'
+12-10 22:00:07.074 20088 20088 I C01405/com.gavin.podcasters/EffectKit: ColorPicker Napi CALL
+12-10 22:00:07.074 20088 20088 I C01405/com.gavin.podcasters/EffectKit: Init success
+12-10 22:00:07.083 20088 20088 W C03F01/com.gavin.podcasters/NAPI: [FindNativeModuleByDisk] mismatch: moduleName is core.deviceCloudGateway.cloudStorage, name is cloudStorage
+12-10 22:00:07.085 20088 20088 W C03F01/com.gavin.podcasters/NAPI: [FindNativeModuleByCache] moduleName 'core.deviceCloudGateway.cloudCommon' is in different path
+12-10 22:00:07.089 20088 20088 I C03F00/com.gavin.podcasters/ArkCompiler: [ecmascript] Route jump to non-singleton page: &phone/src/main/ets/pages/IndexPage&
+12-10 22:00:07.089 20088 20088 W C03F00/com.gavin.podcasters/ArkCompiler: [debugger] DebuggerImpl::NotifyScriptParsed: Script already been parsed: url: phone|phone|1.0.0|src/main/ets/pages/IndexPage.ts fileName: /data/storage/el1/bundle/phone/ets/modules.abc
+12-10 22:00:07.089 20088 20088 W C03922/com.gavin.podcasters/AceNavigation: [(100000:100000:scope)] insert builder failed, update builder: IndexPage
+12-10 22:00:07.091 20088 20088 I C03922/com.gavin.podcasters/AceNavigation: [(100000:100000:scope)] render current custom node: IndexPage
+12-10 22:00:07.092 20088 20192 I C04215/com.gavin.podcasters/WMSHierarchy: GetTopWindowWithContext: mainId:411!
+12-10 22:00:07.092 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style text_pattern not contains linear_split_child_min_size!
+12-10 22:00:07.092 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style text_pattern not contains menu_celia_ask_is_support!
+12-10 22:00:07.093 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style 125829872 not contains app_theme_pattern!
+12-10 22:00:07.093 20088 20088 E C01E00/com.gavin.podcasters/ResourceManager: ref <private> id not found
+12-10 22:00:07.093 20088 20088 E C01E00/com.gavin.podcasters/ResourceManager: ref <private> id not found
+12-10 22:00:07.093 20088 20088 W C03937/com.gavin.podcasters/AceResource: [(100000:100000:scope)] Get pattern by name error, name=app_theme_pattern
+12-10 22:00:07.093 20088 20088 E C01E00/com.gavin.podcasters/ResourceManager: ref <private> id not found
+12-10 22:00:07.093 20088 20088 E C01E00/com.gavin.podcasters/ResourceManager: ref <private> id not found
+12-10 22:00:07.093 20088 20088 W C03937/com.gavin.podcasters/AceResource: [(100000:100000:scope)] Get pattern by name error, name=app_theme_pattern
+12-10 22:00:07.093 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style 125829872 not contains aging_adapation_dialog_pattern!
+12-10 22:00:07.093 20088 20088 I C03922/com.gavin.podcasters/AceNavigation: [(100000:100000:scope)] IndexPage lifecycle change to onWillAppear state. navdestinationId:13, navigationId:5
+12-10 22:00:07.094 20088 20088 I C03922/com.gavin.podcasters/AceNavigation: [(100000:100000:scope)] last standard page index is 0
+12-10 22:00:07.094 20088 20088 I C03922/com.gavin.podcasters/AceNavigation: [(100000:100000:scope)] serialize navDestination param success! its index: 0
+12-10 22:00:07.094 20088 20088 I C03922/com.gavin.podcasters/AceNavigation: [(100000:100000:scope)] mountToParent navdestinationId:13, slot:0
+12-10 22:00:07.095 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style 125829872 not contains tab_pattern!
+12-10 22:00:07.096 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style tab_pattern not contains default_tab_bar_name!
+12-10 22:00:07.096 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style tab_pattern get attr dialog_radius_level10 error!
+12-10 22:00:07.096 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style tab_pattern get attr dialog_icon_primary error!
+12-10 22:00:07.096 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style tab_pattern get attr dialog_font_primary error!
+12-10 22:00:07.096 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style 125829872 not contains swiper_pattern!
+12-10 22:00:07.097 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style swiper_pattern get attr swiper_focus_style_type error!
+12-10 22:00:07.097 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style swiper_pattern not contains swiper_indicator_drag_min_angle!
+12-10 22:00:07.097 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style swiper_pattern not contains swiper_indicator_drag_max_angle!
+12-10 22:00:07.098 20088 20088 I C03922/com.gavin.podcasters/AceNavigation: [(100000:100000:scope)] IndexPage lifecycle change to onAppear state. navdestinationId:13, navigationId:5
+12-10 22:00:07.098 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style 125829872 not contains focus_animation_pattern!
+12-10 22:00:07.099 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style 125829872 not contains image_pattern!
+12-10 22:00:07.101 20088 20088 I C03953/com.gavin.podcasters/AceSelectOverlay: [(100000:100000:scope)] isDestroyed:0,isClosed:0
+12-10 22:00:07.101 20088 20088 I C0391C/com.gavin.podcasters/AceFocus: [(100000:100000:scope)] view: NavDestination/13 show
+12-10 22:00:07.101 20088 20088 I C03922/com.gavin.podcasters/AceNavigation: [(100000:100000:scope)] transition start, disableAllAnimation: 0, animated: 1, isPopPage: 0, isDialog: 0, isReplace: 1, isCustomAnimation: 0
+12-10 22:00:07.101 20088 20088 I C03922/com.gavin.podcasters/AceNavigation: [(100000:100000:scope)] IndexPage lifecycle change to onWillShow state. navdestinationId:13, navigationId:5
+12-10 22:00:07.101 20088 20088 I C03922/com.gavin.podcasters/AceNavigation: [(100000:100000:scope)] conditions are not met, don't update PageViewportConfig
+12-10 22:00:07.102 20088 20088 I C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] Root node request first frame.
+12-10 22:00:07.102 20088 20088 I C04200/com.gavin.podcasters/WMS: RegisterListener: [keyboardHeightChange, 1]
+12-10 22:00:07.102 20088 20088 I C04200/com.gavin.podcasters/WMS: OnRegisterWindowCallback: Id=411, type=keyboardHeightChange
+12-10 22:00:07.102 20088 20088 I C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] Update application state , state: ON_ACTIVE
+12-10 22:00:07.102 20088 20088 I C01D02/com.gavin.podcasters/accessibility_asacfwk: [(SubscribeStateObserver:551)]Observer has subscribed!
+12-10 22:00:07.102 20088 20088 I C01D02/com.gavin.podcasters/accessibility_asacfwk: [(SubscribeStateObserver:551)]Observer has subscribed!
+12-10 22:00:07.102 20088 20088 I C01D02/com.gavin.podcasters/accessibility_asacfwk: [(SubscribeStateObserver:551)]Observer has subscribed!
+12-10 22:00:07.102 20088 20088 I C0391C/com.gavin.podcasters/AceFocus: [(100000:100000:scope)] Window: 411 get focus.
+12-10 22:00:07.102 20088 20088 I C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] Update application state , state: ON_ACTIVE
+12-10 22:00:07.102 20088 20088 I C01D02/com.gavin.podcasters/accessibility_asacfwk: [(SubscribeStateObserver:551)]Observer has subscribed!
+12-10 22:00:07.102 20088 20088 I C01D02/com.gavin.podcasters/accessibility_asacfwk: [(SubscribeStateObserver:551)]Observer has subscribed!
+12-10 22:00:07.102 20088 20088 I C01D02/com.gavin.podcasters/accessibility_asacfwk: [(SubscribeStateObserver:551)]Observer has subscribed!
+12-10 22:00:07.107 20088 20088 I A0FF00/com.gavin.podcasters/AIOffice: BreakpointUtils, updateBreakpoint: sm
+12-10 22:00:07.107 20088 20088 I C03900/com.gavin.podcasters/Ace: [(-2:100000:singleton)] [100000][com.gavin.podcasters][phone] UpdateConfiguration, name:{"0#ohos.system.colorMode":"light","0#ohos.system.colorMode.isSetByApp":"isSetByApp"}
+12-10 22:00:07.107 20088 20088 I C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] AceContainer UpdateConfiguration frontend MarkNeedUpdate
+12-10 22:00:07.107 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style 125829872 not contains navigation_bar_pattern!
+12-10 22:00:07.108 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style navigation_bar_pattern not contains title_sapce_vertical!
+12-10 22:00:07.108 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style navigation_bar_pattern not contains title_sapce_vertical!
+12-10 22:00:07.108 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style 125829872 not contains aging_adapation_dialog_pattern!
+12-10 22:00:07.108 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style 125829872 not contains app_theme_pattern!
+12-10 22:00:07.108 20088 20088 E C01E00/com.gavin.podcasters/ResourceManager: ref <private> id not found
+12-10 22:00:07.108 20088 20088 E C01E00/com.gavin.podcasters/ResourceManager: ref <private> id not found
+12-10 22:00:07.108 20088 20088 W C03937/com.gavin.podcasters/AceResource: [(100000:100000:scope)] Get pattern by name error, name=app_theme_pattern
+12-10 22:00:07.109 20088 20088 E C01E00/com.gavin.podcasters/ResourceManager: ref <private> id not found
+12-10 22:00:07.109 20088 20088 E C01E00/com.gavin.podcasters/ResourceManager: ref <private> id not found
+12-10 22:00:07.109 20088 20088 W C03937/com.gavin.podcasters/AceResource: [(100000:100000:scope)] Get pattern by name error, name=app_theme_pattern
+12-10 22:00:07.109 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style 125829872 not contains tab_pattern!
+12-10 22:00:07.109 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style tab_pattern not contains default_tab_bar_name!
+12-10 22:00:07.109 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style tab_pattern get attr dialog_radius_level10 error!
+12-10 22:00:07.109 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style tab_pattern get attr dialog_icon_primary error!
+12-10 22:00:07.109 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style tab_pattern get attr dialog_font_primary error!
+12-10 22:00:07.111 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style 125829872 not contains image_pattern!
+12-10 22:00:07.111 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style text_pattern not contains linear_split_child_min_size!
+12-10 22:00:07.111 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style text_pattern not contains menu_celia_ask_is_support!
+12-10 22:00:07.115 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style text_pattern not contains linear_split_child_min_size!
+12-10 22:00:07.115 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style text_pattern not contains menu_celia_ask_is_support!
+12-10 22:00:07.116 20088 20088 I C01408/com.gavin.podcasters/Text: InitTextBundleConfig: Adapter text height enabled 0
+12-10 22:00:07.120 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style 125829872 not contains divider_pattern!
+12-10 22:00:07.121 20088 20088 I A0FF00/com.gavin.podcasters/AIOffice: PodcastPage, 播放列表为空，自动从云存储导入音频
+12-10 22:00:07.121 20088 20088 I A05530/com.gavin.podcasters/CloudDevelopStorage: Storage getDefaultBucket
+12-10 22:00:07.122 20088 20088 I C05530/com.gavin.podcasters/CloudDevelopProxyStorage: [(GetDefaultBucketParse:122)]GetDefaultBucket parse
+12-10 22:00:07.122 20088 20232 I C05530/com.gavin.podcasters/CloudDevelopProxyStorage: [(GetDefaultBucketExecute:128)]GetDefaultBucketExecute
+12-10 22:00:07.122 20088 20232 I C05530/com.gavin.podcasters/CloudDevelopProxyStorage: [(QueryDefaultBucket:21)]QueryDefaultBucket
+12-10 22:00:07.122 20088 20232 I C05530/com.gavin.podcasters/CloudDevelopProxyStorage: [(QueryDefaultBucketRequest:41)]new QueryDefaultBucketRequest
+12-10 22:00:07.122 20088 20232 I C05530/com.gavin.podcasters/CloudDevelopProxyNet: [(SendRequestSync:22)]Backend start to SendRequest
+12-10 22:00:07.122 20088 20232 I C05530/com.gavin.podcasters/CloudDevelopProxyNet: [(Intercept:14)]ReportInterceptor Intercept
+12-10 22:00:07.123 20088 20232 W C02D07/com.gavin.podcasters/Verify: invalid configName=
+12-10 22:00:07.123 20088 20232 I C02D07/com.gavin.podcasters/ObserverMgr: register processor=1 exit
+12-10 22:00:07.123 20088 20232 I C05530/com.gavin.podcasters/CloudDevelopProxyNet: [(Intercept:81)]ErrorCode Intercept
+12-10 22:00:07.123 20088 20232 I C05530/com.gavin.podcasters/CloudDevelopProxyNet: [(Intercept:44)]Token Intercept
+12-10 22:00:07.123 20088 20232 I C05530/com.gavin.podcasters/CloudDevelopProxyNet: [(Intercept:47)]AuthProvider has not value.
+12-10 22:00:07.123 20088 20232 I C05530/com.gavin.podcasters/CloudDevelopProxyNet: [(Intercept:25)]------>GET, region:CN, serviceInfo:storage, iface:/**/**f**l**b**k**, timeout:70000
+12-10 22:00:07.123 20088 20232 I C05530/com.gavin.podcasters/CloudDevelopProxyNet: [(Intercept:57)]CallServerInterceptor
+12-10 22:00:07.123 20088 20232 I C05530/com.gavin.podcasters/CloudDevelopProxyNet: [(CreateTask:24)]Backend start to SendRequest CreateTask
+12-10 22:00:07.123 20088 20232 I C05530/com.gavin.podcasters/CloudDevelopProxyInnerApi: [(GetUrl:284)]GetUrl start.
+12-10 22:00:07.123 20088 20232 I C05530/com.gavin.podcasters/CloudDevelopProxyInnerApi: [(GetProxy:127)]Try to load auth service.
+12-10 22:00:07.123 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style 125829872 not contains sheet_pattern!
+12-10 22:00:07.123 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style sheet_pattern not contains corner_radius_none!
+12-10 22:00:07.124 20088 20088 E C03949/com.gavin.podcasters/AceSheet: [(100000:100000:scope)] radius is not correct type
+12-10 22:00:07.124 20088 20088 E C03949/com.gavin.podcasters/AceSheet: [(100000:100000:scope)] radius is not correct type
+12-10 22:00:07.125 20088 20088 W C03947/com.gavin.podcasters/AceStateMgmt: [(100000:100000:scope)] findProvider: @ComponentV2 'NavHeaderBar'[55] @Consumer('isCommentInModalDialog'), no matching @Provider found amongst ancestor @ComponentV2's!
+12-10 22:00:07.126 20088 20232 I C05530/com.gavin.podcasters/CloudDevelopProxyInnerApi: [(CreateTask:257)]apiPlatformVersion: OpenHarmony-6.0.1.115
+12-10 22:00:07.126 20088 20232 I C05530/com.gavin.podcasters/CloudDevelopProxyInnerApi: [(SetSignHeader:213)]grs region: CN
+12-10 22:00:07.126 20088 20232 I C05530/com.gavin.podcasters/CloudDevelopProxyInnerApi: [(GetCredential:159)]GetCredential.
+12-10 22:00:07.126 20088 20232 I C05530/com.gavin.podcasters/CloudDevelopProxyInnerApi: [(GetCredential:169)]usedCache is 1.
+12-10 22:00:07.129 20088 20088 E C02C03/com.gavin.podcasters/PARAM_WATCHER: [nodict]Read result failed, code is: 1.
+12-10 22:00:07.129 20088 20088 E C02C03/PARAM_WATCHER: Failed to add watcher for persist.rosen.animationtrace.enabled
+12-10 22:00:07.129 20088 20088 E C02C03/PARAM_WATCHER: SystemWatchParameter is failed!keyPrefix is:persist.rosen.animationtrace.enabled,errNum is:-1
+12-10 22:00:07.129 20088 20088 E C02C0B/BEGET: [service_watcher.c:83]WatchParameter failed! the errNum is -1
+12-10 22:00:07.130 20088 20088 I C02C03/PARAM_WATCHER: Add watcher keyPrefix sys.graphic.openTestModeTrace remoteWatcherId 3825 success
+12-10 22:00:07.135 20088 20088 W C03926/com.gavin.podcasters/AceTheme: [(100000:100000:scope)] style 125829872 not contains scrollable_pattern!
+12-10 22:00:07.138 20088 20088 I C03922/com.gavin.podcasters/AceNavigation: [(100000:100000:scope)]  lifecycle change to onAppear state. navdestinationId:47, navigationId:-1
+12-10 22:00:07.138 20088 20088 I C03922/com.gavin.podcasters/AceNavigation: [(100000:100000:scope)]  lifecycle Respond user onAppear. navdestinationId:47, navigationId:-1
+12-10 22:00:07.140 20088 20088 E C03947/com.gavin.podcasters/AceStateMgmt: [(100000:100000:scope)] FIX THIS APPLICATION ERROR: @ComponentV2 'NavHeaderBar'[55] has error in update func: Cannot read property bind of undefined
+12-10 22:00:07.140 20088 20088 E C03947/com.gavin.podcasters/AceStateMgmt: [(100000:100000:scope)] FIX THIS APPLICATION ERROR: @ComponentV2 'NavHeaderBar'[55] has error in update func: Cannot read property bind of undefined
+12-10 22:00:07.140 20088 20088 W C03F00/com.gavin.podcasters/ArkCompiler: [default] [Call] occur exception need return
+12-10 22:00:07.140 20088 20088 E C03F00/com.gavin.podcasters/ArkCompiler: [ecmascript] Pending exception before ExecutePendingJob called, in line:5894, exception details as follows:
+12-10 22:00:07.140 20088 20088 E C03F00/com.gavin.podcasters/ArkCompiler: TypeError: Cannot read property bind of undefined
+12-10 22:00:07.140 20088 20088 E C03F00/com.gavin.podcasters/ArkCompiler:     at anonymous phone (products/phone/src/main/ets/pages/podcast/PodcastPage.ets:667:39)
+12-10 22:00:07.140 20088 20088 E C03F00/com.gavin.podcasters/ArkCompiler:     at updateFunc (/usr1/hmos_for_system/src/increment/sourcecode/out/generic_generic_arm_64only/general_all_phone_standard/obj/foundation/arkui/ace_engine/frameworks/bridge/declarative_frontend/stateMgmt.js:11943:1)
+12-10 22:00:07.140 20088 20088 E C03F00/com.gavin.podcasters/ArkCompiler:     at observeComponentCreation2 (/usr1/hmos_for_system/src/increment/sourcecode/out/generic_generic_arm_64only/general_all_phone_standard/obj/foundation/arkui/ace_engine/frameworks/bridge/declarative_frontend/stateMgmt.js:11970:1)
+12-10 22:00:07.140 20088 20088 E C03F00/com.gavin.podcasters/ArkCompiler:     at headerRightBuilder phone (products/phone/src/main/ets/pages/podcast/PodcastPage.ets:654:22)
+12-10 22:00:07.140 20088 20088 E C03F00/com.gavin.podcasters/ArkCompiler:     at anonymous lib_widget (components/lib_widget/src/main/ets/components/NavHeaderBar.ets:54:11)
+12-10 22:00:07.140 20088 20088 E C03F00/com.gavin.podcasters/ArkCompiler:     at ifElseBranchUpdateFunction (/usr1/hmos_for_system/src/increment/sourcecode/out/generic_generic_arm_64only/general_all_phone_standard/obj/foundation/arkui/ace_engine/frameworks/bridge/declarative_frontend/stateMgmt.js:5049:1)
+12-10 22:00:07.140 20088 20088 E C03F00/com.gavin.podcasters/ArkCompiler:     at anonymous lib_widget (components/lib_widget/src/main/ets/components/NavHeaderBar.ets:53:36)
+12-10 22:00:07.140 20088 20088 E C03F00/com.gavin.podcasters/ArkCompiler:     at updateFunc (/usr1/hmos_for_system/src/increment/sourcecode/out/generic_generic_arm_64only/general_all_phone_standard/obj/foundation/arkui/ace_engine/frameworks/bridge/declarative_frontend/stateMgmt.js:11943:1)
+12-10 22:00:07.140 20088 20088 E C03F00/com.gavin.podcasters/ArkCompiler:     at observeComponentCreation2 (/usr1/hmos_for_system/src/increment/sourcecode/out/generic_generic_arm_64only/general_all_phone_standard/obj/foundation/arkui/ace_engine/frameworks/bridge/declarative_frontend/stateMgmt.js:11970:1)
+12-10 22:00:07.140 20088 20088 E C03F00/com.gavin.podcasters/ArkCompiler:     at initialRender lib_widget (components/lib_widget/src/main/ets/components/NavHeaderBar.ets:28:12)
+12-10 22:00:07.140 20088 20088 E C03F00/com.gavin.podcasters/ArkCompiler:     at initialRenderView (/usr1/hmos_for_system/src/increment/sourcecode/out/generic_generic_arm_64only/general_all_phone_standard/obj/foundation/arkui/ace_engine/frameworks/bridge/declarative_frontend/stateMgmt.js:11888:1)
+12-10 22:00:07.140 20088 20088 W C03900/com.gavin.podcasters/Ace: [(100000:100000:scope)] after call jsFunction hasError, empty: 0, caught: 1
+12-10 22:00:07.141 20088 20088 I C01356/com.gavin.podcasters/Recovery: [app_recovery255]scheduleRecoverApp  begin
+12-10 22:00:07.141 20088 20088 E C01317/com.gavin.podcasters/AppKit: [MAINTHD2022]
+12-10 22:00:07.141 20088 20088 E C01317/com.gavin.podcasters/AppKit: com.gavin.podcasters is about to exit due to RuntimeError
+12-10 22:00:07.141 20088 20088 E C01317/com.gavin.podcasters/AppKit: Error type:TypeError
+12-10 22:00:07.141 20088 20088 E C01317/com.gavin.podcasters/AppKit: Error name:TypeError
+12-10 22:00:07.141 20088 20088 E C01317/com.gavin.podcasters/AppKit: Error message:Cannot read property bind of undefined
+12-10 22:00:07.141 20088 20088 E C01317/com.gavin.podcasters/AppKit: Stacktrace:
+12-10 22:00:07.141 20088 20088 E C01317/com.gavin.podcasters/AppKit:     at anonymous phone (products/phone/src/main/ets/pages/podcast/PodcastPage.ets:667:39)
+12-10 22:00:07.141 20088 20088 E C01317/com.gavin.podcasters/AppKit:     at updateFunc (/usr1/hmos_for_system/src/increment/sourcecode/out/generic_generic_arm_64only/general_all_phone_standard/obj/foundation/arkui/ace_engine/frameworks/bridge/declarative_frontend/stateMgmt.js:11943:1)
+12-10 22:00:07.141 20088 20088 E C01317/com.gavin.podcasters/AppKit:     at observeComponentCreation2 (/usr1/hmos_for_system/src/increment/sourcecode/out/generic_generic_arm_64only/general_all_phone_standard/obj/foundation/arkui/ace_engine/frameworks/bridge/declarative_frontend/stateMgmt.js:11970:1)
+12-10 22:00:07.141 20088 20088 E C01317/com.gavin.podcasters/AppKit:     at headerRightBuilder phone (products/phone/src/main/ets/pages/podcast/PodcastPage.ets:654:22)
+12-10 22:00:07.141 20088 20088 E C01317/com.gavin.podcasters/AppKit:     at anonymous lib_widget (components/lib_widget/src/main/ets/components/NavHeaderBar.ets:54:11)
+12-10 22:00:07.141 20088 20088 E C01317/com.gavin.podcasters/AppKit:     at ifElseBranchUpdateFunction (/usr1/hmos_for_system/src/increment/sourcecode/out/generic_generic_arm_64only/general_all_phone_standard/obj/foundation/arkui/ace_engine/frameworks/bridge/declarative_frontend/stateMgmt.js:5049:1)
+12-10 22:00:07.141 20088 20088 E C01317/com.gavin.podcasters/AppKit:     at anonymous lib_widget (components/lib_widget/src/main/ets/components/NavHeaderBar.ets:53:36)
+12-10 22:00:07.141 20088 20088 E C01317/com.gavin.podcasters/AppKit:     at updateFunc (/usr1/hmos_for_system/src/increment/sourcecode/out/generic_generic_arm_64only/general_all_phone_standard/obj/foundation/arkui/ace_engine/frameworks/bridge/declarative_frontend/stateMgmt.js:11943:1)
+12-10 22:00:07.141 20088 20088 E C01317/com.gavin.podcasters/AppKit:     at observeComponentCreation2 (/usr1/hmos_for_system/src/increment/sourcecode/out/generic_generic_arm_64only/general_all_phone_standard/obj/foundation/arkui/ace_engine/frameworks/bridge/declarative_frontend/stateMgmt.js:11970:1)
+12-10 22:00:07.141 20088 20088 E C01317/com.gavin.podcasters/AppKit:     at initialRender lib_widget (components/lib_widget/src/main/ets/components/NavHeaderBar.ets:28:12)
+12-10 22:00:07.141 20088 20088 E C01317/com.gavin.podcasters/AppKit:     at initialRenderView (/usr1/hmos_for_system/src/increment/sourcecode/out/generic_generic_arm_64only/general_all_phone_standard/obj/foundation/arkui/ace_engine/frameworks/bridge/declarative_frontend/stateMgmt.js:11888:1)
+12-10 22:00:07.141 20088 20088 W C01317/com.gavin.podcasters/AppKit: [MAINTHD2033]hisysevent write result=0, send event [FRAMEWORK,PROCESS_KILL], pid=20088, processName=com.gavin.podcasters, msg=Kill Reason:Js Error, foreground=1, isUncatchable=0
