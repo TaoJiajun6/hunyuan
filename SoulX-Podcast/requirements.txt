@@ -3,6 +3,7 @@ numpy
 scipy
 s3tokenizer
 diffusers
+peft
 torch==2.7.1
 torchaudio==2.7.1
 triton>=3.0.0

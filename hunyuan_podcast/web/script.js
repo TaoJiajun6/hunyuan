@@ -117,39 +117,158 @@ async function generateMultiRole(event) {
     log('multi', '提交中，请稍候...');
     showProgress('multi', 10);
     
-    // 发送请求
-    const resp = await fetch('/api/v1/podcast/multi_role', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(requestBody)
-    });
+    // 发送请求（增加超时时间，因为生成可能需要较长时间）
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30秒超时（仅用于提交）
     
-    if (!resp.ok) {
+    let resp;
+    try {
+      resp = await fetch('/api/v1/podcast/multi_role', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+    } catch (e) {
+      clearTimeout(timeoutId);
+      if (e.name === 'AbortError') {
+        // 提交超时，但任务可能已经在后端开始处理，尝试轮询
+        log('multi', '提交请求超时，但任务可能已开始处理，正在检查进度...');
+        // 继续执行轮询逻辑
+      } else {
+        throw new Error(`网络错误: ${e.message}`);
+      }
+    }
+    
+    // 如果请求成功，获取响应数据
+    let submitData = null;
+    if (resp && resp.ok) {
+      submitData = await resp.json();
+      if (!submitData.success) {
+        throw new Error(submitData.message || '提交失败');
+      }
+      log('multi', '任务已提交，正在生成中...');
+    } else if (resp && !resp.ok) {
       const errorText = await resp.text();
       throw new Error(`HTTP ${resp.status}: ${errorText}`);
-    }
-    
-    const data = await resp.json();
-    if (!data.success) throw new Error(data.message || '生成失败');
-    
-    log('multi', '生成完成！');
-    showProgress('multi', 100);
-    
-    // 处理音频播放
-    const player = document.getElementById('player-multi');
-    if (data.data.audio_base64) {
-      // 如果有 base64 音频，直接使用
-      player.src = 'data:audio/wav;base64,' + data.data.audio_base64;
-    } else if (data.data.audio_url) {
-      // 如果有 URL，使用 URL
-      player.src = data.data.audio_url;
     } else {
-      throw new Error('未找到音频数据');
+      // 请求超时，但继续尝试轮询
+      log('multi', '正在检查任务状态...');
     }
-    player.style.display = 'block';
-    player.load();
+    
+    showProgress('multi', 15);
+    
+    // 轮询获取进度
+    const pollInterval = 2000; // 2秒轮询一次
+    const maxPollTime = 600000; // 最大等待10分钟
+    const startTime = Date.now();
+    
+    const pollProgress = async () => {
+      let lastProgress = 0;
+      while (Date.now() - startTime < maxPollTime) {
+        try {
+          const progressResp = await fetch(`/api/v1/podcast/progress/${jobId}`);
+          if (!progressResp.ok) {
+            // 如果是 404，可能是任务还没创建，继续等待
+            if (progressResp.status === 404) {
+              await new Promise(resolve => setTimeout(resolve, pollInterval));
+              continue;
+            }
+            throw new Error(`获取进度失败: HTTP ${progressResp.status}`);
+          }
+          
+          const progressData = await progressResp.json();
+          
+          // 检查是否是未知状态（任务不存在）
+          if (progressData.phase === 'unknown') {
+            // 任务可能还没创建，继续等待
+            await new Promise(resolve => setTimeout(resolve, pollInterval));
+            continue;
+          }
+          
+          // 更新进度
+          if (progressData.percent !== undefined && progressData.percent !== lastProgress) {
+            showProgress('multi', progressData.percent);
+            lastProgress = progressData.percent;
+          }
+          if (progressData.message) {
+            log('multi', progressData.message);
+          }
+          
+          // 检查是否完成
+          if (progressData.done) {
+            if (progressData.error) {
+              throw new Error(progressData.error);
+            }
+            
+            // 任务完成，获取最终结果
+            log('multi', '生成完成！正在获取音频...');
+            showProgress('multi', 100);
+            
+            // 如果有 audio_url，直接使用
+            if (progressData.audio_url) {
+              const player = document.getElementById('player-multi');
+              player.src = progressData.audio_url;
+              player.style.display = 'block';
+              player.load();
+              log('multi', '音频已加载！');
+              return;
+            }
+            
+            // 如果没有 audio_url，等待一下再检查（后端可能还在处理）
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // 再次检查进度，看是否有 audio_url
+            const finalProgressResp = await fetch(`/api/v1/podcast/progress/${jobId}`);
+            if (finalProgressResp.ok) {
+              const finalProgressData = await finalProgressResp.json();
+              if (finalProgressData.audio_url) {
+                const player = document.getElementById('player-multi');
+                player.src = finalProgressData.audio_url;
+                player.style.display = 'block';
+                player.load();
+                log('multi', '音频已加载！');
+                return;
+              }
+            }
+            
+            // 如果还是没有，尝试从提交响应中获取（后端可能已经返回了）
+            if (submitData.data) {
+              const player = document.getElementById('player-multi');
+              if (submitData.data.audio_base64) {
+                player.src = 'data:audio/wav;base64,' + submitData.data.audio_base64;
+              } else if (submitData.data.audio_url) {
+                player.src = submitData.data.audio_url;
+              } else {
+                throw new Error('未找到音频数据，请检查后端日志');
+              }
+              player.style.display = 'block';
+              player.load();
+              log('multi', '音频已加载！');
+              return;
+            }
+            
+            throw new Error('未找到音频数据，请检查后端是否成功生成');
+          }
+          
+          // 等待后继续轮询
+          await new Promise(resolve => setTimeout(resolve, pollInterval));
+        } catch (e) {
+          if (e.message.includes('获取进度失败') || e.message.includes('未找到音频数据')) {
+            throw e;
+          }
+          // 其他错误继续轮询
+          await new Promise(resolve => setTimeout(resolve, pollInterval));
+        }
+      }
+      
+      throw new Error('生成超时，请稍后重试');
+    };
+    
+    await pollProgress();
   } catch (e) {
     log('multi', '错误：' + e.message);
     showProgress('multi', 0);
