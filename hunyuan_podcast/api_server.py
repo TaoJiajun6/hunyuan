@@ -842,7 +842,7 @@ async def log_requests(request: Request, call_next):
                 if content_length:
                     logger.info(f"中间件未读取请求体（大小: {int(content_length) / 1024 / 1024:.2f} MB），将由FastAPI端点直接处理")
                 else:
-                logger.debug("中间件读取请求体失败，将让 FastAPI 端点直接处理请求体")
+                    logger.debug("中间件读取请求体失败，将让 FastAPI 端点直接处理请求体")
         except Exception as e:
             logger.warning(f"中间件处理请求体时出错: {str(e)}")
             # 如果出现异常，确保不重新创建请求流，让 FastAPI 自己处理
