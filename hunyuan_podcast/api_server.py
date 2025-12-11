@@ -1,6 +1,5 @@
 """
 混元AI播客生成系统 - REST API服务
-提供REST API接口供工作流系统调用
 """
 import os
 import sys
@@ -3236,16 +3235,37 @@ async def get_podcast_file(file_id: str):
     获取生成的播客文件
     
     - **file_id**: 文件名（相对于输出目录）
+    
+    前端可以直接通过此 API 访问 ./hunyuan/outputs/podcasts 目录中的音频文件
+    例如：/api/v1/podcast/file/podcast_20231211_123456.wav
     """
     try:
+        # 安全检查：防止路径遍历攻击
+        if '..' in file_id or '/' in file_id or '\\' in file_id:
+            raise HTTPException(status_code=400, detail="无效的文件名")
+        
         file_path = os.path.join(OUTPUT_DIR, file_id)
         if not os.path.exists(file_path):
             raise HTTPException(status_code=404, detail="文件不存在")
         
+        # 根据文件扩展名确定媒体类型
+        ext = os.path.splitext(file_id)[1].lower()
+        media_types = {
+            '.wav': 'audio/wav',
+            '.mp3': 'audio/mpeg',
+            '.flac': 'audio/flac',
+            '.m4a': 'audio/mp4',
+        }
+        media_type = media_types.get(ext, 'audio/wav')
+        
         return FileResponse(
             file_path,
-            media_type="audio/wav",
-            filename=file_id
+            media_type=media_type,
+            filename=file_id,
+            headers={
+                "Content-Disposition": f'inline; filename="{file_id}"',
+                "Cache-Control": "public, max-age=3600"
+            }
         )
     except HTTPException:
         raise
@@ -3421,6 +3441,8 @@ async def get_podcast_history(limit: int = 50, category: Optional[str] = None):
         
         # 从进度文件读取播客信息
         history_list = []
+        file_map = {}  # 用于映射文件名到播客信息
+        
         if os.path.exists(_PROGRESS_DIR):
             progress_files = glob.glob(os.path.join(_PROGRESS_DIR, '*.json'))
             for progress_file in progress_files:
@@ -3442,18 +3464,44 @@ async def get_podcast_history(limit: int = 50, category: Optional[str] = None):
                         except:
                             pass
                         
+                        # 获取本地文件路径
+                        local_file_path = None
+                        local_filename = None
+                        if task_info:
+                            audio_path = task_info.get('audio_path', '')
+                            if audio_path:
+                                # 如果是绝对路径，提取文件名
+                                if os.path.isabs(audio_path):
+                                    local_filename = os.path.basename(audio_path)
+                                    if os.path.exists(audio_path):
+                                        local_file_path = audio_path
+                                else:
+                                    # 如果是相对路径，尝试拼接
+                                    local_filename = os.path.basename(audio_path)
+                                    full_path = os.path.join(OUTPUT_DIR, local_filename)
+                                    if os.path.exists(full_path):
+                                        local_file_path = full_path
+                        
+                        # 构建音频URL（优先使用本地文件，其次使用云存储URL）
+                        audio_url = progress_data.get('audio_url')
+                        if local_filename and os.path.exists(os.path.join(OUTPUT_DIR, local_filename)):
+                            # 如果本地文件存在，使用本地文件API
+                            audio_url = f"/api/v1/podcast/file/{local_filename}"
+                            file_map[local_filename] = True
+                        
                         # 构建播客信息
                         podcast_info = {
                             'id': job_id,
-                            'title': progress_data.get('message', '未命名播客'),
-                            'audio_url': progress_data.get('audio_url'),
+                            'title': progress_data.get('title') or progress_data.get('message', '未命名播客'),
+                            'audio_url': audio_url,
+                            'local_file': local_filename if local_file_path else None,
                             'created_at': progress_data.get('ts', int(time.time())),
                             'duration': None,  # 时长需要从音频文件获取，暂时设为None
                             'category': progress_data.get('category'),
                             'status': 'completed',
-                            'script': task_info.get('script') if task_info else None,
+                            'script': task_info.get('script') if task_info else progress_data.get('script'),
                             'file_size_mb': task_info.get('file_size_mb') if task_info else None,
-                            'topic': task_info.get('topic') if task_info else None,
+                            'topic': task_info.get('topic') if task_info else progress_data.get('topic'),
                         }
                         
                         # 如果有 script，提取前100字符作为内容预览
@@ -3463,6 +3511,31 @@ async def get_podcast_history(limit: int = 50, category: Optional[str] = None):
                         history_list.append(podcast_info)
                 except Exception as e:
                     logger.debug(f"读取进度文件失败: {progress_file}, {e}")
+        
+        # 扫描 OUTPUT_DIR 目录，添加没有进度文件的音频文件
+        if os.path.exists(OUTPUT_DIR):
+            audio_extensions = ['.wav', '.mp3', '.flac', '.m4a']
+            for ext in audio_extensions:
+                audio_files = glob.glob(os.path.join(OUTPUT_DIR, f'*{ext}'))
+                for audio_file in audio_files:
+                    filename = os.path.basename(audio_file)
+                    # 如果这个文件还没有在历史列表中
+                    if filename not in file_map:
+                        file_stat = os.stat(audio_file)
+                        file_map[filename] = True
+                        history_list.append({
+                            'id': f'file_{filename}',
+                            'title': os.path.splitext(filename)[0],
+                            'audio_url': f"/api/v1/podcast/file/{filename}",
+                            'local_file': filename,
+                            'created_at': int(file_stat.st_mtime),
+                            'duration': None,
+                            'category': None,
+                            'status': 'completed',
+                            'script': None,
+                            'file_size_mb': round(file_stat.st_size / (1024 * 1024), 2),
+                            'topic': None,
+                        })
         
         # 按创建时间倒序排序
         history_list.sort(key=lambda x: x.get('created_at', 0), reverse=True)
