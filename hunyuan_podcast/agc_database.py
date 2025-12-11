@@ -176,21 +176,39 @@ class AGCDatabaseClient:
         roles_str = podcast_data.get('roles', '[]')
         if isinstance(roles_str, list):
             roles_str = json.dumps(roles_str, ensure_ascii=False)
+        elif roles_str is None:
+            roles_str = '[]'
+        
+        # 处理duration字段（确保是整数或None）
+        duration = podcast_data.get('duration')
+        if duration is not None:
+            try:
+                duration = int(duration)
+            except (ValueError, TypeError):
+                duration = None
+        
+        # 处理file_size_mb字段（确保是浮点数或None）
+        file_size_mb = podcast_data.get('file_size_mb')
+        if file_size_mb is not None:
+            try:
+                file_size_mb = float(file_size_mb)
+            except (ValueError, TypeError):
+                file_size_mb = None
         
         return {
             "fs": [
-                {"s": podcast_data.get('id', '')},  # id (主键)
-                {"s": podcast_data.get('title', '')},  # title
-                {"s": podcast_data.get('audio_url') or ''},  # audio_url
-                {"s": podcast_data.get('local_file') or ''},  # local_file
+                {"s": str(podcast_data.get('id', ''))},  # id (主键)
+                {"s": str(podcast_data.get('title', ''))},  # title
+                {"s": str(podcast_data.get('audio_url') or '')},  # audio_url
+                {"s": str(podcast_data.get('local_file') or '')},  # local_file
                 {"l": int(podcast_data.get('created_at', 0))},  # created_at
-                {"l": int(podcast_data.get('duration', 0)) if podcast_data.get('duration') else None},  # duration
-                {"s": podcast_data.get('category') or ''},  # category
-                {"s": podcast_data.get('status', 'completed')},  # status
-                {"s": podcast_data.get('script') or ''},  # script
-                {"d": float(podcast_data.get('file_size_mb', 0)) if podcast_data.get('file_size_mb') else None},  # file_size_mb
-                {"s": podcast_data.get('topic') or ''},  # topic
-                {"s": roles_str},  # roles (JSON字符串)
+                {"l": duration},  # duration (整数或None)
+                {"s": str(podcast_data.get('category') or '')},  # category
+                {"s": str(podcast_data.get('status', 'completed'))},  # status
+                {"s": str(podcast_data.get('script') or '')},  # script
+                {"d": file_size_mb},  # file_size_mb (浮点数或None)
+                {"s": str(podcast_data.get('topic') or '')},  # topic
+                {"s": str(roles_str)},  # roles (JSON字符串)
                 {"l": None},  # naturalbase_version
                 {"bl": False}  # naturalbase_deleted
             ]
@@ -207,30 +225,41 @@ class AGCDatabaseClient:
             播客数据字典
         """
         fs = clouddb_data.get('fs', [])
-        if len(fs) < 13:
+        logger.debug(f"转换CloudDB数据，字段数量: {len(fs)}")
+        
+        # 字段数量应该至少是12个（不包括naturalbase_version和naturalbase_deleted）
+        # 但为了兼容性，我们允许更少的字段
+        if len(fs) < 12:
+            logger.warning(f"字段数量不足: {len(fs)} < 12，原始数据: {json.dumps(clouddb_data, ensure_ascii=False)}")
             return {}
         
-        # 解析roles字段
-        roles = fs[11].get('s', '[]')
+        # 解析roles字段（索引11）
+        roles = '[]'
+        if len(fs) > 11:
+            roles = fs[11].get('s', '[]')
         try:
             roles = json.loads(roles) if roles else []
         except:
             roles = []
         
-        return {
-            'id': fs[0].get('s', ''),
-            'title': fs[1].get('s', ''),
-            'audio_url': fs[2].get('s', ''),
-            'local_file': fs[3].get('s', ''),
-            'created_at': fs[4].get('l', 0),
-            'duration': fs[5].get('l'),
-            'category': fs[6].get('s', ''),
-            'status': fs[7].get('s', 'completed'),
-            'script': fs[8].get('s', ''),
-            'file_size_mb': fs[9].get('d'),
-            'topic': fs[10].get('s', ''),
+        # 安全地获取字段值，使用索引访问
+        podcast = {
+            'id': fs[0].get('s', '') if len(fs) > 0 else '',
+            'title': fs[1].get('s', '') if len(fs) > 1 else '',
+            'audio_url': fs[2].get('s', '') if len(fs) > 2 else '',
+            'local_file': fs[3].get('s', '') if len(fs) > 3 else '',
+            'created_at': fs[4].get('l', 0) if len(fs) > 4 else 0,
+            'duration': fs[5].get('l') if len(fs) > 5 else None,
+            'category': fs[6].get('s', '') if len(fs) > 6 else '',
+            'status': fs[7].get('s', 'completed') if len(fs) > 7 else 'completed',
+            'script': fs[8].get('s', '') if len(fs) > 8 else '',
+            'file_size_mb': fs[9].get('d') if len(fs) > 9 else None,
+            'topic': fs[10].get('s', '') if len(fs) > 10 else '',
             'roles': roles
         }
+        
+        logger.debug(f"转换后的播客数据: {json.dumps(podcast, ensure_ascii=False, default=str)}")
+        return podcast
     
     def save_podcast(self, podcast_data: Dict[str, Any]) -> bool:
         """
@@ -307,14 +336,33 @@ class AGCDatabaseClient:
             resp.raise_for_status()
             
             result = resp.json()
-            if result.get('ret', {}).get('code') == 0:
+            ret_code = result.get('ret', {}).get('code')
+            ret_msg = result.get('ret', {}).get('msg', '未知错误')
+            
+            if ret_code == 0:
                 logger.info(f"播客数据已保存到云数据库: {podcast_data['id']}")
                 return True
             else:
-                logger.warning(f"保存播客数据到云数据库失败: {result.get('ret', {}).get('msg', '未知错误')}")
+                logger.error(f"保存播客数据到云数据库失败:")
+                logger.error(f"  错误码: {ret_code}")
+                logger.error(f"  错误信息: {ret_msg}")
+                logger.error(f"  完整响应: {json.dumps(result, ensure_ascii=False, indent=2)}")
+                logger.error(f"  播客数据ID: {podcast_data.get('id')}")
+                logger.error(f"  播客数据标题: {podcast_data.get('title')}")
                 return False
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"保存播客数据到云数据库时HTTP错误: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    logger.error(f"  响应状态码: {e.response.status_code}")
+                    logger.error(f"  响应内容: {json.dumps(error_detail, ensure_ascii=False, indent=2)}")
+                except:
+                    logger.error(f"  响应内容: {e.response.text[:500]}")
+            return False
         except Exception as e:
             logger.error(f"保存播客数据到云数据库时出错: {e}", exc_info=True)
+            logger.error(f"  播客数据: {json.dumps(podcast_data, ensure_ascii=False, indent=2, default=str)}")
             return False
     
     def get_podcast(self, podcast_id: str) -> Optional[Dict[str, Any]]:
@@ -471,11 +519,13 @@ class AGCDatabaseClient:
             query_conditions = []
             
             # 首先添加过滤条件：只查询未删除的记录
-            query_conditions.append({
-                "conditionType": "EqualTo",
-                "fieldName": "naturalbase_deleted",
-                "value": False
-            })
+            # 注意：如果数据中没有 naturalbase_deleted 字段，这个条件可能会导致查询不到数据
+            # 为了兼容性，我们先尝试查询所有数据，然后在内存中过滤
+            # query_conditions.append({
+            #     "conditionType": "EqualTo",
+            #     "fieldName": "naturalbase_deleted",
+            #     "value": False
+            # })
             
             # 如果指定了分类，添加分类过滤
             if category and category != 'all':
@@ -524,10 +574,16 @@ class AGCDatabaseClient:
                 }
             }
             
+            logger.debug(f"查询播客列表，查询条件: {json.dumps(query_conditions, ensure_ascii=False, indent=2)}")
+            logger.debug(f"查询请求URL: {url}")
+            logger.debug(f"查询请求Payload: {json.dumps(payload, ensure_ascii=False, indent=2)}")
+            
             resp = requests.post(url, headers=headers, json=payload, timeout=30)
             resp.raise_for_status()
             
             result = resp.json()
+            logger.debug(f"查询响应: {json.dumps(result, ensure_ascii=False, indent=2)}")
+            
             # 检查响应状态
             ret_code = result.get('ret', {}).get('code')
             if ret_code == 0 or ret_code is None:  # 成功时 code 可能为 0 或不存在
@@ -535,24 +591,45 @@ class AGCDatabaseClient:
                 op_data_list = result.get('opData', [])
                 podcasts = []
                 
+                logger.debug(f"opData 列表长度: {len(op_data_list)}")
+                
                 # 遍历 opData 中的每个 OperatorData
-                for op_data in op_data_list:
+                for idx, op_data in enumerate(op_data_list):
+                    logger.debug(f"处理 opData[{idx}]: {json.dumps(op_data, ensure_ascii=False, indent=2)}")
                     # 获取对象列表 os
                     objects = op_data.get('os', [])
-                    for obj in objects:
+                    logger.debug(f"  对象数量: {len(objects)}")
+                    for obj_idx, obj in enumerate(objects):
+                        logger.debug(f"  处理对象[{obj_idx}]: {json.dumps(obj, ensure_ascii=False, indent=2)}")
                         podcast = self._convert_from_clouddb_format(obj)
                         if podcast:
-                            podcasts.append(podcast)
+                            # 在内存中过滤：只保留未删除的记录
+                            # 检查 naturalbase_deleted 字段（索引13）
+                            fs = obj.get('fs', [])
+                            is_deleted = False
+                            if len(fs) > 13:
+                                is_deleted = fs[13].get('bl', False)
+                            elif len(fs) == 13:
+                                is_deleted = fs[12].get('bl', False)  # 如果只有13个字段，naturalbase_deleted在索引12
+                            
+                            if not is_deleted:
+                                logger.debug(f"  转换后的播客数据: {json.dumps(podcast, ensure_ascii=False, indent=2)}")
+                                podcasts.append(podcast)
+                            else:
+                                logger.debug(f"  跳过已删除的播客: {podcast.get('id')}")
+                        else:
+                            logger.warning(f"  对象转换失败，原始数据: {json.dumps(obj, ensure_ascii=False, indent=2)}")
                 
                 # 在内存中排序（如果CloudDB不支持排序）
                 if order_by == "created_at":
                     podcasts.sort(key=lambda x: x.get('created_at', 0), reverse=(order == "desc"))
                 
-                logger.debug(f"从云数据库获取到 {len(podcasts)} 个播客")
+                logger.info(f"从云数据库获取到 {len(podcasts)} 个播客")
                 return podcasts
             else:
                 error_msg = result.get('ret', {}).get('msg', '未知错误')
-                logger.warning(f"查询失败，错误码: {ret_code}, 错误信息: {error_msg}")
+                logger.error(f"查询失败，错误码: {ret_code}, 错误信息: {error_msg}")
+                logger.error(f"完整响应: {json.dumps(result, ensure_ascii=False, indent=2)}")
             return []
         except Exception as e:
             error_msg = str(e)

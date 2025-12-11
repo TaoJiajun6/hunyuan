@@ -2325,10 +2325,15 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 from .agc_database import get_database_client
                 db_client = get_database_client()
                 if db_client:
-                    db_client.save_podcast(podcast_metadata)
-                    logger.info("播客元数据已保存到AGC云数据库")
+                    success = db_client.save_podcast(podcast_metadata)
+                    if success:
+                        logger.info("播客元数据已保存到AGC云数据库")
+                    else:
+                        logger.warning("播客元数据保存到云数据库失败（不影响主流程）")
+                else:
+                    logger.debug("未配置云数据库客户端，跳过保存")
             except Exception as e:
-                logger.debug(f"保存播客元数据到云数据库失败（不影响主流程）: {e}")
+                logger.warning(f"保存播客元数据到云数据库失败（不影响主流程）: {e}", exc_info=True)
             
             data = {
                     "audio_base64": audio_base64,
