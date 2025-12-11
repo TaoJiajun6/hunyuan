@@ -94,7 +94,13 @@ def get_agc_token(domain: str, client_id: str, client_secret: str, timeout: int 
     if not client_id or not client_secret:
         raise AGCUploadError('缺少 client_id 或 client_secret，无法获取 token')
 
-    cache_key = f"{domain}:{client_id}"
+    # 根据官方文档，Token 获取接口必须使用 connect-drcn.dbankcloud.cn
+    # 如果传入的是其他域名，自动修正（用于缓存key）
+    token_domain_for_cache = domain
+    if domain == 'connect-api.cloud.huawei.com':
+        token_domain_for_cache = 'connect-drcn.dbankcloud.cn'
+    
+    cache_key = f"{token_domain_for_cache}:{client_id}"
     cached = _TOKEN_CACHE.get(cache_key)
     now = time.time()
     if cached and cached.get('expires_at', 0) > now + 5:
@@ -102,8 +108,15 @@ def get_agc_token(domain: str, client_id: str, client_secret: str, timeout: int 
         remaining_expires = int(cached.get('expires_at', 0) - now)
         return (cached['token'], remaining_expires if remaining_expires > 0 else 3600)
 
+    # 根据官方文档，Token 获取接口必须使用 connect-drcn.dbankcloud.cn
+    # 如果传入的是其他域名，自动修正
+    token_domain = domain
+    if domain == 'connect-api.cloud.huawei.com':
+        logger.warning(f"检测到域名 {domain}，Token 获取需要使用 connect-drcn.dbankcloud.cn，已自动修正")
+        token_domain = 'connect-drcn.dbankcloud.cn'
+    
     # 根据官方文档，URL是 /agc/apigw/oauth2/v1/token
-    url = f"https://{domain}/agc/apigw/oauth2/v1/token"
+    url = f"https://{token_domain}/agc/apigw/oauth2/v1/token"
     payload = {
         'useJwt': '1',  # 固定值，表示使用JWT
         'grant_type': 'client_credentials',

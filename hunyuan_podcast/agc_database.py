@@ -52,7 +52,15 @@ class AGCDatabaseClient:
         self.client_id = client_id or os.getenv('AGC_CLIENT_ID')
         self.client_secret = client_secret or os.getenv('AGC_CLIENT_SECRET')
         self.product_id = product_id or os.getenv('AGC_PRODUCT_ID')
-        self.domain = domain or os.getenv('AGC_DOMAIN', 'connect-drcn.dbankcloud.cn')
+        # CloudDB 和 Token 获取必须使用 connect-drcn.dbankcloud.cn
+        # 如果环境变量设置为其他域名，自动修正
+        env_domain = domain or os.getenv('AGC_DOMAIN', 'connect-drcn.dbankcloud.cn')
+        if env_domain == 'connect-api.cloud.huawei.com':
+            # 自动修正为正确的 CloudDB 域名
+            logger.warning(f"检测到域名 {env_domain}，CloudDB 需要使用 connect-drcn.dbankcloud.cn，已自动修正")
+            self.domain = 'connect-drcn.dbankcloud.cn'
+        else:
+            self.domain = env_domain
         self.cloud_db_zone = cloud_db_zone or os.getenv('AGC_CLOUD_DB_ZONE', 'cloudDBZone')
         
         # 如果没有提供认证信息，尝试从文件读取
