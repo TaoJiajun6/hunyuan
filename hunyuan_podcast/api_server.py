@@ -3229,6 +3229,56 @@ async def generate_podcast_cover(request: GenerateCoverRequest):
         )
 
 
+@app.get("/api/v1/podcast/debug/paths", response_model=ApiResponse)
+async def get_debug_paths():
+    """
+    获取调试信息：真实的文件路径和目录信息
+    用于调试和确认实际的输出目录路径
+    """
+    try:
+        import glob
+        
+        # 获取真实的 OUTPUT_DIR 路径
+        output_dir_abs = os.path.abspath(OUTPUT_DIR)
+        output_dir_exists = os.path.exists(OUTPUT_DIR)
+        
+        # 列出所有音频文件
+        audio_files = []
+        if os.path.exists(OUTPUT_DIR):
+            audio_extensions = ['.wav', '.mp3', '.flac', '.m4a']
+            for ext in audio_extensions:
+                files = glob.glob(os.path.join(OUTPUT_DIR, f'*{ext}'))
+                for f in files:
+                    file_stat = os.stat(f)
+                    audio_files.append({
+                        'filename': os.path.basename(f),
+                        'full_path': f,
+                        'size_mb': round(file_stat.st_size / (1024 * 1024), 2),
+                        'created_at': int(file_stat.st_mtime),
+                        'api_url': f"/api/v1/podcast/file/{os.path.basename(f)}"
+                    })
+        
+        # 按创建时间排序
+        audio_files.sort(key=lambda x: x['created_at'], reverse=True)
+        
+        return ApiResponse(
+            success=True,
+            message="调试信息",
+            data={
+                "output_dir": OUTPUT_DIR,
+                "output_dir_absolute": output_dir_abs,
+                "output_dir_exists": output_dir_exists,
+                "project_root": os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "current_working_dir": os.getcwd(),
+                "audio_files_count": len(audio_files),
+                "audio_files": audio_files[:20]  # 只返回前20个
+            }
+        )
+    except Exception as e:
+        logger.error(f"获取调试信息失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取调试信息失败: {str(e)}")
+
+
 @app.get("/api/v1/podcast/file/{file_id}")
 async def get_podcast_file(file_id: str):
     """
@@ -3246,7 +3296,12 @@ async def get_podcast_file(file_id: str):
         
         file_path = os.path.join(OUTPUT_DIR, file_id)
         if not os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail="文件不存在")
+            # 提供更详细的错误信息，包括实际查找的路径
+            logger.warning(f"文件不存在: {file_path} (OUTPUT_DIR: {OUTPUT_DIR})")
+            raise HTTPException(
+                status_code=404, 
+                detail=f"文件不存在: {file_id}。查找路径: {file_path}。实际输出目录: {OUTPUT_DIR}"
+            )
         
         # 根据文件扩展名确定媒体类型
         ext = os.path.splitext(file_id)[1].lower()
