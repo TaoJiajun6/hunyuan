@@ -49,43 +49,116 @@ function updateDeepVoices() {
   }
 }
 
-async function generateMultiRole() {
-  const text = document.getElementById('text').value.trim();
-  const role1 = document.getElementById('role1').value.trim() || '角色A';
-  const role2 = document.getElementById('role2').value.trim() || '角色B';
-  const silence = document.getElementById('silence').value.trim() || '800';
-  const voice1 = document.getElementById('voice1').files[0];
-  const voice2 = document.getElementById('voice2').files[0];
-  const bg = document.getElementById('bg').files[0];
-  if (!text) { log('multi', '请输入文本'); return; }
-  if (!voice1 || !voice2) { log('multi', '请上传两个角色的音色文件'); return; }
-  const fd = new FormData();
-  fd.append('text', text);
-  fd.append('role1', role1);
-  fd.append('role2', role2);
-  fd.append('silence_interval', silence);
-  fd.append('voice1', voice1);
-  fd.append('voice2', voice2);
-  if (bg) fd.append('background', bg);
-  const btn = event.target;
-  btn.disabled = true;
-  log('multi', '提交中，请稍候...');
-  showProgress('multi', 10);
+// 将文件转换为 base64
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      // 移除 data:audio/...;base64, 前缀，只保留 base64 字符串
+      const base64 = reader.result.split(',')[1];
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function generateMultiRole(event) {
+  console.log('generateMultiRole 函数被调用');
+  
+  // 获取按钮元素
+  const btn = event ? event.target : document.querySelector('#tab-multi button[onclick*="generateMultiRole"]');
+  
   try {
-    const resp = await fetch('/web/api/generate', { method: 'POST', body: fd });
+    const text = document.getElementById('text').value.trim();
+    const role1 = document.getElementById('role1').value.trim() || '角色A';
+    const role2 = document.getElementById('role2').value.trim() || '角色B';
+    const silence = parseInt(document.getElementById('silence').value.trim() || '800');
+    const voice1 = document.getElementById('voice1').files[0];
+    const voice2 = document.getElementById('voice2').files[0];
+    
+    console.log('输入验证:', { text: text ? '有文本' : '无文本', voice1: !!voice1, voice2: !!voice2 });
+    
+    if (!text) { 
+      log('multi', '请输入文本'); 
+      return; 
+    }
+    if (!voice1 || !voice2) { 
+      log('multi', '请上传两个角色的音色文件'); 
+      return; 
+    }
+    
+    if (btn) {
+      btn.disabled = true;
+    }
+    log('multi', '正在处理文件，请稍候...');
+    showProgress('multi', 5);
+    // 将音色文件转换为 base64
+    log('multi', '正在转换音色文件...');
+    const [voice1Base64, voice2Base64] = await Promise.all([
+      fileToBase64(voice1),
+      fileToBase64(voice2)
+    ]);
+    
+    // 生成 job_id
+    const jobId = 'job_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    
+    // 构建请求体
+    const requestBody = {
+      text: text,
+      role_voices: {
+        [role1]: voice1Base64,
+        [role2]: voice2Base64
+      },
+      silence_interval: silence,
+      job_id: jobId
+    };
+    
+    log('multi', '提交中，请稍候...');
+    showProgress('multi', 10);
+    
+    // 发送请求
+    const resp = await fetch('/api/v1/podcast/multi_role', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestBody)
+    });
+    
+    if (!resp.ok) {
+      const errorText = await resp.text();
+      throw new Error(`HTTP ${resp.status}: ${errorText}`);
+    }
+    
     const data = await resp.json();
     if (!data.success) throw new Error(data.message || '生成失败');
+    
     log('multi', '生成完成！');
     showProgress('multi', 100);
+    
+    // 处理音频播放
     const player = document.getElementById('player-multi');
-    player.src = data.data.audio_url;
+    if (data.data.audio_base64) {
+      // 如果有 base64 音频，直接使用
+      player.src = 'data:audio/wav;base64,' + data.data.audio_base64;
+    } else if (data.data.audio_url) {
+      // 如果有 URL，使用 URL
+      player.src = data.data.audio_url;
+    } else {
+      throw new Error('未找到音频数据');
+    }
     player.style.display = 'block';
     player.load();
   } catch (e) {
     log('multi', '错误：' + e.message);
     showProgress('multi', 0);
+    console.error('生成播客失败:', e);
   } finally {
-    btn.disabled = false;
+    // 确保按钮重新启用
+    if (btn) {
+      btn.disabled = false;
+    }
   }
 }
 
