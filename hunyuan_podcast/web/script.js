@@ -790,13 +790,55 @@ function playPodcast(audioUrl, podcastId, event) {
   // 可以打开一个播放器或者直接播放
   const player = document.getElementById('audio-player');
   if (player) {
-    console.log('播放播客:', podcastId, '音频URL:', audioUrl);
-    player.src = audioUrl;
+    console.log('播放播客:', podcastId, '原始音频URL:', audioUrl);
+    
+    // 如果URL包含中文字符，确保正确编码
+    // 后端应该已经编码了URL，但如果收到未编码的URL，这里进行编码
+    let finalUrl = audioUrl;
+    
+    // 检查URL是否包含未编码的中文字符
+    if (/[\u4e00-\u9fa5]/.test(audioUrl) && !audioUrl.includes('%')) {
+      try {
+        // 分离URL的各个部分
+        const urlObj = new URL(audioUrl);
+        // 对路径部分进行编码（每个路径段单独编码，保留斜杠）
+        const pathParts = urlObj.pathname.split('/').filter(part => part); // 过滤空字符串
+        const encodedPath = '/' + pathParts.map(part => {
+          // 如果路径段已经编码（包含%），不再编码；否则编码
+          if (part.includes('%')) {
+            return part;
+          }
+          return encodeURIComponent(part);
+        }).join('/');
+        urlObj.pathname = encodedPath;
+        finalUrl = urlObj.toString();
+        console.log('Web端编码后的音频URL:', finalUrl);
+      } catch (e) {
+        // 如果URL解析失败，尝试简单编码文件名部分
+        console.warn('URL解析失败，尝试简单编码文件名:', e);
+        // 尝试找到最后一个斜杠，只编码文件名部分
+        const lastSlash = audioUrl.lastIndexOf('/');
+        if (lastSlash > 0) {
+          const baseUrl = audioUrl.substring(0, lastSlash + 1);
+          const filename = audioUrl.substring(lastSlash + 1);
+          finalUrl = baseUrl + encodeURIComponent(filename);
+          console.log('简单编码文件名后的音频URL:', finalUrl);
+        } else {
+          finalUrl = audioUrl;
+        }
+      }
+    } else {
+      // URL已经编码或没有中文字符，直接使用
+      console.log('URL已编码或无需编码，直接使用');
+    }
+    
+    player.src = finalUrl;
     player.style.display = 'block';
     
     // 添加错误处理
     player.onerror = function(e) {
       console.error('音频播放失败:', e);
+      console.error('失败的URL:', finalUrl);
       alert('音频加载失败，请检查URL是否正确或网络连接');
       player.style.display = 'none';
     };

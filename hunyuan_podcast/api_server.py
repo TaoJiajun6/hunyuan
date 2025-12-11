@@ -1583,14 +1583,32 @@ def do_agc_upload(output_path: str, storage_url: str, bucket: str, product_id: O
             
             # 上传成功后，更新进度中的 audio_url
             if job_id and res.get('status') == 'uploaded':
-                # 构建完整的访问 URL
+                # 构建完整的访问 URL，对文件名部分进行URL编码（处理中文文件名）
+                from urllib.parse import quote
                 if object_name:
-                    audio_url = f"{storage_url.rstrip('/')}/{bucket}/{object_name}"
+                    # 分离路径和文件名，只对文件名部分进行编码
+                    path_parts = object_name.split('/')
+                    if len(path_parts) > 0:
+                        # 对最后一个部分（文件名）进行编码
+                        filename = path_parts[-1]
+                        encoded_filename = quote(filename, safe='')
+                        # 重新组合路径
+                        encoded_path = '/'.join(path_parts[:-1] + [encoded_filename])
+                        audio_url = f"{storage_url.rstrip('/')}/{bucket}/{encoded_path}"
+                    else:
+                        audio_url = f"{storage_url.rstrip('/')}/{bucket}/{object_name}"
                 else:
                     # 如果没有提供 object_name，从返回结果中获取
                     object_name = res.get('object')
                     if object_name:
-                        audio_url = f"{storage_url.rstrip('/')}/{bucket}/{object_name}"
+                        path_parts = object_name.split('/')
+                        if len(path_parts) > 0:
+                            filename = path_parts[-1]
+                            encoded_filename = quote(filename, safe='')
+                            encoded_path = '/'.join(path_parts[:-1] + [encoded_filename])
+                            audio_url = f"{storage_url.rstrip('/')}/{bucket}/{encoded_path}"
+                        else:
+                            audio_url = f"{storage_url.rstrip('/')}/{bucket}/{object_name}"
                     else:
                         audio_url = None
                 
@@ -2311,11 +2329,21 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                                                   agc_product_id, agc_domain, agc_client_id, agc_client_secret,
                                                   request.job_id, object_name)
                         logger.info("已在后台启动 AGC 上传任务（不阻塞主流程）")
+                        # 构建URL时对文件名进行编码（处理中文文件名）
+                        from urllib.parse import quote
+                        # 分离路径和文件名，只对文件名部分进行编码
+                        path_parts = object_name.split('/')
+                        if len(path_parts) > 0:
+                            filename = path_parts[-1]
+                            encoded_filename = quote(filename, safe='')
+                            encoded_path = '/'.join(path_parts[:-1] + [encoded_filename])
+                        else:
+                            encoded_path = object_name
                         agc_result = {
                             'status': 'started',
                             'bucket': agc_bucket,
                             'object': object_name,
-                            'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
+                            'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{encoded_path}"
                         }
                         # 更新进度，包含音频URL（即使后台上传，也先返回URL以便前端从云存储下载）
                         audio_url = agc_result.get('url') if isinstance(agc_result, dict) else None
@@ -2746,11 +2774,21 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
                                                   agc_product_id, agc_domain, agc_client_id, agc_client_secret,
                                                   request.job_id, object_name)
                         logger.info("已在后台启动 AGC 上传任务（不阻塞主流程）")
+                        # 构建URL时对文件名进行编码（处理中文文件名）
+                        from urllib.parse import quote
+                        # 分离路径和文件名，只对文件名部分进行编码
+                        path_parts = object_name.split('/')
+                        if len(path_parts) > 0:
+                            filename = path_parts[-1]
+                            encoded_filename = quote(filename, safe='')
+                            encoded_path = '/'.join(path_parts[:-1] + [encoded_filename])
+                        else:
+                            encoded_path = object_name
                         agc_result = {
                             'status': 'started',
                             'bucket': agc_bucket,
                             'object': object_name,
-                            'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
+                            'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{encoded_path}"
                         }
                         # 更新进度，包含音频URL（即使后台上传，也先返回URL以便前端从云存储下载）
                         audio_url = agc_result.get('url') if isinstance(agc_result, dict) else None
@@ -3094,11 +3132,21 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
                                                   agc_product_id, agc_domain, agc_client_id, agc_client_secret,
                                                   request.job_id, object_name)
                         logger.info("已在后台启动 AGC 上传任务（不阻塞主流程）")
+                        # 构建URL时对文件名进行编码（处理中文文件名）
+                        from urllib.parse import quote
+                        # 分离路径和文件名，只对文件名部分进行编码
+                        path_parts = object_name.split('/')
+                        if len(path_parts) > 0:
+                            filename = path_parts[-1]
+                            encoded_filename = quote(filename, safe='')
+                            encoded_path = '/'.join(path_parts[:-1] + [encoded_filename])
+                        else:
+                            encoded_path = object_name
                         agc_result = {
                             'status': 'started',
                             'bucket': agc_bucket,
                             'object': object_name,
-                            'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{object_name}"
+                            'url': f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{encoded_path}"
                         }
                         # 更新进度，包含音频URL（即使后台上传，也先返回URL以便前端从云存储下载）
                         audio_url = agc_result.get('url') if isinstance(agc_result, dict) else None
