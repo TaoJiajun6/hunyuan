@@ -363,6 +363,11 @@ class AGCDatabaseClient:
                     "value": podcast_id
                 },
                 {
+                    "conditionType": "EqualTo",
+                    "fieldName": "naturalbase_deleted",
+                    "value": False
+                },
+                {
                     "conditionType": "Limit",
                     "value": {
                         "number": 1,
@@ -392,12 +397,20 @@ class AGCDatabaseClient:
             resp.raise_for_status()
             
             result = resp.json()
-            if result.get('ret', {}).get('code') == 0:
-                query_result = result.get('queryResultMsg', {})
-                objects = query_result.get('objects', [])
-                if objects and len(objects) > 0:
-                    # 转换第一个对象
-                    return self._convert_from_clouddb_format(objects[0])
+            # 检查响应状态
+            ret_code = result.get('ret', {}).get('code')
+            if ret_code == 0 or ret_code is None:  # 成功时 code 可能为 0 或不存在
+                # 根据文档，数据在 opData 中
+                op_data_list = result.get('opData', [])
+                if op_data_list:
+                    # 获取第一个 OperatorData 中的对象列表
+                    objects = op_data_list[0].get('os', [])
+                    if objects and len(objects) > 0:
+                        # 转换第一个对象
+                        return self._convert_from_clouddb_format(objects[0])
+            else:
+                error_msg = result.get('ret', {}).get('msg', '未知错误')
+                logger.debug(f"查询单个播客失败，错误码: {ret_code}, 错误信息: {error_msg}")
             return None
         except Exception as e:
             logger.debug(f"从云数据库获取播客数据时出错: {e}")
@@ -455,6 +468,21 @@ class AGCDatabaseClient:
             # 构造查询条件
             query_conditions = []
             
+            # 首先添加过滤条件：只查询未删除的记录
+            query_conditions.append({
+                "conditionType": "EqualTo",
+                "fieldName": "naturalbase_deleted",
+                "value": False
+            })
+            
+            # 如果指定了分类，添加分类过滤
+            if category and category != 'all':
+                query_conditions.append({
+                    "conditionType": "EqualTo",
+                    "fieldName": "category",
+                    "value": category
+                })
+            
             # 如果指定了 limit，添加 Limit 条件；否则使用一个很大的值来获取所有数据
             if limit is not None and limit > 0:
                 query_conditions.append({
@@ -472,14 +500,6 @@ class AGCDatabaseClient:
                         "number": 10000,  # 足够大的值，应该能覆盖所有播客
                         "offset": 0
                     }
-                })
-            
-            # 如果指定了分类，添加分类过滤
-            if category:
-                query_conditions.insert(0, {
-                    "conditionType": "EqualTo",
-                    "fieldName": "category",
-                    "value": category
                 })
             
             # 添加排序（注意：CloudDB的排序可能需要通过其他方式实现）
@@ -506,20 +526,31 @@ class AGCDatabaseClient:
             resp.raise_for_status()
             
             result = resp.json()
-            if result.get('ret', {}).get('code') == 0:
-                query_result = result.get('queryResultMsg', {})
-                objects = query_result.get('objects', [])
+            # 检查响应状态
+            ret_code = result.get('ret', {}).get('code')
+            if ret_code == 0 or ret_code is None:  # 成功时 code 可能为 0 或不存在
+                # 根据文档，数据在 opData 中
+                op_data_list = result.get('opData', [])
                 podcasts = []
-                for obj in objects:
-                    podcast = self._convert_from_clouddb_format(obj)
-                    if podcast:
-                        podcasts.append(podcast)
+                
+                # 遍历 opData 中的每个 OperatorData
+                for op_data in op_data_list:
+                    # 获取对象列表 os
+                    objects = op_data.get('os', [])
+                    for obj in objects:
+                        podcast = self._convert_from_clouddb_format(obj)
+                        if podcast:
+                            podcasts.append(podcast)
                 
                 # 在内存中排序（如果CloudDB不支持排序）
                 if order_by == "created_at":
                     podcasts.sort(key=lambda x: x.get('created_at', 0), reverse=(order == "desc"))
                 
+                logger.debug(f"从云数据库获取到 {len(podcasts)} 个播客")
                 return podcasts
+            else:
+                error_msg = result.get('ret', {}).get('msg', '未知错误')
+                logger.warning(f"查询失败，错误码: {ret_code}, 错误信息: {error_msg}")
             return []
         except Exception as e:
             error_msg = str(e)
