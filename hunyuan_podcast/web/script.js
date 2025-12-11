@@ -703,18 +703,42 @@ function createPodcastCard(podcast) {
   const card = document.createElement('div');
   card.className = 'podcast-card';
   
-  const date = new Date(podcast.created_at * 1000);
-  const dateStr = date.toLocaleDateString('zh-CN');
+  // 处理时间：created_at可能是秒级或毫秒级时间戳
+  let created_at = podcast.created_at;
+  if (created_at) {
+    // 如果是毫秒级时间戳（大于10位数），需要转换为秒
+    if (created_at > 10000000000) {
+      created_at = Math.floor(created_at / 1000);
+    }
+    const date = new Date(created_at * 1000);
+    var dateStr = date.toLocaleDateString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }) + ' ' + date.toLocaleTimeString('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  } else {
+    var dateStr = '未知';
+  }
   
   // 格式化时长（如果有）
   let durationStr = '未知';
   if (podcast.duration) {
-    const minutes = Math.floor(podcast.duration / 60);
-    durationStr = `${minutes} 分钟`;
+    // duration是秒数
+    const totalSeconds = parseInt(podcast.duration);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    if (minutes > 0) {
+      durationStr = seconds > 0 ? `${minutes}分${seconds}秒` : `${minutes}分钟`;
+    } else {
+      durationStr = `${seconds}秒`;
+    }
   } else if (podcast.file_size_mb) {
     // 根据文件大小估算时长（粗略估算：1MB ≈ 1分钟）
     const estimatedMinutes = Math.round(podcast.file_size_mb);
-    durationStr = `${estimatedMinutes} 分钟`;
+    durationStr = `${estimatedMinutes} 分钟（估算）`;
   }
   
   // 获取内容预览
@@ -737,7 +761,7 @@ function createPodcastCard(podcast) {
         </div>
       </div>
       <div class="podcast-actions">
-        <button class="play-btn" onclick="playPodcast('${podcast.audio_url}', event)" title="播放">
+        <button class="play-btn" onclick="playPodcast('${podcast.audio_url || ''}', '${podcast.id}', event)" title="${podcast.audio_url ? '播放' : '暂无音频'}" ${!podcast.audio_url ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''}>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
             <path d="M6 4 L12 8 L6 12 Z"/>
           </svg>
@@ -755,14 +779,41 @@ function createPodcastCard(podcast) {
 }
 
 // 播放播客
-function playPodcast(audioUrl, event) {
+function playPodcast(audioUrl, podcastId, event) {
   event.stopPropagation();
+  
+  if (!audioUrl || audioUrl === 'null' || audioUrl === 'undefined' || audioUrl.trim() === '') {
+    alert('该播客暂无音频文件');
+    return;
+  }
+  
   // 可以打开一个播放器或者直接播放
   const player = document.getElementById('audio-player');
   if (player) {
+    console.log('播放播客:', podcastId, '音频URL:', audioUrl);
     player.src = audioUrl;
     player.style.display = 'block';
-    player.play();
+    
+    // 添加错误处理
+    player.onerror = function(e) {
+      console.error('音频播放失败:', e);
+      alert('音频加载失败，请检查URL是否正确或网络连接');
+      player.style.display = 'none';
+    };
+    
+    // 添加加载成功处理
+    player.onloadeddata = function() {
+      console.log('音频加载成功，开始播放');
+      player.play().catch(err => {
+        console.error('播放失败:', err);
+        alert('播放失败: ' + err.message);
+      });
+    };
+    
+    // 尝试播放
+    player.load();
+  } else {
+    alert('找不到音频播放器');
   }
 }
 

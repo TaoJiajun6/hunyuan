@@ -955,6 +955,40 @@ class BatchRequest(BaseModel):
 
 # ============ 工具函数 ============
 
+def get_audio_duration(file_path: Optional[str]) -> Optional[int]:
+    """
+    获取音频文件的时长（秒）
+    
+    Args:
+        file_path: 音频文件路径
+    
+    Returns:
+        时长（秒），如果获取失败则返回None
+    """
+    if not file_path or not os.path.exists(file_path):
+        return None
+    
+    try:
+        import librosa
+        audio_data, sr = librosa.load(file_path, sr=None)
+        duration_seconds = int(len(audio_data) / sr)
+        logger.debug(f"使用librosa获取音频时长: {duration_seconds}秒")
+        return duration_seconds
+    except Exception as e:
+        logger.debug(f"使用librosa获取音频时长失败: {e}")
+        # 如果librosa不可用，尝试使用wave模块
+        try:
+            import wave
+            with wave.open(file_path, 'rb') as wav_file:
+                frames = wav_file.getnframes()
+                sample_rate = wav_file.getframerate()
+                duration_seconds = int(frames / sample_rate)
+                logger.debug(f"使用wave模块获取音频时长: {duration_seconds}秒")
+                return duration_seconds
+        except Exception as e2:
+            logger.warning(f"获取音频时长失败: {e2}")
+            return None
+
 def decode_base64_audio(base64_str: str, suffix: str = ".wav") -> str:
     """解码base64音频文件并保存到临时文件"""
     try:
@@ -2305,13 +2339,16 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                            title=podcast_title, topic=request.topic, category=request.category, script=text_content)
             
             # 构建播客元数据
+            # 尝试获取音频时长
+            duration_seconds = get_audio_duration(output_path)
+            
             podcast_metadata = {
                 "id": request.job_id,
                 "title": podcast_title,
                 "audio_url": agc_result.get('url') if isinstance(agc_result, dict) else None,
                 "local_file": os.path.basename(output_path) if output_path else None,
-                "created_at": int(time.time()),
-                "duration": None,  # 时长需要从音频文件获取
+                "created_at": int(time.time()),  # 秒级时间戳
+                "duration": duration_seconds,  # 时长（秒）
                 "category": request.category,
                 "status": "completed",
                 "script": text_content,
