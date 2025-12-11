@@ -512,7 +512,7 @@ def get_task_manager() -> PodcastTaskManager:
 def _progress_path(job_id: str) -> str:
     return os.path.join(_PROGRESS_DIR, f"{job_id}.json")
 
-def _update_progress(job_id: Optional[str], phase: str, percent: int, message: str, done: bool = False, error: Optional[str] = None, audio_url: Optional[str] = None):
+def _update_progress(job_id: Optional[str], phase: str, percent: int, message: str, done: bool = False, error: Optional[str] = None, audio_url: Optional[str] = None, **kwargs):
     """更新任务进度
     
     Args:
@@ -523,6 +523,7 @@ def _update_progress(job_id: Optional[str], phase: str, percent: int, message: s
         done: 是否完成
         error: 错误信息（可选）
         audio_url: 音频云存储URL（可选，生成完成后提供）
+        **kwargs: 其他额外信息（如 script, topic, category 等）
     """
     if not job_id:
         return
@@ -538,6 +539,11 @@ def _update_progress(job_id: Optional[str], phase: str, percent: int, message: s
     # 如果提供了 audio_url，添加到进度数据中（用于前端从云存储下载）
     if audio_url:
         data["audio_url"] = audio_url
+    
+    # 添加其他额外信息
+    for key, value in kwargs.items():
+        if value is not None:
+            data[key] = value
     _PROGRESS_CACHE[job_id] = data
     try:
         with open(_progress_path(job_id), 'w', encoding='utf-8') as f:
@@ -2209,11 +2215,13 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                         }
                         # 更新进度，包含音频URL（即使后台上传，也先返回URL以便前端从云存储下载）
                         audio_url = agc_result.get('url') if isinstance(agc_result, dict) else None
+                        # 注意：此时 podcast_title 还未定义，稍后在生成完成后更新
                         _update_progress(request.job_id, "uploading", 95, "生成完成，已开始后台上传到云存储", done=True, audio_url=audio_url)
                     except Exception as e:
                         logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
                 else:
                     logger.debug("未检测到 AGC 存储配置，跳过后台上传")
+                    # 注意：此时 podcast_title 还未定义，稍后在生成完成后更新
                     _update_progress(request.job_id, "completed", 100, "生成完成", done=True)
             except Exception as e:
                 logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
@@ -2225,12 +2233,21 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
             total_time = time.time() - start_time
             logger.info(f"多角色播客生成成功，总耗时: {total_time:.2f}s，输出文件大小: {file_size:.2f} MB")
             
+            # 生成播客标题（从文本内容提取或使用默认）
+            podcast_title = request.podcast_name or request.topic or (text_content[:50] + "..." if len(text_content) > 50 else text_content)
+            
+            # 更新进度，保存完整的播客信息
+            _update_progress(request.job_id, "completed", 100, podcast_title, done=True, 
+                           title=podcast_title, topic=request.topic, category=request.category, script=text_content)
+            
             data = {
                     "audio_base64": audio_base64,
                 "audio_path": output_path,  # 默认使用本地路径
                     "file_size_mb": round(file_size, 2),
                 "script": text_content,
-                    "roles": list(roles)
+                    "roles": list(roles),
+                    "title": podcast_title,
+                    "topic": request.topic
                 }
             if agc_result:
                 data['agc_upload_status'] = agc_result
@@ -3387,6 +3404,88 @@ async def get_task_status(task_id: str):
     except Exception as e:
         logger.error(f"查询任务状态失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"查询任务状态失败: {str(e)}")
+
+
+@app.get("/api/v1/podcast/history", response_model=ApiResponse)
+async def get_podcast_history(limit: int = 50, category: Optional[str] = None):
+    """
+    获取历史播客列表
+    
+    参数：
+    - limit: 返回数量限制，默认50
+    - category: 播客分类过滤，可选
+    """
+    try:
+        import glob
+        from datetime import datetime
+        
+        # 从进度文件读取播客信息
+        history_list = []
+        if os.path.exists(_PROGRESS_DIR):
+            progress_files = glob.glob(os.path.join(_PROGRESS_DIR, '*.json'))
+            for progress_file in progress_files:
+                try:
+                    with open(progress_file, 'r', encoding='utf-8') as f:
+                        progress_data = json.load(f)
+                    
+                    # 只包含已完成的播客
+                    if progress_data.get('done') and not progress_data.get('error'):
+                        job_id = os.path.splitext(os.path.basename(progress_file))[0]
+                        
+                        # 尝试从任务管理器获取更多信息
+                        task_info = None
+                        try:
+                            task_manager = get_task_manager()
+                            task = task_manager.get_task(job_id)
+                            if task and task.result:
+                                task_info = task.result
+                        except:
+                            pass
+                        
+                        # 构建播客信息
+                        podcast_info = {
+                            'id': job_id,
+                            'title': progress_data.get('message', '未命名播客'),
+                            'audio_url': progress_data.get('audio_url'),
+                            'created_at': progress_data.get('ts', int(time.time())),
+                            'duration': None,  # 时长需要从音频文件获取，暂时设为None
+                            'category': progress_data.get('category'),
+                            'status': 'completed',
+                            'script': task_info.get('script') if task_info else None,
+                            'file_size_mb': task_info.get('file_size_mb') if task_info else None,
+                            'topic': task_info.get('topic') if task_info else None,
+                        }
+                        
+                        # 如果有 script，提取前100字符作为内容预览
+                        if podcast_info['script']:
+                            podcast_info['content'] = podcast_info['script'][:100] + '...' if len(podcast_info['script']) > 100 else podcast_info['script']
+                        
+                        history_list.append(podcast_info)
+                except Exception as e:
+                    logger.debug(f"读取进度文件失败: {progress_file}, {e}")
+        
+        # 按创建时间倒序排序
+        history_list.sort(key=lambda x: x.get('created_at', 0), reverse=True)
+        
+        # 分类过滤
+        if category and category != 'all':
+            history_list = [h for h in history_list if h.get('category') == category]
+        
+        # 限制数量
+        history_list = history_list[:limit]
+        
+        return ApiResponse(
+            success=True,
+            message=f"共找到 {len(history_list)} 个历史播客",
+            data={
+                "podcasts": history_list,
+                "total": len(history_list)
+            }
+        )
+    
+    except Exception as e:
+        logger.error(f"获取历史播客列表失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取历史播客列表失败: {str(e)}")
 
 
 @app.get("/api/v1/podcast/tasks", response_model=ApiResponse)

@@ -3,131 +3,194 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>混元 AI 播客生成 (Web)</title>
+  <title>真AI播客</title>
   <link rel="stylesheet" href="/web/style.css" />
 </head>
 <body>
-  <div class="container">
-    <h1>混元 AI 播客生成</h1>
-    
-    <div class="tabs">
-      <button class="tab active" onclick="switchTab('multi')">多角色播客</button>
-      <button class="tab" onclick="switchTab('character')">自定义角色</button>
-      <button class="tab" onclick="switchTab('deep')">主题深度</button>
-      <button class="tab" onclick="switchTab('analyze')">文本分析</button>
-    </div>
-
-    <!-- 多角色播客 -->
-    <div id="tab-multi" class="tab-content active">
-      <div class="card">
-        <h2>多角色互动播客</h2>
-        <label>播客文本</label>
-        <textarea id="text" rows="6" placeholder="支持含角色标记的文本，或普通叙述文本"></textarea>
-        <div class="row">
-          <div>
-            <label>角色1 名称</label>
-            <input id="role1" type="text" value="角色A" />
-            <label>角色1 音色文件</label>
-            <input id="voice1" type="file" accept=".wav,.mp3,.flac,.m4a" />
-          </div>
-          <div>
-            <label>角色2 名称</label>
-            <input id="role2" type="text" value="角色B" />
-            <label>角色2 音色文件</label>
-            <input id="voice2" type="file" accept=".wav,.mp3,.flac,.m4a" />
-          </div>
-        </div>
-        <div class="row">
-          <div>
-            <label>静音间隔 (毫秒)</label>
-            <input id="silence" type="text" value="800" />
-          </div>
-          <div>
-            <label>背景音乐</label>
-            <input type="text" value="自动选择" disabled style="opacity: 0.6;" />
-            <small style="display: block; margin-top: 4px; opacity: 0.7; font-size: 12px;">系统会根据播客内容自动选择背景音乐</small>
-          </div>
-        </div>
-        <button onclick="generateMultiRole(event)">生成播客</button>
-        <div class="log" id="log-multi">等待提交...</div>
-        <div class="progress" id="progress-multi" style="display:none;"><div class="progress-bar" id="progress-bar-multi"></div></div>
-        <audio id="player-multi" controls style="display:none;"></audio>
+  <!-- 左侧边栏 -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">
+        <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+          <path d="M8 12 L16 6 L24 12 L24 26 L8 26 Z" stroke="currentColor" stroke-width="2" fill="none"/>
+          <path d="M12 16 L20 16" stroke="currentColor" stroke-width="2"/>
+        </svg>
+        <span>混元播客</span>
       </div>
     </div>
-
-    <!-- 自定义角色播客 -->
-    <div id="tab-character" class="tab-content">
-      <div class="card">
-        <h2>自定义角色播客</h2>
-        <label>文本素材</label>
-        <textarea id="char-text" rows="6" placeholder="输入文本素材"></textarea>
-        <label>播客主题（可选）</label>
-        <input id="char-topic" type="text" placeholder="例如：人工智能的未来" />
-        <h3>角色配置</h3>
-        <div id="characters-list"></div>
-        <button class="btn-add" onclick="addCharacter()">+ 添加角色</button>
-        <div style="margin-top: 16px;">
-          <label>静音间隔 (毫秒)</label>
-          <input id="char-silence" type="text" value="800" />
-        </div>
-        <button onclick="generateCharacter()">生成播客</button>
-        <div class="log" id="log-character">等待提交...</div>
-        <div class="progress" id="progress-character" style="display:none;"><div class="progress-bar" id="progress-bar-character"></div></div>
-        <audio id="player-character" controls style="display:none;"></audio>
-      </div>
+    <nav class="sidebar-nav">
+      <a href="#" class="nav-item active" onclick="switchPage('create'); return false;">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+          <path d="M3 10 L17 10 M10 3 L10 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span>首页</span>
+      </a>
+      <a href="#" class="nav-item" onclick="switchPage('history'); return false;">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+          <rect x="3" y="4" width="14" height="12" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/>
+          <path d="M7 8 L13 8 M7 11 L13 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <span>资料库</span>
+      </a>
+      <a href="#" class="nav-item" onclick="switchPage('explore'); return false;">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+          <rect x="3" y="3" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/>
+          <rect x="11" y="3" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/>
+          <rect x="3" y="11" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/>
+          <rect x="11" y="11" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/>
+        </svg>
+        <span>探索</span>
+      </a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-icon"></div>
     </div>
+  </aside>
 
-    <!-- 主题深度播客 -->
-    <div id="tab-deep" class="tab-content">
-      <div class="card">
-        <h2>主题深度播客</h2>
-        <label>播客主题</label>
-        <input id="deep-topic" type="text" placeholder="例如：人工智能对社会的影响" />
-        <div class="row">
-          <div>
-            <label>角色数量</label>
-            <select id="deep-num-chars">
-              <option value="1">1个角色</option>
-              <option value="2" selected>2个角色</option>
-              <option value="3">3个角色</option>
+  <!-- 主内容区 -->
+  <main class="main-content">
+    <!-- 创建播客页面 -->
+    <div id="page-create" class="page active">
+      <div class="page-header">
+        <h1 class="page-title">混元 AI 播客生成</h1>
+        <p class="page-subtitle">把你的创意转为播客</p>
+      </div>
+
+      <!-- 标签页 -->
+      <div class="tabs">
+        <button class="tab active" onclick="switchPodcastType('multi')">多角色互动播客</button>
+        <button class="tab" onclick="switchPodcastType('character')">自定义角色播客</button>
+        <button class="tab" onclick="switchPodcastType('deep')">主题深度播客</button>
+      </div>
+
+      <!-- 播客生成表单 -->
+      <div class="podcast-form">
+        <!-- 输入区域 -->
+        <div class="input-section">
+          <textarea 
+            id="podcast-input" 
+            class="podcast-input" 
+            placeholder="输入文字、上传文件或粘贴链接，我们帮你生成播客"
+            rows="6"
+          ></textarea>
+          <div class="input-actions">
+            <button class="icon-btn" title="粘贴链接">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <path d="M8 4 L12 4 L12 8 L8 8 Z" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                <path d="M4 8 L16 8 L16 16 L4 16 Z" stroke="currentColor" stroke-width="1.5" fill="none"/>
+              </svg>
+            </button>
+            <button class="icon-btn" title="上传文件">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <path d="M10 3 L10 13 M5 8 L10 3 L15 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M3 15 L17 15 L17 17 L3 17" stroke="currentColor" stroke-width="1.5"/>
+              </svg>
+              <input type="file" id="file-upload" accept=".txt,.doc,.docx,.pdf" style="display: none;" onchange="handleFileUpload(event)" />
+            </button>
+          </div>
+        </div>
+
+        <!-- 选项区域 -->
+        <div class="options-section">
+          <div class="option-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="quick-listen" />
+              <span>速听精华</span>
+            </label>
+          </div>
+          <div class="option-group">
+            <label>语言</label>
+            <select id="language" class="select-input">
+              <option value="zh-CN">中文 (普通话)</option>
+              <option value="en-US">English</option>
             </select>
           </div>
-          <div>
-            <label>深度级别</label>
-            <select id="deep-level">
-              <option value="浅层">浅层</option>
-              <option value="中等">中等</option>
-              <option value="深度" selected>深度</option>
-            </select>
+          <div class="option-group">
+            <label>选择音色</label>
+            <div id="voice-selectors" class="voice-selectors">
+              <!-- 动态生成音色选择器 -->
+            </div>
           </div>
         </div>
-        <h3>角色音色</h3>
-        <div id="deep-voices"></div>
-        <div style="margin-top: 16px;">
-          <label>静音间隔 (毫秒)</label>
-          <input id="deep-silence" type="text" value="800" />
+
+        <!-- 动态配置区域 -->
+        <div id="dynamic-config" class="dynamic-config">
+          <!-- 根据选择的播客类型动态显示 -->
         </div>
-        <button onclick="generateDeep()">生成播客</button>
-        <div class="log" id="log-deep">等待提交...</div>
-        <div class="progress" id="progress-deep" style="display:none;"><div class="progress-bar" id="progress-bar-deep"></div></div>
-        <audio id="player-deep" controls style="display:none;"></audio>
+
+        <!-- 生成按钮 -->
+        <div class="form-actions">
+          <button class="btn-primary" onclick="generatePodcast(event)">
+            <span>创作</span>
+          </button>
+        </div>
+
+        <!-- 状态显示 -->
+        <div class="status-section">
+          <div class="log" id="log-area">等待提交...</div>
+          <div class="progress" id="progress-area" style="display:none;">
+            <div class="progress-bar" id="progress-bar"></div>
+          </div>
+          <audio id="audio-player" controls style="display:none; width: 100%; margin-top: 16px;"></audio>
+        </div>
       </div>
     </div>
 
-    <!-- 文本分析 -->
-    <div id="tab-analyze" class="tab-content">
-      <div class="card">
-        <h2>文本分析</h2>
-        <label>文本素材</label>
-        <textarea id="analyze-text" rows="8" placeholder="输入要分析的文本素材，系统会自动推断播客名称、主题、角色设定和互动场景"></textarea>
-        <button onclick="analyzeText()">分析文本</button>
-        <div class="log" id="log-analyze">等待分析...</div>
-        <div id="analyze-result" class="analyze-result" style="display:none;"></div>
+    <!-- 历史播客页面 -->
+    <div id="page-history" class="page">
+      <div class="page-header">
+        <h1 class="page-title">资料库</h1>
+        <div class="page-actions">
+          <button class="btn-secondary" onclick="loadHistory()">刷新</button>
+        </div>
+      </div>
+
+      <!-- 分类筛选 -->
+      <div class="category-filters">
+        <button class="category-btn active" onclick="filterByCategory('all')">全部</button>
+        <button class="category-btn" onclick="filterByCategory('财经')">财经</button>
+        <button class="category-btn" onclick="filterByCategory('科技')">科技</button>
+        <button class="category-btn" onclick="filterByCategory('教育')">教育</button>
+        <button class="category-btn" onclick="filterByCategory('新闻')">新闻</button>
+        <button class="category-btn" onclick="filterByCategory('健康')">健康</button>
+        <button class="category-btn" onclick="filterByCategory('生活方式')">生活方式</button>
+        <button class="category-btn" onclick="filterByCategory('故事')">故事</button>
+      </div>
+
+      <!-- 播客列表 -->
+      <div id="podcast-list" class="podcast-grid">
+        <!-- 动态加载播客卡片 -->
       </div>
     </div>
-  </div>
+
+    <!-- 探索页面 -->
+    <div id="page-explore" class="page">
+      <div class="page-header">
+        <h1 class="page-title">探索</h1>
+        <div class="page-actions">
+          <button class="btn-secondary">▶ 播放全部</button>
+        </div>
+      </div>
+
+      <!-- 分类筛选 -->
+      <div class="category-filters">
+        <button class="category-btn active" onclick="filterByCategory('all')">全部</button>
+        <button class="category-btn" onclick="filterByCategory('财经')">财经</button>
+        <button class="category-btn" onclick="filterByCategory('科技')">科技</button>
+        <button class="category-btn" onclick="filterByCategory('教育')">教育</button>
+        <button class="category-btn" onclick="filterByCategory('新闻')">新闻</button>
+        <button class="category-btn" onclick="filterByCategory('健康')">健康</button>
+        <button class="category-btn" onclick="filterByCategory('生活方式')">生活方式</button>
+        <button class="category-btn" onclick="filterByCategory('故事')">故事</button>
+      </div>
+
+      <!-- 播客列表 -->
+      <div id="explore-list" class="podcast-grid">
+        <!-- 动态加载播客卡片 -->
+      </div>
+    </div>
+  </main>
 
   <script src="/web/script.js"></script>
 </body>
 </html>
-
