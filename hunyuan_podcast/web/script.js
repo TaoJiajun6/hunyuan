@@ -117,9 +117,9 @@ async function generateMultiRole(event) {
     log('multi', '提交中，请稍候...');
     showProgress('multi', 10);
     
-    // 发送请求（增加超时时间，因为生成可能需要较长时间）
+    // 发送请求（设置较短的超时，因为只需要提交成功即可，不需要等待生成完成）
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30秒超时（仅用于提交）
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时（仅用于提交，足够上传数据）
     
     let resp;
     try {
@@ -211,29 +211,62 @@ async function generateMultiRole(event) {
             // 如果有 audio_url，直接使用
             if (progressData.audio_url) {
               const player = document.getElementById('player-multi');
+              console.log('设置音频源:', progressData.audio_url);
               player.src = progressData.audio_url;
               player.style.display = 'block';
+              
+              // 添加错误处理
+              player.onerror = function(e) {
+                console.error('音频加载失败:', e);
+                log('multi', '音频加载失败，请检查 URL 是否正确');
+              };
+              
+              player.onloadeddata = function() {
+                console.log('音频数据已加载');
+                log('multi', '音频已加载！');
+              };
+              
               player.load();
-              log('multi', '音频已加载！');
               return;
             }
             
-            // 如果没有 audio_url，等待一下再检查（后端可能还在处理）
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-            // 再次检查进度，看是否有 audio_url
-            const finalProgressResp = await fetch(`/api/v1/podcast/progress/${jobId}`);
-            if (finalProgressResp.ok) {
-              const finalProgressData = await finalProgressResp.json();
-              if (finalProgressData.audio_url) {
-                const player = document.getElementById('player-multi');
-                player.src = finalProgressData.audio_url;
-                player.style.display = 'block';
-                player.load();
-                log('multi', '音频已加载！');
-                return;
+            // 如果没有 audio_url，可能是上传还在进行中，等待并重试几次
+            log('multi', '等待音频上传完成...');
+            for (let retry = 0; retry < 10; retry++) {
+              await new Promise(resolve => setTimeout(resolve, 2000)); // 每2秒检查一次
+              
+              const finalProgressResp = await fetch(`/api/v1/podcast/progress/${jobId}`);
+              if (finalProgressResp.ok) {
+                const finalProgressData = await finalProgressResp.json();
+                if (finalProgressData.audio_url) {
+                  const player = document.getElementById('player-multi');
+                  console.log('设置音频源（重试）:', finalProgressData.audio_url);
+                  player.src = finalProgressData.audio_url;
+                  player.style.display = 'block';
+                  
+                  // 添加错误处理
+                  player.onerror = function(e) {
+                    console.error('音频加载失败:', e);
+                    log('multi', '音频加载失败，请检查 URL 是否正确');
+                  };
+                  
+                  player.onloadeddata = function() {
+                    console.log('音频数据已加载');
+                    log('multi', '音频已加载！');
+                  };
+                  
+                  player.load();
+                  return;
+                }
+                // 更新进度显示
+                if (finalProgressData.message) {
+                  log('multi', finalProgressData.message);
+                }
               }
             }
+            
+            // 如果重试10次后还没有 audio_url，提示用户
+            log('multi', '警告：未找到音频URL，请检查后端日志');
             
             // 如果还是没有，尝试从提交响应中获取（后端可能已经返回了）
             if (submitData.data) {

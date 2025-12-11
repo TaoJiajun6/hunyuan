@@ -23,6 +23,7 @@ import glob
 import base64 as _base64
 from typing import Tuple
 import concurrent.futures
+import random
 
 # 导入音频处理相关库
 try:
@@ -1464,7 +1465,7 @@ def calculate_upload_timeout(file_path: str, base_timeout: int = 120) -> int:
 
 def do_agc_upload(output_path: str, storage_url: str, bucket: str, product_id: Optional[str] = None,
                   domain: str = 'connect-api.cloud.huawei.com', client_id: Optional[str] = None,
-                  client_secret: Optional[str] = None):
+                  client_secret: Optional[str] = None, job_id: Optional[str] = None, object_name: Optional[str] = None):
     """在后台执行 AGC 上传任务的 helper（供 BackgroundTasks 调用）"""
     try:
         if not agc_upload_client:
@@ -1481,10 +1482,32 @@ def do_agc_upload(output_path: str, storage_url: str, bucket: str, product_id: O
                 domain=domain,
                 client_id=client_id,
                 client_secret=client_secret,
+                object_name=object_name,
             )
             logger.info(f"后台 AGC 上传完成: {res}")
+            
+            # 上传成功后，更新进度中的 audio_url
+            if job_id and res.get('status') == 'uploaded':
+                # 构建完整的访问 URL
+                if object_name:
+                    audio_url = f"{storage_url.rstrip('/')}/{bucket}/{object_name}"
+                else:
+                    # 如果没有提供 object_name，从返回结果中获取
+                    object_name = res.get('object')
+                    if object_name:
+                        audio_url = f"{storage_url.rstrip('/')}/{bucket}/{object_name}"
+                    else:
+                        audio_url = None
+                
+                if audio_url:
+                    # 更新进度，包含最终的 audio_url
+                    _update_progress(job_id, "completed", 100, "上传完成，音频已就绪", done=True, audio_url=audio_url)
+                    logger.info(f"已更新进度 audio_url: {audio_url}")
         except Exception as e:
             logger.exception(f"后台 AGC 上传失败: {e}")
+            # 上传失败时，也更新进度
+            if job_id:
+                _update_progress(job_id, "failed", 100, f"上传失败: {str(e)}", done=True, error=f"上传失败: {str(e)}")
     except Exception:
         logger.exception("do_agc_upload 异常")
 
@@ -1651,15 +1674,20 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
     
     ## 注意事项
     
-    - 本接口仅支持云存储URL，不再支持base64编码的音频文件
+    - 音色文件支持两种方式：云存储URL（role_voice_urls）或base64编码（role_voices）
+    - 推荐使用云存储URL方式，base64编码会增加请求体大小，但适合小文件或本地开发
     - 如果输入普通文本，系统会自动转换为多角色对话，需要至少上传2个角色的音色文件
     - 系统会自动选择背景音乐，无需手动指定
     - 生成过程可能需要几分钟，建议使用job_id轮询进度
     """
+    # 生成或使用提供的 job_id
+    if not request.job_id:
+        request.job_id = f"job_{int(time.time() * 1000)}_{os.getpid()}_{random.randint(1000, 9999)}"
+    
     # 立即创建初始进度，确保前端轮询时能立即获取到状态
     _update_progress(request.job_id, "queued", 1, "任务已提交，准备开始处理")
-    start_time = time.time()
     
+    # 快速验证基本参数（不处理大文件，立即返回）
     # 验证文本输入（text、text_file_url或input_url至少有一个）
     has_text = request.text and request.text.strip()
     # 支持单个URL字符串或URL列表
@@ -1866,6 +1894,7 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
     role_voice_data = request.role_voice_urls if use_cloud_storage else request.role_voices
     
     logger.info(f"开始生成多角色播客: 角色数量={len(role_voice_data)}, 文本长度={len(text_content)}, 使用云存储={use_cloud_storage}")
+    start_time = time.time()
     
     try:
         gen = get_generator()
@@ -2169,7 +2198,8 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                         # 统一使用后台上传，避免阻塞和超时问题
                         # 参考之前提交的实现：立即返回base64音频，上传在后台进行
                         background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
-                                                  agc_product_id, agc_domain, agc_client_id, agc_client_secret)
+                                                  agc_product_id, agc_domain, agc_client_id, agc_client_secret,
+                                                  request.job_id, object_name)
                         logger.info("已在后台启动 AGC 上传任务（不阻塞主流程）")
                         agc_result = {
                             'status': 'started',
@@ -2222,6 +2252,7 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                         os.remove(temp_file)
                 except:
                     pass
+    
                     
     except HTTPException:
         _update_progress(getattr(request, 'job_id', None), "failed", 100, "请求参数错误", done=True, error="HTTPException")
@@ -2229,8 +2260,7 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
     except Exception as e:
         import traceback
         error_detail = traceback.format_exc()
-        total_time = time.time() - start_time
-        logger.error(f"多角色播客生成失败，耗时: {total_time:.2f}s，错误: {str(e)}")
+        logger.error(f"多角色播客生成失败，错误: {str(e)}")
         logger.error(f"错误详情:\n{error_detail}")
         _update_progress(getattr(request, 'job_id', None), "failed", 100, f"生成失败: {str(e)}", done=True, error=str(e))
         return ApiResponse(
@@ -2535,7 +2565,8 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
                         # 统一使用后台上传，避免阻塞和超时问题
                         # 参考之前提交的实现：立即返回base64音频，上传在后台进行
                         background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
-                                                  agc_product_id, agc_domain, agc_client_id, agc_client_secret)
+                                                  agc_product_id, agc_domain, agc_client_id, agc_client_secret,
+                                                  request.job_id, object_name)
                         logger.info("已在后台启动 AGC 上传任务（不阻塞主流程）")
                         agc_result = {
                             'status': 'started',
@@ -2866,7 +2897,8 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
                         # 统一使用后台上传，避免阻塞和超时问题
                         # 参考之前提交的实现：立即返回base64音频，上传在后台进行
                         background_tasks.add_task(do_agc_upload, output_path, agc_storage_url, agc_bucket,
-                                                  agc_product_id, agc_domain, agc_client_id, agc_client_secret)
+                                                  agc_product_id, agc_domain, agc_client_id, agc_client_secret,
+                                                  request.job_id, object_name)
                         logger.info("已在后台启动 AGC 上传任务（不阻塞主流程）")
                         agc_result = {
                             'status': 'started',
