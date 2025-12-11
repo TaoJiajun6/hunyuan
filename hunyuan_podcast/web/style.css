@@ -674,33 +674,10 @@ body {
   background: linear-gradient(135deg, var(--accent-pink), var(--accent-blue));
 }
 
-.player-thumbnail-placeholder {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: rgba(255, 255, 255, 0.8);
-  background: linear-gradient(135deg, var(--accent-pink), var(--accent-blue));
-}
-
 .player-thumbnail img {
   width: 100%;
   height: 100%;
   object-fit: cover;
-}
-
-.player-thumbnail-label {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: rgba(0, 0, 0, 0.6);
-  color: #ffffff;
-  font-size: 11px;
-  padding: 4px 8px;
-  text-align: center;
-  font-weight: 500;
 }
 
 /* 中间信息区域 */

@@ -162,13 +162,7 @@
     <div class="player-content">
       <!-- 左侧：缩略图 -->
       <div class="player-thumbnail">
-        <div class="player-thumbnail-placeholder">
-          <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
-            <path d="M20 8 L20 32 M8 20 L32 20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            <circle cx="20" cy="20" r="18" stroke="currentColor" stroke-width="2" fill="none"/>
-          </svg>
-        </div>
-        <div class="player-thumbnail-label" id="player-category">播客</div>
+        <!-- 缩略图背景渐变，无内容 -->
       </div>
       
       <!-- 中间：标题和信息 -->
@@ -197,9 +191,9 @@
             <path d="M6 4 H10 V20 H6 Z M14 4 H18 V20 H14 Z"/>
           </svg>
         </button>
-        <button class="player-btn" onclick="closePlayer()" title="关闭">
+        <button class="player-btn" onclick="playNext()" title="下一首">
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-            <path d="M5 5 L15 15 M15 5 L5 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <path d="M4 4 L4 16 M4 4 L10 10 L4 16 M10 4 L10 16 M10 4 L16 10 L10 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </button>
       </div>

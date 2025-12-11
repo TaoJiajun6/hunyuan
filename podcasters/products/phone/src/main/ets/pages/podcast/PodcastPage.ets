@@ -704,7 +704,7 @@ export struct PodcastPage {
         bottom: this.customPadding.bottom ?? 0,
       })
       .width(CommonConstants.FULL_PERCENT)
-      .backgroundColor(this.bgColor)
+      .backgroundColor('#fff8f8f8')
 
     }
     .hideTitleBar(true)

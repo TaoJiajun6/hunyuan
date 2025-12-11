@@ -76,12 +76,12 @@ export struct MusicPlayController {
         this.NoSong()
       } else {
         // 卡片内容
-        Row({ space: 12 }) {
+        Row() {
           // 左侧：缩略图
           this.ThumbnailBuilder()
 
           // 中间：歌曲信息
-          Column({ space: 4 }) {
+          Column() {
             this.SongInfoBuild()
           }
           .layoutWeight(1)
@@ -89,7 +89,7 @@ export struct MusicPlayController {
           .justifyContent(FlexAlign.Center)
 
           // 右侧：控制按钮
-          Row({ space: 12 }) {
+          Row() {
             // 播放/暂停按钮
             this.PlayPauseButton()
             
@@ -99,18 +99,18 @@ export struct MusicPlayController {
           .alignItems(VerticalAlign.Center)
         }
         .width('100%')
-        .padding(12)
       }
     }
     .width('100%')
     .height(55)
     .backgroundColor(Color.White)
-    .borderRadius(16)
+    .borderRadius(14)
+    .border()
     .shadow({
       radius: 14,
       color: '#1F000000',
       offsetX: 0,
-      offsetY: 10
+      offsetY: 20
     })
     .bindContentCover($$this.musicModel.isShowPlay, this.MusicPlayBuilder(), {
       transition: TransitionEffect.translate({ y: this.windowHeight })
@@ -120,8 +120,8 @@ export struct MusicPlayController {
         })
     })
     .padding({
-      left: 16,
-      right: 16,
+      left: 10,
+      right: 10,
       top: 8,
       bottom: 8
     })
@@ -132,7 +132,7 @@ export struct MusicPlayController {
    */
   @Builder
   NoSong() {
-    Row({ space: 16 }) {
+    Row() {
       Row() {
         SymbolGlyph($r('sys.symbol.music_fill'))
           .fontSize(28)

@@ -682,14 +682,19 @@ async function loadHistory() {
     
     const podcasts = data.data.podcasts || [];
     
+    // 保存播客列表到全局变量
+    podcastList = podcasts;
+    
     if (podcasts.length === 0) {
       listElement.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-secondary);">暂无历史播客</div>';
       return;
     }
     
     listElement.innerHTML = '';
-    podcasts.forEach(podcast => {
+    podcasts.forEach((podcast, index) => {
       const card = createPodcastCard(podcast);
+      // 为卡片添加索引，方便查找
+      card.dataset.podcastIndex = index;
       listElement.appendChild(card);
     });
   } catch (e) {
@@ -781,6 +786,8 @@ function createPodcastCard(podcast) {
 // 全局播放器状态
 let currentPlayingPodcast = null;
 let playerUpdateInterval = null;
+let podcastList = []; // 保存播客列表，用于下一首功能
+let currentPodcastIndex = -1; // 当前播放的播客索引
 
 // 播放播客
 function playPodcast(audioUrl, podcastId, event) {
@@ -797,13 +804,44 @@ function playPodcast(audioUrl, podcastId, event) {
   const card = event?.target?.closest('.podcast-card');
   let podcastTitle = '未命名播客';
   let podcastSubtitle = '';
-  let podcastCategory = '播客';
+  let podcastDuration = null;
+  let podcastIndex = -1;
   
-  if (card) {
+  // 从播客列表中查找完整的播客信息
+  const podcast = podcastList.find(p => p.id === podcastId);
+  if (podcast) {
+    podcastTitle = podcast.title || '未命名播客';
+    // 处理时间：created_at可能是秒级或毫秒级时间戳
+    let created_at = podcast.created_at;
+    if (created_at) {
+      if (created_at > 10000000000) {
+        created_at = Math.floor(created_at / 1000);
+      }
+      const date = new Date(created_at * 1000);
+      podcastSubtitle = date.toLocaleDateString('zh-CN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }) + ' ' + date.toLocaleTimeString('zh-CN', {
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    }
+    podcastDuration = podcast.duration ? parseInt(podcast.duration) : null;
+    podcastIndex = podcastList.findIndex(p => p.id === podcastId);
+  } else if (card) {
+    // 如果找不到，从卡片中提取
     const titleEl = card.querySelector('.podcast-title');
     const authorEl = card.querySelector('.podcast-author');
     if (titleEl) podcastTitle = titleEl.textContent.trim();
     if (authorEl) podcastSubtitle = authorEl.textContent.trim();
+    // 尝试从卡片的data属性获取索引
+    if (card.dataset.podcastIndex) {
+      podcastIndex = parseInt(card.dataset.podcastIndex);
+      if (podcastList[podcastIndex]) {
+        podcastDuration = podcastList[podcastIndex].duration ? parseInt(podcastList[podcastIndex].duration) : null;
+      }
+    }
   }
   
   // 显示播放器卡片
@@ -811,7 +849,7 @@ function playPodcast(audioUrl, podcastId, event) {
   const playerAudio = document.getElementById('player-audio');
   const playerTitleEl = document.getElementById('player-title');
   const playerSubtitleEl = document.getElementById('player-subtitle');
-  const playerCategoryEl = document.getElementById('player-category');
+  const totalTimeEl = document.getElementById('player-total-time');
   
   if (!playerCard || !playerAudio) {
     alert('找不到播放器组件');
@@ -821,7 +859,17 @@ function playPodcast(audioUrl, podcastId, event) {
   // 更新播放器信息
   playerTitleEl.textContent = podcastTitle;
   playerSubtitleEl.textContent = podcastSubtitle || '正在加载...';
-  playerCategoryEl.textContent = podcastCategory;
+  
+  // 如果有duration，立即显示总时长
+  if (podcastDuration) {
+    totalTimeEl.textContent = formatTime(podcastDuration);
+  } else {
+    totalTimeEl.textContent = '0:00';
+  }
+  
+  // 保存当前播客索引
+  currentPodcastIndex = podcastIndex;
+  
   playerCard.style.display = 'block';
   
   // 检测是否是云存储URL（需要代理）
@@ -860,6 +908,16 @@ function playPodcast(audioUrl, podcastId, event) {
   // 添加加载成功处理
   playerAudio.onloadedmetadata = function() {
     console.log('音频元数据加载成功');
+    // 如果音频元数据中有duration，使用它；否则使用播客数据中的duration
+    const audioDuration = playerAudio.duration;
+    const totalTimeEl = document.getElementById('player-total-time');
+    if (totalTimeEl) {
+      if (audioDuration && audioDuration > 0) {
+        totalTimeEl.textContent = formatTime(audioDuration);
+      } else if (podcastDuration) {
+        totalTimeEl.textContent = formatTime(podcastDuration);
+      }
+    }
     updatePlayerTime();
     playerSubtitleEl.textContent = podcastSubtitle || '准备播放';
   };
@@ -879,16 +937,30 @@ function playPodcast(audioUrl, podcastId, event) {
     updatePlayPauseButton(false);
     stopPlayerUpdate();
     resetPlayerProgress();
+    // 自动播放下一首
+    setTimeout(() => {
+      playNext();
+    }, 500);
   };
   
   // 进度条点击事件
   const progressBar = document.querySelector('.player-progress-bar');
   if (progressBar) {
     progressBar.onclick = function(e) {
-      if (playerAudio.duration) {
+      let duration = playerAudio.duration || 0;
+      // 如果音频duration不可用，尝试从播客数据中获取
+      if (!duration || duration === 0 || !isFinite(duration)) {
+        if (currentPodcastIndex >= 0 && podcastList[currentPodcastIndex]) {
+          const podcast = podcastList[currentPodcastIndex];
+          if (podcast.duration) {
+            duration = parseInt(podcast.duration);
+          }
+        }
+      }
+      if (duration > 0 && isFinite(duration)) {
         const rect = progressBar.getBoundingClientRect();
-        const percent = (e.clientX - rect.left) / rect.width;
-        playerAudio.currentTime = percent * playerAudio.duration;
+        const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        playerAudio.currentTime = percent * duration;
       }
     };
   }
@@ -941,20 +1013,33 @@ function updatePlayerTime() {
   if (!playerAudio) return;
   
   const currentTime = playerAudio.currentTime || 0;
-  const duration = playerAudio.duration || 0;
+  let duration = playerAudio.duration || 0;
+  
+  // 如果音频duration不可用，尝试从当前播放的播客数据中获取
+  if (!duration || duration === 0 || !isFinite(duration)) {
+    if (currentPodcastIndex >= 0 && podcastList[currentPodcastIndex]) {
+      const podcast = podcastList[currentPodcastIndex];
+      if (podcast.duration) {
+        duration = parseInt(podcast.duration);
+      }
+    }
+  }
   
   // 更新时间显示
   if (currentTimeEl) {
     currentTimeEl.textContent = formatTime(currentTime);
   }
   if (totalTimeEl) {
-    totalTimeEl.textContent = formatTime(duration);
+    // 只有当duration有效时才更新总时长
+    if (duration > 0 && isFinite(duration)) {
+      totalTimeEl.textContent = formatTime(duration);
+    }
   }
   
   // 更新进度条
-  if (progressFill && duration > 0) {
+  if (progressFill && duration > 0 && isFinite(duration)) {
     const percent = (currentTime / duration) * 100;
-    progressFill.style.width = percent + '%';
+    progressFill.style.width = Math.min(100, Math.max(0, percent)) + '%';
   }
 }
 
@@ -992,7 +1077,52 @@ function resetPlayerProgress() {
   if (currentTimeEl) currentTimeEl.textContent = '0:00';
 }
 
-// 关闭播放器
+// 播放下一首
+function playNext() {
+  if (podcastList.length === 0 || currentPodcastIndex < 0) {
+    console.log('没有可播放的播客列表');
+    return;
+  }
+  
+  // 找到下一个有音频的播客
+  let nextIndex = currentPodcastIndex;
+  let attempts = 0;
+  
+  do {
+    nextIndex = (nextIndex + 1) % podcastList.length;
+    attempts++;
+    
+    if (attempts > podcastList.length) {
+      console.log('没有找到下一个可播放的播客');
+      return;
+    }
+  } while (!podcastList[nextIndex] || !podcastList[nextIndex].audio_url);
+  
+  // 播放下一首
+  const nextPodcast = podcastList[nextIndex];
+  console.log('播放下一首:', nextPodcast.id, nextPodcast.title);
+  
+  // 创建一个模拟事件对象
+  const mockEvent = {
+    target: {
+      closest: () => {
+        // 尝试找到对应的卡片
+        const cards = document.querySelectorAll('.podcast-card');
+        for (let card of cards) {
+          if (card.dataset.podcastIndex == nextIndex) {
+            return card;
+          }
+        }
+        return null;
+      }
+    },
+    stopPropagation: () => {}
+  };
+  
+  playPodcast(nextPodcast.audio_url, nextPodcast.id, mockEvent);
+}
+
+// 关闭播放器（保留函数，但不在UI中显示）
 function closePlayer() {
   const playerCard = document.getElementById('player-card');
   const playerAudio = document.getElementById('player-audio');
@@ -1005,6 +1135,7 @@ function closePlayer() {
   stopPlayerUpdate();
   resetPlayerProgress();
   currentPlayingPodcast = null;
+  currentPodcastIndex = -1;
   
   if (playerCard) {
     playerCard.style.display = 'none';
