@@ -228,11 +228,12 @@ class CloudStorageMusicClient:
                 return None
             
             try:
-                # 获取access_token
+                # 获取access_token（云存储使用 connect-api.cloud.huawei.com）
                 token, _ = get_agc_token(
                     domain=self.domain,
                     client_id=self.client_id,
-                    client_secret=self.client_secret
+                    client_secret=self.client_secret,
+                    service_type='storage'  # 云存储使用不同的Token接口
                 )
                 
                 # 添加必需的Header（按照API文档要求）
@@ -480,12 +481,13 @@ class CloudStorageMusicClient:
         if not self.client_id or not self.client_secret:
             raise RuntimeError("缺少 AGC_CLIENT_ID 或 AGC_CLIENT_SECRET")
         
-        # 获取access_token
+        # 获取access_token（云存储使用 connect-api.cloud.huawei.com）
         print(f"正在获取AGC access_token...")
-        token = get_agc_token(
+        token, _ = get_agc_token(
             domain=self.domain,
             client_id=self.client_id,
-            client_secret=self.client_secret
+            client_secret=self.client_secret,
+            service_type='storage'  # 云存储使用不同的Token接口
         )
         print(f"✓ Token获取成功")
         
@@ -741,11 +743,12 @@ class CloudStorageMusicClient:
             return None
         
         try:
-            # 获取access_token
-            token = get_agc_token(
+            # 获取access_token（云存储使用 connect-api.cloud.huawei.com）
+            token, _ = get_agc_token(
                 domain=self.domain,
                 client_id=self.client_id,
-                client_secret=self.client_secret
+                client_secret=self.client_secret,
+                service_type='storage'  # 云存储使用不同的Token接口
             )
             
             # 构建获取下载URL的API请求

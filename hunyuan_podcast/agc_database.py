@@ -106,12 +106,13 @@ class AGCDatabaseClient:
                 return self._access_token
         
         try:
-            # 使用客户端凭证获取token
+            # 使用客户端凭证获取token（云数据库使用 connect-drcn.dbankcloud.cn）
             token, expires_in = get_agc_token(
                 domain=self.domain,
                 client_id=self.client_id,
                 client_secret=self.client_secret,
-                timeout=30
+                timeout=30,
+                service_type='database'  # 云数据库使用不同的Token接口
             )
             
             if token:

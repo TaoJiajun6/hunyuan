@@ -82,11 +82,23 @@ def _load_agc_credentials_from_file(path: str) -> Dict[str, Optional[str]]:
 
 
 def get_agc_token(domain: str, client_id: str, client_secret: str, timeout: int = 30, retries: int = 3,
-                  backoff_factor: float = 0.5) -> tuple[str, int]:
+                  backoff_factor: float = 0.5, storage_url: Optional[str] = None, 
+                  service_type: str = 'storage') -> tuple[str, int]:
     """获取 AGC access_token（带缓存与重试）
 
-    返回 (access_token, expires_in) 元组。
-    使用 module-level 缓存避免频繁获取。
+    根据服务类型（云存储或云数据库）使用不同的Token获取接口：
+    - 云存储：使用 connect-api.cloud.huawei.com/api/oauth2/v1/token（或对应站点域名）
+    - 云数据库：使用 connect-drcn.dbankcloud.cn/agc/apigw/oauth2/v1/token
+    
+    Args:
+        domain: Token域名
+        client_id: 客户端ID
+        client_secret: 客户端密钥
+        timeout: 请求超时时间
+        retries: 重试次数
+        backoff_factor: 退避因子
+        storage_url: 存储URL（可选，用于自动推断Token域名和路径）
+        service_type: 服务类型，'storage'（云存储）或 'database'（云数据库），默认 'storage'
     
     Returns:
         tuple[str, int]: (access_token, expires_in) 元组，expires_in 单位为秒
@@ -94,13 +106,55 @@ def get_agc_token(domain: str, client_id: str, client_secret: str, timeout: int 
     if not client_id or not client_secret:
         raise AGCUploadError('缺少 client_id 或 client_secret，无法获取 token')
 
-    # 根据官方文档，Token 获取接口必须使用 connect-drcn.dbankcloud.cn
-    # 如果传入的是其他域名，自动修正（用于缓存key）
-    token_domain_for_cache = domain
-    if domain == 'connect-api.cloud.huawei.com':
-        token_domain_for_cache = 'connect-drcn.dbankcloud.cn'
+    # 根据 storage_url 自动推断服务类型和Token域名
+    if storage_url:
+        if 'ops-server-drcn.agcstorage.link' in storage_url:
+            # 中国站点云存储
+            token_domain = 'connect-api.cloud.huawei.com'
+            token_path = '/api/oauth2/v1/token'
+            service_type = 'storage'
+        elif 'ops-server-dre.agcstorage.link' in storage_url:
+            # 德国站点云存储
+            token_domain = 'connect-api-dre.cloud.huawei.com'
+            token_path = '/api/oauth2/v1/token'
+            service_type = 'storage'
+        elif 'ops-server-dra.agcstorage.link' in storage_url:
+            # 新加坡站点云存储
+            token_domain = 'connect-api-dra.cloud.huawei.com'
+            token_path = '/api/oauth2/v1/token'
+            service_type = 'storage'
+        elif 'ops-server-drru.agcstorage.link' in storage_url:
+            # 俄罗斯站点云存储
+            token_domain = 'connect-api-drru.cloud.huawei.com'
+            token_path = '/api/oauth2/v1/token'
+            service_type = 'storage'
+        else:
+            # 无法从 storage_url 推断，使用传入的 domain 和 service_type
+            token_domain = domain or 'connect-api.cloud.huawei.com'
+            if service_type == 'database' or token_domain == 'connect-drcn.dbankcloud.cn':
+                token_path = '/agc/apigw/oauth2/v1/token'
+                service_type = 'database'
+            else:
+                token_path = '/api/oauth2/v1/token'
+                service_type = 'storage'
+    else:
+        # 没有 storage_url，根据 domain 和 service_type 判断
+        token_domain = domain or 'connect-api.cloud.huawei.com'
+        if service_type == 'database' or token_domain == 'connect-drcn.dbankcloud.cn':
+            # 云数据库
+            token_domain = 'connect-drcn.dbankcloud.cn'
+            token_path = '/agc/apigw/oauth2/v1/token'
+            service_type = 'database'
+        else:
+            # 云存储
+            if token_domain == 'connect-api.cloud.huawei.com':
+                token_path = '/api/oauth2/v1/token'
+            else:
+                # 其他云存储站点域名
+                token_path = '/api/oauth2/v1/token'
+            service_type = 'storage'
     
-    cache_key = f"{token_domain_for_cache}:{client_id}"
+    cache_key = f"{token_domain}{token_path}:{client_id}"
     cached = _TOKEN_CACHE.get(cache_key)
     now = time.time()
     if cached and cached.get('expires_at', 0) > now + 5:
@@ -108,21 +162,25 @@ def get_agc_token(domain: str, client_id: str, client_secret: str, timeout: int 
         remaining_expires = int(cached.get('expires_at', 0) - now)
         return (cached['token'], remaining_expires if remaining_expires > 0 else 3600)
 
-    # 根据官方文档，Token 获取接口必须使用 connect-drcn.dbankcloud.cn
-    # 如果传入的是其他域名，自动修正
-    token_domain = domain
-    if domain == 'connect-api.cloud.huawei.com':
-        logger.warning(f"检测到域名 {domain}，Token 获取需要使用 connect-drcn.dbankcloud.cn，已自动修正")
-        token_domain = 'connect-drcn.dbankcloud.cn'
+    # 构建Token获取URL
+    url = f"https://{token_domain}{token_path}"
     
-    # 根据官方文档，URL是 /agc/apigw/oauth2/v1/token
-    url = f"https://{token_domain}/agc/apigw/oauth2/v1/token"
-    payload = {
-        'useJwt': '1',  # 固定值，表示使用JWT
-        'grant_type': 'client_credentials',
-        'client_id': client_id,
-        'client_secret': client_secret
-    }
+    # 根据服务类型构建不同的payload
+    if service_type == 'database':
+        # 云数据库使用 useJwt=1
+        payload = {
+            'useJwt': '1',  # 固定值，表示使用JWT
+            'grant_type': 'client_credentials',
+            'client_id': client_id,
+            'client_secret': client_secret
+        }
+    else:
+        # 云存储不使用 useJwt（根据Java示例代码）
+        payload = {
+            'grant_type': 'client_credentials',
+            'client_id': client_id,
+            'client_secret': client_secret
+        }
     last_exc = None
     for attempt in range(1, retries + 1):
         try:
@@ -191,202 +249,194 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
     logger.info(f"  X-Agc-Content-Type: {content_type}")
     logger.info(f"  Headers: productId={'已设置' if product_id else '未设置'}, client_id={'已设置' if client_id else '未设置'}, Authorization={'已设置' if token else '未设置'}")
 
-    last_exc = None
     file_size_mb = file_size / (1024 * 1024)
-    
-    # 移除重试次数限制，持续重试直到成功
-    # 对于慢速网络，上传可能需要很长时间，不应该设置重试次数限制
-    retries = float('inf')  # 无限重试，直到成功
-    backoff_factor = 0.5
     
     # 移除超时限制，允许上传持续进行直到完成
     # 对于慢速网络，上传可能需要很长时间，不应该设置超时限制
     connect_timeout = 30  # 连接超时30秒（仅用于建立连接）
     read_timeout = None  # 读取/写入超时设置为None，表示无超时限制
     
-    attempt = 0
-    while True:
-        attempt += 1
-        try:
-            logger.info(f"上传尝试 {attempt}: 连接超时={connect_timeout}秒, 读取超时=无限制 (文件大小: {file_size_mb:.2f} MB)")
-            
-            # 优化上传：使用Session和连接池（每次重试创建新的session）
-            # 在socket层面禁用超时，确保写入操作不会中断
-            import socket
-            from urllib3.util.connection import create_connection
-            
-            # 保存原始的create_connection函数
-            _original_create_connection = create_connection
-            
-            def create_connection_without_timeout(address, *args, **kwargs):
-                """创建没有超时的socket连接，并优化TCP参数以提高上传速度"""
-                sock = _original_create_connection(address, *args, **kwargs)
-                try:
-                    # 禁用socket超时
-                    sock.settimeout(None)
-                    # 优化TCP参数以提高上传速度
-                    # TCP_NODELAY: 禁用Nagle算法，减少延迟，提高小数据包传输速度
-                    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                    # 增大发送缓冲区，提高大文件上传速度
-                    # 默认通常是64KB-256KB，我们设置为1MB
-                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1024 * 1024)
-                    # 增大接收缓冲区
-                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)
-                except Exception as e:
-                    logger.debug(f"设置socket参数失败（不影响功能）: {e}")
-                return sock
-            
-            # 临时替换urllib3的create_connection函数
-            import urllib3.util.connection
-            urllib3.util.connection.create_connection = create_connection_without_timeout
-            
-            session = requests.Session()
-            # 优化连接池设置以提高性能
-            adapter = requests.adapters.HTTPAdapter(
-                pool_connections=20,  # 增加连接池大小
-                pool_maxsize=50,  # 增加最大连接数
-                max_retries=0  # 禁用urllib3的重试，我们自己处理
-            )
-            session.mount('http://', adapter)
-            session.mount('https://', adapter)
-            
+    # 不进行重试，等待一次性上传完毕
+    try:
+        logger.info(f"开始上传: 连接超时={connect_timeout}秒, 读取超时=无限制 (文件大小: {file_size_mb:.2f} MB)")
+        
+        # 优化上传：使用Session和连接池
+        # 在socket层面禁用超时，确保写入操作不会中断
+        import socket
+        from urllib3.util.connection import create_connection
+        
+        # 保存原始的create_connection函数
+        _original_create_connection = create_connection
+        
+        def create_connection_without_timeout(address, *args, **kwargs):
+            """创建没有超时的socket连接，并优化TCP参数以提高上传速度"""
+            sock = _original_create_connection(address, *args, **kwargs)
             try:
-                upload_start = time.time()
-                
-                # AGC服务器要求必须使用Content-Length头，不能使用Transfer-Encoding: chunked
-                # 创建一个支持Content-Length的流式上传类
-                # 这个类实现了__iter__和__len__，让requests使用Content-Length而不是chunked编码
-                class FileStream:
-                    """支持Content-Length的流式文件上传类"""
-                    def __init__(self, file_path, chunk_size=1024 * 1024):
-                        self.file_path = file_path
-                        self.chunk_size = chunk_size
-                        self.file_size = os.path.getsize(file_path)
-                        self._file = None
-                        self._bytes_sent = 0
-                        self._last_log_time = upload_start
-                    
-                    def __len__(self):
-                        """返回文件大小，让requests使用Content-Length"""
-                        return self.file_size
-                    
-                    def __iter__(self):
-                        """迭代器，分块读取文件"""
-                        try:
-                            self._file = open(self.file_path, 'rb')
-                            while True:
-                                chunk = self._file.read(self.chunk_size)
-                                if not chunk:
-                                    break
-                                self._bytes_sent += len(chunk)
-                                # 每2秒记录一次进度
-                                current_time = time.time()
-                                if current_time - self._last_log_time >= 2.0:
-                                    elapsed = current_time - upload_start
-                                    if elapsed > 0:
-                                        speed = (self._bytes_sent / (1024 * 1024)) / elapsed
-                                        progress = (self._bytes_sent / self.file_size) * 100
-                                        file_size_mb = self.file_size / (1024 * 1024)
-                                        logger.info(f"上传进度: {progress:.1f}% ({self._bytes_sent / (1024 * 1024):.2f}/{file_size_mb:.2f} MB), 速度: {speed:.2f} MB/s")
-                                    self._last_log_time = current_time
-                                yield chunk
-                        finally:
-                            if self._file:
-                                self._file.close()
-                
-                # 优化chunk_size以提高上传速度
-                # 在保证不超时的前提下，使用更大的chunk可以减少网络往返次数，提高速度
-                # 由于已经禁用了socket超时，可以使用更大的chunk
-                # 针对1MB以上的文件（常见情况），使用更大的chunk_size以提高速度
-                if file_size_mb > 50:
-                    chunk_size = 4 * 1024 * 1024  # 4MB chunks，超大文件（最大化速度）
-                elif file_size_mb > 20:
-                    chunk_size = 2 * 1024 * 1024  # 2MB chunks，大文件
-                elif file_size_mb > 5:
-                    chunk_size = 1024 * 1024  # 1MB chunks，中等文件
-                elif file_size_mb > 1:
-                    chunk_size = 512 * 1024  # 512KB chunks，1MB以上的文件
-                else:
-                    chunk_size = 256 * 1024  # 256KB chunks，小于1MB的小文件
-                
-                logger.info(f"流式上传模式（文件大小: {file_size_mb:.2f} MB, chunk_size: {chunk_size / 1024:.0f} KB）")
-                
-                file_stream = FileStream(file_path, chunk_size)
-                
-                resp = session.put(
-                    url,
-                    data=file_stream,  # 使用支持Content-Length的流式对象
-                    headers=headers,
-                    timeout=(connect_timeout, read_timeout),
-                    allow_redirects=True
-                )
-            finally:
-                session.close()
-                # 恢复原始的create_connection函数（在session关闭后）
-                urllib3.util.connection.create_connection = _original_create_connection
+                # 禁用socket超时
+                sock.settimeout(None)
+                # 优化TCP参数以提高上传速度
+                # TCP_NODELAY: 禁用Nagle算法，减少延迟，提高小数据包传输速度
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                # 增大发送缓冲区，提高大文件上传速度
+                # 默认通常是64KB-256KB，我们设置为1MB
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1024 * 1024)
+                # 增大接收缓冲区
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)
+            except Exception as e:
+                logger.debug(f"设置socket参数失败（不影响功能）: {e}")
+            return sock
+        
+        # 临时替换urllib3的create_connection函数
+        import urllib3.util.connection
+        urllib3.util.connection.create_connection = create_connection_without_timeout
+        
+        session = requests.Session()
+        # 优化连接池设置以提高性能
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=20,  # 增加连接池大小
+            pool_maxsize=50,  # 增加最大连接数
+            max_retries=0  # 禁用urllib3的重试
+        )
+        session.mount('http://', adapter)
+        session.mount('https://', adapter)
+        
+        try:
+            upload_start = time.time()
             
-            upload_time = time.time() - upload_start
-            upload_speed = (file_size / (1024 * 1024)) / upload_time if upload_time > 0 else 0
+            # AGC服务器要求必须使用Content-Length头，不能使用Transfer-Encoding: chunked
+            # 创建一个支持Content-Length的流式上传类
+            # 这个类实现了__iter__和__len__，让requests使用Content-Length而不是chunked编码
+            class FileStream:
+                """支持Content-Length的流式文件上传类"""
+                def __init__(self, file_path, chunk_size=1024 * 1024):
+                    self.file_path = file_path
+                    self.chunk_size = chunk_size
+                    self.file_size = os.path.getsize(file_path)
+                    self._file = None
+                    self._bytes_sent = 0
+                    self._last_log_time = upload_start
+                
+                def __len__(self):
+                    """返回文件大小，让requests使用Content-Length"""
+                    return self.file_size
+                
+                def __iter__(self):
+                    """迭代器，分块读取文件"""
+                    try:
+                        self._file = open(self.file_path, 'rb')
+                        while True:
+                            chunk = self._file.read(self.chunk_size)
+                            if not chunk:
+                                break
+                            self._bytes_sent += len(chunk)
+                            # 每2秒记录一次进度
+                            current_time = time.time()
+                            if current_time - self._last_log_time >= 2.0:
+                                elapsed = current_time - upload_start
+                                if elapsed > 0:
+                                    speed = (self._bytes_sent / (1024 * 1024)) / elapsed
+                                    progress = (self._bytes_sent / self.file_size) * 100
+                                    file_size_mb = self.file_size / (1024 * 1024)
+                                    logger.info(f"上传进度: {progress:.1f}% ({self._bytes_sent / (1024 * 1024):.2f}/{file_size_mb:.2f} MB), 速度: {speed:.2f} MB/s")
+                                self._last_log_time = current_time
+                            yield chunk
+                    finally:
+                        if self._file:
+                            self._file.close()
             
-            logger.info(f"上传响应: status_code={resp.status_code}, 耗时: {upload_time:.2f}秒, 速度: {upload_speed:.2f} MB/s")
-            logger.info(f"  响应头: {dict(resp.headers)}")
-            if resp.text:
-                logger.info(f"上传响应内容: {resp.text[:500]}")
-            
-            # 如果状态码是成功的（2xx），即使之前有超时警告也认为成功
-            if 200 <= resp.status_code < 300:
-                logger.info(f"上传成功！")
-                return resp
+            # 优化chunk_size以提高上传速度
+            # 在保证不超时的前提下，使用更大的chunk可以减少网络往返次数，提高速度
+            # 由于已经禁用了socket超时，可以使用更大的chunk
+            # 针对1MB以上的文件（常见情况），使用更大的chunk_size以提高速度
+            if file_size_mb > 50:
+                chunk_size = 4 * 1024 * 1024  # 4MB chunks，超大文件（最大化速度）
+            elif file_size_mb > 20:
+                chunk_size = 2 * 1024 * 1024  # 2MB chunks，大文件
+            elif file_size_mb > 5:
+                chunk_size = 1024 * 1024  # 1MB chunks，中等文件
+            elif file_size_mb > 1:
+                chunk_size = 512 * 1024  # 512KB chunks，1MB以上的文件
             else:
-                # 对于客户端错误（4xx，如403认证失败），直接抛出异常，不重试
-                # 因为认证问题不会因为重试而解决
-                if 400 <= resp.status_code < 500:
-                    error_msg = f"上传失败: HTTP {resp.status_code}"
-                    if resp.text:
-                        error_msg += f" - {resp.text[:200]}"
-                    logger.error(error_msg)
-                    raise AGCUploadError(error_msg)
-                # 对于服务器错误（5xx），也直接抛出异常，不重试
-                # 等待一次性上传完毕，不进行重试
-                resp.raise_for_status()
-                return resp
-        except requests.exceptions.Timeout as e:
-            # 超时错误，直接抛出异常，不重试
+                chunk_size = 256 * 1024  # 256KB chunks，小于1MB的小文件
+            
+            logger.info(f"流式上传模式（文件大小: {file_size_mb:.2f} MB, chunk_size: {chunk_size / 1024:.0f} KB）")
+            
+            file_stream = FileStream(file_path, chunk_size)
+            
+            resp = session.put(
+                url,
+                data=file_stream,  # 使用支持Content-Length的流式对象
+                headers=headers,
+                timeout=(connect_timeout, read_timeout),
+                allow_redirects=True
+            )
+        finally:
+            session.close()
+            # 恢复原始的create_connection函数（在session关闭后）
+            urllib3.util.connection.create_connection = _original_create_connection
+        
+        upload_time = time.time() - upload_start
+        upload_speed = (file_size / (1024 * 1024)) / upload_time if upload_time > 0 else 0
+        
+        logger.info(f"上传响应: status_code={resp.status_code}, 耗时: {upload_time:.2f}秒, 速度: {upload_speed:.2f} MB/s")
+        logger.info(f"  响应头: {dict(resp.headers)}")
+        if resp.text:
+            logger.info(f"上传响应内容: {resp.text[:500]}")
+        
+        # 如果状态码是成功的（2xx），即使之前有超时警告也认为成功
+        if 200 <= resp.status_code < 300:
+            logger.info(f"上传成功！")
+            return resp
+        else:
+            # 对于客户端错误（4xx，如403认证失败），直接抛出异常，不重试
+            # 因为认证问题不会因为重试而解决
+            if 400 <= resp.status_code < 500:
+                error_msg = f"上传失败: HTTP {resp.status_code}"
+                if resp.text:
+                    error_msg += f" - {resp.text[:200]}"
+                logger.error(error_msg)
+                raise AGCUploadError(error_msg)
+            # 对于服务器错误（5xx），也直接抛出异常，不重试
             # 等待一次性上传完毕，不进行重试
-            is_write_timeout = "write operation timed out" in str(e).lower() or "timed out" in str(e).lower()
-            logger.error(f"上传超时: {str(e)}")
-            logger.error(f"  文件大小: {file_size_mb:.2f} MB")
-            logger.error(f"  超时设置: 连接={connect_timeout}秒, 读取={read_timeout}秒")
-            if is_write_timeout:
-                logger.warning(f"  检测到写入超时")
-            raise AGCUploadError(f"上传超时: {e}") from e
-        except requests.exceptions.HTTPError as e:
-            # HTTP错误（4xx/5xx），直接抛出异常，不重试
-            # 等待一次性上传完毕，不进行重试
-            if hasattr(e, 'response') and e.response is not None:
-                status_code = e.response.status_code
-                logger.error(f"上传失败: HTTP {status_code}")
-                logger.error(f"  响应头: {dict(e.response.headers)}")
-                logger.error(f"  响应内容: {e.response.text[:500] if e.response.text else '(empty)'}")
-                error_msg = f"上传失败: HTTP {status_code}"
-                if e.response.text:
-                    error_msg += f" - {e.response.text[:200]}"
-                raise AGCUploadError(error_msg) from e
-            else:
-                raise AGCUploadError(f"上传失败: {e}") from e
-        except (requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
-            # 对于连接错误，也直接抛出异常，不重试
-            # 等待一次性上传完毕，不进行重试
-            error_str = str(e).lower()
-            logger.error(f"上传失败: {e}")
-            if "write operation timed out" in error_str or "connection aborted" in error_str:
-                logger.warning(f"  检测到写入超时或连接中断")
+            resp.raise_for_status()
+            return resp
+    except requests.exceptions.Timeout as e:
+        # 超时错误，直接抛出异常，不重试
+        # 等待一次性上传完毕，不进行重试
+        is_write_timeout = "write operation timed out" in str(e).lower() or "timed out" in str(e).lower()
+        logger.error(f"上传超时: {str(e)}")
+        logger.error(f"  文件大小: {file_size_mb:.2f} MB")
+        logger.error(f"  超时设置: 连接={connect_timeout}秒, 读取={read_timeout}秒")
+        if is_write_timeout:
+            logger.warning(f"  检测到写入超时")
+        raise AGCUploadError(f"上传超时: {e}") from e
+    except requests.exceptions.HTTPError as e:
+        # HTTP错误（4xx/5xx），直接抛出异常，不重试
+        # 等待一次性上传完毕，不进行重试
+        if hasattr(e, 'response') and e.response is not None:
+            status_code = e.response.status_code
+            logger.error(f"上传失败: HTTP {status_code}")
+            logger.error(f"  响应头: {dict(e.response.headers)}")
+            logger.error(f"  响应内容: {e.response.text[:500] if e.response.text else '(empty)'}")
+            error_msg = f"上传失败: HTTP {status_code}"
+            if e.response.text:
+                error_msg += f" - {e.response.text[:200]}"
+            raise AGCUploadError(error_msg) from e
+        else:
             raise AGCUploadError(f"上传失败: {e}") from e
-        except Exception as e:
-            # 捕获其他未预期的异常，直接抛出，不重试
-            # 等待一次性上传完毕，不进行重试
-            logger.error(f"上传出现未预期错误: {e}")
-            raise AGCUploadError(f"上传失败: {e}") from e
+    except (requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+        # 对于连接错误，也直接抛出异常，不重试
+        # 等待一次性上传完毕，不进行重试
+        error_str = str(e).lower()
+        logger.error(f"上传失败: {e}")
+        if "write operation timed out" in error_str or "connection aborted" in error_str:
+            logger.warning(f"  检测到写入超时或连接中断")
+        raise AGCUploadError(f"上传失败: {e}") from e
+    except Exception as e:
+        # 捕获其他未预期的异常，直接抛出，不重试
+        # 等待一次性上传完毕，不进行重试
+        logger.error(f"上传出现未预期错误: {e}")
+        raise AGCUploadError(f"上传失败: {e}") from e
 
 
 def upload_generated_podcast(
@@ -446,7 +496,8 @@ def upload_generated_podcast(
     logger.info(f"  product_id: {'已设置' if product_id else '未设置'}")
 
     # 获取 token（使用token_client_id和client_secret）
-    token, _ = get_agc_token(domain, token_client_id, client_secret)
+    # 传入 storage_url 以便自动推断正确的Token接口（云存储 vs 云数据库）
+    token, _ = get_agc_token(domain, token_client_id, client_secret, storage_url=storage_url, service_type='storage')
 
     # 上传（使用upload_client_id，可能与token_client_id不同）
     resp = upload_file_to_agc(storage_url, bucket, object_name, output_path,
@@ -615,7 +666,8 @@ def download_generated_podcast(
     logger.info(f"  product_id: {'已设置' if product_id else '未设置'}")
 
     # 获取 token（使用token_client_id和client_secret）
-    token, _ = get_agc_token(domain, token_client_id, client_secret)
+    # 传入 storage_url 以便自动推断正确的Token接口（云存储 vs 云数据库）
+    token, _ = get_agc_token(domain, token_client_id, client_secret, storage_url=storage_url, service_type='storage')
 
     # 下载（使用download_client_id，可能与token_client_id不同）
     resp = download_file_from_agc(storage_url, bucket, object_name, output_path,

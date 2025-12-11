@@ -43,6 +43,7 @@ AGC_DOMAIN=connect-api.cloud.huawei.com
 6. **AGC_DOMAIN**: AGC API 域名（可选）
    - 默认值：`connect-api.cloud.huawei.com`
    - 用于获取 access_token
+   - **注意**：对于云存储，代码会根据 `AGC_STORAGE_URL` 自动推断正确的 Token 接口，此参数主要用于云数据库场景
 
 ### 配置优先级
 
