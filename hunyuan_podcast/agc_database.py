@@ -243,13 +243,33 @@ class AGCDatabaseClient:
             roles = []
         
         # 安全地获取字段值，使用索引访问
+        # 处理 created_at 字段，确保是整数类型
+        created_at = 0
+        if len(fs) > 4:
+            created_at_value = fs[4].get('l')
+            if created_at_value is not None:
+                try:
+                    created_at = int(created_at_value)
+                except (ValueError, TypeError):
+                    created_at = 0
+        
+        # 处理 duration 字段，确保是整数或None
+        duration = None
+        if len(fs) > 5:
+            duration_value = fs[5].get('l')
+            if duration_value is not None:
+                try:
+                    duration = int(duration_value)
+                except (ValueError, TypeError):
+                    duration = None
+        
         podcast = {
             'id': fs[0].get('s', '') if len(fs) > 0 else '',
             'title': fs[1].get('s', '') if len(fs) > 1 else '',
             'audio_url': fs[2].get('s', '') if len(fs) > 2 else '',
             'local_file': fs[3].get('s', '') if len(fs) > 3 else '',
-            'created_at': fs[4].get('l', 0) if len(fs) > 4 else 0,
-            'duration': fs[5].get('l') if len(fs) > 5 else None,
+            'created_at': created_at,  # 确保是整数类型
+            'duration': duration,  # 确保是整数或None
             'category': fs[6].get('s', '') if len(fs) > 6 else '',
             'status': fs[7].get('s', 'completed') if len(fs) > 7 else 'completed',
             'script': fs[8].get('s', '') if len(fs) > 8 else '',
@@ -642,7 +662,11 @@ class AGCDatabaseClient:
                 
                 # 在内存中排序（如果CloudDB不支持排序）
                 if order_by == "created_at":
-                    podcasts.sort(key=lambda x: x.get('created_at', 0), reverse=(order == "desc"))
+                    # 确保 created_at 是整数类型，避免类型比较错误
+                    podcasts.sort(
+                        key=lambda x: int(x.get('created_at', 0)) if x.get('created_at') is not None else 0,
+                        reverse=(order == "desc")
+                    )
                 
                 logger.info(f"从云数据库获取到 {len(podcasts)} 个播客")
                 return podcasts
