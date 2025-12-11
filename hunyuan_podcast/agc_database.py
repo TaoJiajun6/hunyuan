@@ -397,7 +397,7 @@ class AGCDatabaseClient:
     
     def list_podcasts(
         self,
-        limit: int = 50,
+        limit: Optional[int] = 50,
         category: Optional[str] = None,
         order_by: str = "created_at",
         order: str = "desc"
@@ -406,7 +406,7 @@ class AGCDatabaseClient:
         从云数据库获取播客列表
         
         Args:
-            limit: 返回数量限制
+            limit: 返回数量限制。如果为 None，则使用一个很大的值（10000）来获取所有数据
             category: 分类筛选（可选）
             order_by: 排序字段
             order: 排序方向（asc/desc）
@@ -442,15 +442,26 @@ class AGCDatabaseClient:
                 }
             
             # 构造查询条件
-            query_conditions = [
-                {
+            query_conditions = []
+            
+            # 如果指定了 limit，添加 Limit 条件；否则使用一个很大的值来获取所有数据
+            if limit is not None and limit > 0:
+                query_conditions.append({
                     "conditionType": "Limit",
                     "value": {
                         "number": limit,
                         "offset": 0
                     }
-                }
-            ]
+                })
+            else:
+                # 如果未指定 limit，使用一个很大的值来获取所有数据
+                query_conditions.append({
+                    "conditionType": "Limit",
+                    "value": {
+                        "number": 10000,  # 足够大的值，应该能覆盖所有播客
+                        "offset": 0
+                    }
+                })
             
             # 如果指定了分类，添加分类过滤
             if category:

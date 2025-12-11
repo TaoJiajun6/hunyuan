@@ -133,24 +133,26 @@ function updateVoiceSelectors() {
     const selector = document.createElement('div');
     selector.className = 'voice-selector';
     selector.innerHTML = `
-      <input type="file" id="voice${i}" accept=".wav,.mp3,.flac,.m4a" onchange="updateVoiceFileName(${i}, event)" />
-      <label for="voice${i}" style="cursor: pointer; color: var(--text-secondary);">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <path d="M8 3 L8 13 M4 7 L8 3 L12 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-      </label>
-      <span class="voice-file-name" id="voice${i}-name">选择音色文件</span>
+      <select id="voice${i}" class="select-input" onchange="updateVoiceSelection(${i}, event)">
+        <option value="">请选择音色</option>
+        ${VOICE_OPTIONS.map(voice => 
+          `<option value="${voice.id}">${voice.name}${voice.description ? ' - ' + voice.description : ''}</option>`
+        ).join('')}
+      </select>
     `;
     voiceSelectors.appendChild(selector);
   }
 }
 
-function updateVoiceFileName(index, event) {
-  const file = event.target.files[0];
-  const nameSpan = document.getElementById(`voice${index}-name`);
-  if (file) {
-    nameSpan.textContent = file.name;
-    nameSpan.style.color = 'var(--text-primary)';
+function updateVoiceSelection(index, event) {
+  const voiceId = event.target.value;
+  if (voiceId) {
+    const voice = getVoiceById(voiceId);
+    if (voice) {
+      event.target.style.color = 'var(--text-primary)';
+    }
+  } else {
+    event.target.style.color = 'var(--text-secondary)';
   }
 }
 
@@ -200,8 +202,13 @@ function addCharacter() {
       </div>
     </div>
     <div class="config-item">
-      <label>音色文件</label>
-      <input type="file" class="char-voice" accept=".wav,.mp3,.flac,.m4a" />
+      <label>音色</label>
+      <select class="char-voice select-input">
+        <option value="">请选择音色</option>
+        ${VOICE_OPTIONS.map(voice => 
+          `<option value="${voice.id}">${voice.name}${voice.description ? ' - ' + voice.description : ''}</option>`
+        ).join('')}
+      </select>
     </div>
     <button class="btn-secondary" onclick="removeCharacter('char-${charCount}')" style="margin-top: 12px;">删除角色</button>
   `;
@@ -221,8 +228,13 @@ function updateDeepVoices() {
     const div = document.createElement('div');
     div.style.marginBottom = '12px';
     div.innerHTML = `
-      <label>${roles[i]} 音色文件</label>
-      <input type="file" class="deep-voice" data-role="${roles[i]}" accept=".wav,.mp3,.flac,.m4a" />
+      <label>${roles[i]} 音色</label>
+      <select class="deep-voice select-input" data-role="${roles[i]}">
+        <option value="">请选择音色</option>
+        ${VOICE_OPTIONS.map(voice => 
+          `<option value="${voice.id}">${voice.name}${voice.description ? ' - ' + voice.description : ''}</option>`
+        ).join('')}
+      </select>
     `;
     container.appendChild(div);
   }
@@ -266,25 +278,25 @@ async function generateMultiRole() {
   const role1 = document.getElementById('role1').value.trim() || '角色A';
   const role2 = document.getElementById('role2').value.trim() || '角色B';
   const silence = parseInt(document.getElementById('silence').value || '800');
-  const voice1 = document.getElementById('voice1')?.files[0];
-  const voice2 = document.getElementById('voice2')?.files[0];
+  const voice1Id = document.getElementById('voice1')?.value;
+  const voice2Id = document.getElementById('voice2')?.value;
   
   if (!text) {
     log('create', '请输入文本');
     return;
   }
-  if (!voice1 || !voice2) {
-    log('create', '请上传两个角色的音色文件');
+  if (!voice1Id || !voice2Id) {
+    log('create', '请为两个角色选择音色');
     return;
   }
   
-  log('create', '正在处理文件，请稍候...');
+  log('create', '正在加载音色文件，请稍候...');
   showProgress(5);
   
   try {
     const [voice1Base64, voice2Base64] = await Promise.all([
-      fileToBase64(voice1),
-      fileToBase64(voice2)
+      loadVoiceFileAsBase64(voice1Id),
+      loadVoiceFileAsBase64(voice2Id)
     ]);
     
     const jobId = 'job_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
@@ -319,14 +331,14 @@ async function generateCharacter() {
   
   document.querySelectorAll('.char-item').forEach(item => {
     const name = item.querySelector('.char-name').value.trim();
-    const voice = item.querySelector('.char-voice').files[0];
-    if (!name || !voice) return;
+    const voiceId = item.querySelector('.char-voice').value;
+    if (!name || !voiceId) return;
     chars.push({
       name,
       identity: item.querySelector('.char-identity').value.trim(),
       personality: item.querySelector('.char-personality').value.trim(),
       speaking_style: item.querySelector('.char-style').value.trim(),
-      voice
+      voiceId
     });
   });
   
@@ -339,12 +351,12 @@ async function generateCharacter() {
     return;
   }
   
-  log('create', '正在处理文件，请稍候...');
+  log('create', '正在加载音色文件，请稍候...');
   showProgress(5);
   
   try {
     const characters = await Promise.all(chars.map(async (char) => {
-      const voiceBase64 = await fileToBase64(char.voice);
+      const voiceBase64 = await loadVoiceFileAsBase64(char.voiceId);
       return {
         name: char.name,
         identity: char.identity || undefined,
@@ -392,25 +404,25 @@ async function generateDeep() {
   
   const voices = {};
   let hasAll = true;
-  document.querySelectorAll('.deep-voice').forEach(input => {
-    const role = input.dataset.role;
-    const file = input.files[0];
-    if (!file) hasAll = false;
-    else voices[role] = file;
+  document.querySelectorAll('.deep-voice').forEach(select => {
+    const role = select.dataset.role;
+    const voiceId = select.value;
+    if (!voiceId) hasAll = false;
+    else voices[role] = voiceId;
   });
   
   if (!hasAll) {
-    log('create', '请上传所有角色的音色文件');
+    log('create', '请为所有角色选择音色');
     return;
   }
   
-  log('create', '正在处理文件，请稍候...');
+  log('create', '正在加载音色文件，请稍候...');
   showProgress(5);
   
   try {
     const roleVoices = {};
     const voicePromises = Object.keys(voices).map(async (role) => {
-      const base64 = await fileToBase64(voices[role]);
+      const base64 = await loadVoiceFileAsBase64(voices[role]);
       roleVoices[role] = base64;
     });
     await Promise.all(voicePromises);

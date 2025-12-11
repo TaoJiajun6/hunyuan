@@ -662,6 +662,16 @@ if not os.path.exists(web_dir):
 if os.path.exists(web_dir):
     app.mount("/web", StaticFiles(directory=web_dir), name="web")
     logger.info(f"已挂载静态文件服务: {web_dir} -> /web")
+    
+    # 挂载音色文件目录（从web/public/voices或web/voices）
+    voices_dir_public = os.path.join(os.path.dirname(os.path.dirname(web_dir)), "web", "public", "voices")
+    voices_dir_local = os.path.join(web_dir, "voices")
+    if os.path.exists(voices_dir_public):
+        app.mount("/voices", StaticFiles(directory=voices_dir_public), name="voices")
+        logger.info(f"已挂载音色文件服务: {voices_dir_public} -> /voices")
+    elif os.path.exists(voices_dir_local):
+        app.mount("/voices", StaticFiles(directory=voices_dir_local), name="voices")
+        logger.info(f"已挂载音色文件服务: {voices_dir_local} -> /voices")
 else:
     logger.warning(f"Web目录不存在: {web_dir}")
 
@@ -3675,225 +3685,66 @@ async def delete_podcast(podcast_id: str):
 
 
 @app.get("/api/v1/podcast/history", response_model=ApiResponse)
-async def get_podcast_history(limit: int = 50, category: Optional[str] = None, debug: bool = False):
+async def get_podcast_history(limit: Optional[int] = None, category: Optional[str] = None, debug: bool = False):
     """
-    获取历史播客列表
+    获取历史播客列表（从 AGC 云数据库获取）
     
     参数：
-    - limit: 返回数量限制，默认50
+    - limit: 返回数量限制，可选。如果不提供或为 None，则返回所有数据
     - category: 播客分类过滤，可选
-    - debug: 是否返回调试信息（包括真实路径），默认False
+    - debug: 是否返回调试信息，默认False
     """
     try:
-        import glob
-        from datetime import datetime
-        
-        # 如果启用调试模式，返回路径信息
-        debug_info = {}
-        if debug:
-            debug_info = {
-                "output_dir": OUTPUT_DIR,
-                "output_dir_absolute": os.path.abspath(OUTPUT_DIR),
-                "output_dir_exists": os.path.exists(OUTPUT_DIR),
-                "project_root": os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                "current_working_dir": os.getcwd(),
-            }
-        
-        # 尝试从AGC云数据库读取播客元数据（如果配置了）
+        # 从 AGC 云数据库读取播客元数据
         db_client = None
         try:
             from .agc_database import get_database_client
             db_client = get_database_client()
-            if db_client:
-                logger.debug("云数据库客户端已初始化，将在处理本地数据时尝试从云数据库补充")
+            if not db_client:
+                logger.warning("AGC 云数据库客户端未配置，无法获取历史播客列表")
+                return ApiResponse(
+                    success=False,
+                    message="AGC 云数据库未配置，请配置 AGC_API_KEY 或 AGC_CLIENT_ID/SECRET",
+                    data={"podcasts": [], "total": 0}
+                )
         except Exception as e:
-            logger.debug(f"初始化云数据库客户端失败: {e}")
+            logger.error(f"初始化云数据库客户端失败: {e}")
+            return ApiResponse(
+                success=False,
+                message=f"初始化云数据库客户端失败: {str(e)}",
+                data={"podcasts": [], "total": 0}
+            )
         
-        # 从进度文件读取播客信息
-        history_list = []
-        file_map = {}  # 用于映射文件名到播客信息（用于去重和合并）
-        job_map = {}  # 用于映射 job_id 到播客信息
+        # 从云数据库获取播客列表
+        # 如果未指定 limit，使用一个很大的值来获取所有数据
+        query_limit = limit if limit is not None and limit > 0 else 10000
+        try:
+            history_list = db_client.list_podcasts(limit=query_limit, category=category)
+        except Exception as e:
+            logger.error(f"从云数据库获取播客列表失败: {e}", exc_info=True)
+            return ApiResponse(
+                success=False,
+                message=f"从云数据库获取播客列表失败: {str(e)}",
+                data={"podcasts": [], "total": 0}
+            )
         
-        if os.path.exists(_PROGRESS_DIR):
-            progress_files = glob.glob(os.path.join(_PROGRESS_DIR, '*.json'))
-            for progress_file in progress_files:
-                try:
-                    with open(progress_file, 'r', encoding='utf-8') as f:
-                        progress_data = json.load(f)
-                    
-                    # 只包含已完成的播客
-                    if progress_data.get('done') and not progress_data.get('error'):
-                        job_id = os.path.splitext(os.path.basename(progress_file))[0]
-                        
-                        # 尝试从任务管理器获取更多信息
-                        task_info = None
-                        try:
-                            task_manager = get_task_manager()
-                            task = task_manager.get_task(job_id)
-                            if task and task.result:
-                                task_info = task.result
-                        except:
-                            pass
-                        
-                        # 获取本地文件路径
-                        local_file_path = None
-                        local_filename = None
-                        if task_info:
-                            audio_path = task_info.get('audio_path', '')
-                            if audio_path:
-                                # 如果是绝对路径，提取文件名
-                                if os.path.isabs(audio_path):
-                                    local_filename = os.path.basename(audio_path)
-                                    if os.path.exists(audio_path):
-                                        local_file_path = audio_path
-                                else:
-                                    # 如果是相对路径，尝试拼接
-                                    local_filename = os.path.basename(audio_path)
-                                    full_path = os.path.join(OUTPUT_DIR, local_filename)
-                                    if os.path.exists(full_path):
-                                        local_file_path = full_path
-                        
-                        # 构建音频URL（优先使用本地文件，其次使用云存储URL）
-                        audio_url = progress_data.get('audio_url')
-                        if local_filename and os.path.exists(os.path.join(OUTPUT_DIR, local_filename)):
-                            # 如果本地文件存在，使用本地文件API
-                            audio_url = f"/api/v1/podcast/file/{local_filename}"
-                        
-                        # 获取脚本内容
-                        script_content = task_info.get('script') if task_info else progress_data.get('script')
-                        
-                        # 确定标题：优先使用已有的title，如果title是默认消息（如"生成完成"、"上传完成"等），则使用AI生成
-                        title = progress_data.get('title') or progress_data.get('message', '未命名播客')
-                        
-                        # 检查标题是否是默认的系统消息
-                        default_messages = ['生成完成', '上传完成', '生成完成，已开始后台上传到云存储', 
-                                          '上传完成，音频已就绪', '任务完成', '未命名播客']
-                        is_default_title = title in default_messages or len(title) < 5
-                        
-                        # 如果标题是默认的且有脚本内容，使用AI生成标题
-                        if is_default_title and script_content and len(script_content.strip()) > 20:
-                            try:
-                                from .text_processor import TextProcessor
-                                text_processor = TextProcessor()
-                                generated_title = text_processor.generate_title_from_script(script_content)
-                                if generated_title and generated_title != "未命名播客":
-                                    title = generated_title
-                            except Exception as e:
-                                logger.debug(f"生成播客标题失败: {e}，使用原标题")
-                        
-                        # 尝试从云数据库获取更完整的元数据
-                        cloud_metadata = None
-                        if db_client:
-                            try:
-                                cloud_metadata = db_client.get_podcast(job_id)
-                                if cloud_metadata:
-                                    logger.debug(f"从云数据库获取到播客元数据: {job_id}")
-                            except Exception as e:
-                                logger.debug(f"从云数据库获取播客元数据失败: {e}")
-                        
-                        # 构建播客信息（优先使用云数据库数据，其次使用本地数据）
-                        podcast_info = {
-                            'id': job_id,
-                            'title': cloud_metadata.get('title') if cloud_metadata else title,
-                            'audio_url': cloud_metadata.get('audio_url') if cloud_metadata and cloud_metadata.get('audio_url') else audio_url,
-                            'local_file': local_filename if local_file_path else None,
-                            'created_at': cloud_metadata.get('created_at') if cloud_metadata and cloud_metadata.get('created_at') else progress_data.get('ts', int(time.time())),
-                            'duration': cloud_metadata.get('duration') if cloud_metadata else None,  # 时长需要从音频文件获取，暂时设为None
-                            'category': cloud_metadata.get('category') if cloud_metadata else progress_data.get('category'),
-                            'status': cloud_metadata.get('status') if cloud_metadata else 'completed',
-                            'script': cloud_metadata.get('script') if cloud_metadata and cloud_metadata.get('script') else script_content,
-                            'file_size_mb': cloud_metadata.get('file_size_mb') if cloud_metadata and cloud_metadata.get('file_size_mb') else (task_info.get('file_size_mb') if task_info else None),
-                            'topic': cloud_metadata.get('topic') if cloud_metadata and cloud_metadata.get('topic') else (task_info.get('topic') if task_info else progress_data.get('topic')),
-                        }
-                        
-                        # 如果有 script，提取前100字符作为内容预览
-                        if podcast_info['script']:
-                            podcast_info['content'] = podcast_info['script'][:100] + '...' if len(podcast_info['script']) > 100 else podcast_info['script']
-                        
-                        # 如果有本地文件，记录到 file_map 中（用于后续去重和补充文件信息）
-                        if local_filename:
-                            file_map[local_filename] = podcast_info
-                        else:
-                            # 没有本地文件，直接添加到列表
-                            history_list.append(podcast_info)
-                except Exception as e:
-                    logger.debug(f"读取进度文件失败: {progress_file}, {e}")
-        
-        # 扫描 OUTPUT_DIR 目录，添加没有进度文件的音频文件，或补充已有播客的文件信息
-        if os.path.exists(OUTPUT_DIR):
-            audio_extensions = ['.wav', '.mp3', '.flac', '.m4a']
-            for ext in audio_extensions:
-                audio_files = glob.glob(os.path.join(OUTPUT_DIR, f'*{ext}'))
-                for audio_file in audio_files:
-                    filename = os.path.basename(audio_file)
-                    file_stat = os.stat(audio_file)
-                    
-                    # 如果这个文件已经在 file_map 中（有进度文件），补充文件信息
-                    if filename in file_map:
-                        existing_info = file_map[filename]
-                        # 补充文件大小（如果还没有）
-                        if not existing_info.get('file_size_mb'):
-                            existing_info['file_size_mb'] = round(file_stat.st_size / (1024 * 1024), 2)
-                        # 确保使用本地文件 URL
-                        if not existing_info.get('audio_url') or not existing_info['audio_url'].startswith('/api/v1/podcast/file'):
-                            existing_info['audio_url'] = f"/api/v1/podcast/file/{filename}"
-                        existing_info['local_file'] = filename
-                    else:
-                        # 这是一个没有进度文件的本地文件，添加到列表
-                        history_list.append({
-                            'id': f'file_{filename}',
-                            'title': os.path.splitext(filename)[0],
-                            'audio_url': f"/api/v1/podcast/file/{filename}",
-                            'local_file': filename,
-                            'created_at': int(file_stat.st_mtime),
-                            'duration': None,
-                            'category': None,
-                            'status': 'completed',
-                            'script': None,
-                            'file_size_mb': round(file_stat.st_size / (1024 * 1024), 2),
-                            'topic': None,
-                        })
-                        file_map[filename] = True  # 标记已处理
-        
-        # 将 file_map 中的播客信息添加到列表（这些是有本地文件的播客，已补充文件信息）
-        for filename, podcast_info in file_map.items():
-            if isinstance(podcast_info, dict) and podcast_info not in history_list:
-                history_list.append(podcast_info)
-        
-        # 按创建时间倒序排序
-        history_list.sort(key=lambda x: x.get('created_at', 0), reverse=True)
-        
-        # 去重：如果有相同的 local_file，只保留一个（优先保留有更多信息的）
-        seen_files = {}
-        deduplicated_list = []
+        # 处理每个播客，添加内容预览
         for podcast in history_list:
-            local_file = podcast.get('local_file')
-            if local_file:
-                if local_file not in seen_files:
-                    seen_files[local_file] = podcast
-                    deduplicated_list.append(podcast)
-                else:
-                    # 如果已有相同文件，选择信息更完整的（有 script 或更好的 title）
-                    existing = seen_files[local_file]
-                    if (podcast.get('script') and not existing.get('script')) or \
-                       (podcast.get('title') and podcast['title'] != os.path.splitext(local_file)[0] and 
-                        existing.get('title') == os.path.splitext(local_file)[0]):
-                        # 替换为信息更完整的
-                        deduplicated_list.remove(existing)
-                        seen_files[local_file] = podcast
-                        deduplicated_list.append(podcast)
-            else:
-                # 没有本地文件，直接添加（可能是只有云存储URL的）
-                deduplicated_list.append(podcast)
+            # 如果有 script，提取前100字符作为内容预览
+            if podcast.get('script'):
+                script = podcast['script']
+                podcast['content'] = script[:100] + '...' if len(script) > 100 else script
+            
+            # 确保 roles 字段是列表格式（如果是从数据库读取的字符串）
+            if 'roles' in podcast and isinstance(podcast['roles'], str):
+                try:
+                    import json
+                    podcast['roles'] = json.loads(podcast['roles'])
+                except:
+                    podcast['roles'] = []
         
-        history_list = deduplicated_list
-        
-        # 分类过滤
-        if category and category != 'all':
-            history_list = [h for h in history_list if h.get('category') == category]
-        
-        # 限制数量
-        history_list = history_list[:limit]
+        # 按创建时间倒序排序（如果数据库未排序）
+        history_list.sort(key=lambda x: x.get('created_at', 0), reverse=True)
         
         response_data = {
             "podcasts": history_list,
@@ -3902,7 +3753,11 @@ async def get_podcast_history(limit: int = 50, category: Optional[str] = None, d
         
         # 如果启用调试模式，添加调试信息
         if debug:
-            response_data["debug"] = debug_info
+            response_data["debug"] = {
+                "source": "AGC CloudDB",
+                "db_client_enabled": db_client.is_enabled if hasattr(db_client, 'is_enabled') else True,
+                "cloud_db_zone": db_client.cloud_db_zone if hasattr(db_client, 'cloud_db_zone') else None
+            }
         
         return ApiResponse(
             success=True,
