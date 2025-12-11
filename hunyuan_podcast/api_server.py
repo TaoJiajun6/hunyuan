@@ -2257,6 +2257,32 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
             _update_progress(request.job_id, "completed", 100, podcast_title, done=True, 
                            title=podcast_title, topic=request.topic, category=request.category, script=text_content)
             
+            # 构建播客元数据
+            podcast_metadata = {
+                "id": request.job_id,
+                "title": podcast_title,
+                "audio_url": agc_result.get('url') if isinstance(agc_result, dict) else None,
+                "local_file": os.path.basename(output_path) if output_path else None,
+                "created_at": int(time.time()),
+                "duration": None,  # 时长需要从音频文件获取
+                "category": request.category,
+                "status": "completed",
+                "script": text_content,
+                "file_size_mb": round(file_size, 2),
+                "topic": request.topic,
+                "roles": list(roles)
+            }
+            
+            # 保存到AGC云数据库（如果配置了）
+            try:
+                from .agc_database import get_database_client
+                db_client = get_database_client()
+                if db_client:
+                    db_client.save_podcast(podcast_metadata)
+                    logger.info("播客元数据已保存到AGC云数据库")
+            except Exception as e:
+                logger.debug(f"保存播客元数据到云数据库失败（不影响主流程）: {e}")
+            
             data = {
                     "audio_base64": audio_base64,
                 "audio_path": output_path,  # 默认使用本地路径
@@ -3614,6 +3640,16 @@ async def delete_podcast(podcast_id: str):
         if podcast_id in _PROGRESS_CACHE:
             del _PROGRESS_CACHE[podcast_id]
         
+        # 6. 从AGC云数据库删除元数据（如果配置了）
+        try:
+            from .agc_database import get_database_client
+            db_client = get_database_client()
+            if db_client:
+                if db_client.delete_podcast(podcast_id):
+                    deleted_items.append(f"云数据库元数据: {podcast_id}")
+        except Exception as e:
+            logger.debug(f"从云数据库删除播客元数据失败: {e}")
+        
         if deleted_items:
             return ApiResponse(
                 success=True,
@@ -3662,6 +3698,16 @@ async def get_podcast_history(limit: int = 50, category: Optional[str] = None, d
                 "project_root": os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                 "current_working_dir": os.getcwd(),
             }
+        
+        # 尝试从AGC云数据库读取播客元数据（如果配置了）
+        db_client = None
+        try:
+            from .agc_database import get_database_client
+            db_client = get_database_client()
+            if db_client:
+                logger.debug("云数据库客户端已初始化，将在处理本地数据时尝试从云数据库补充")
+        except Exception as e:
+            logger.debug(f"初始化云数据库客户端失败: {e}")
         
         # 从进度文件读取播客信息
         history_list = []
@@ -3735,19 +3781,29 @@ async def get_podcast_history(limit: int = 50, category: Optional[str] = None, d
                             except Exception as e:
                                 logger.debug(f"生成播客标题失败: {e}，使用原标题")
                         
-                        # 构建播客信息
+                        # 尝试从云数据库获取更完整的元数据
+                        cloud_metadata = None
+                        if db_client:
+                            try:
+                                cloud_metadata = db_client.get_podcast(job_id)
+                                if cloud_metadata:
+                                    logger.debug(f"从云数据库获取到播客元数据: {job_id}")
+                            except Exception as e:
+                                logger.debug(f"从云数据库获取播客元数据失败: {e}")
+                        
+                        # 构建播客信息（优先使用云数据库数据，其次使用本地数据）
                         podcast_info = {
                             'id': job_id,
-                            'title': title,
-                            'audio_url': audio_url,
+                            'title': cloud_metadata.get('title') if cloud_metadata else title,
+                            'audio_url': cloud_metadata.get('audio_url') if cloud_metadata and cloud_metadata.get('audio_url') else audio_url,
                             'local_file': local_filename if local_file_path else None,
-                            'created_at': progress_data.get('ts', int(time.time())),
-                            'duration': None,  # 时长需要从音频文件获取，暂时设为None
-                            'category': progress_data.get('category'),
-                            'status': 'completed',
-                            'script': script_content,
-                            'file_size_mb': task_info.get('file_size_mb') if task_info else None,
-                            'topic': task_info.get('topic') if task_info else progress_data.get('topic'),
+                            'created_at': cloud_metadata.get('created_at') if cloud_metadata and cloud_metadata.get('created_at') else progress_data.get('ts', int(time.time())),
+                            'duration': cloud_metadata.get('duration') if cloud_metadata else None,  # 时长需要从音频文件获取，暂时设为None
+                            'category': cloud_metadata.get('category') if cloud_metadata else progress_data.get('category'),
+                            'status': cloud_metadata.get('status') if cloud_metadata else 'completed',
+                            'script': cloud_metadata.get('script') if cloud_metadata and cloud_metadata.get('script') else script_content,
+                            'file_size_mb': cloud_metadata.get('file_size_mb') if cloud_metadata and cloud_metadata.get('file_size_mb') else (task_info.get('file_size_mb') if task_info else None),
+                            'topic': cloud_metadata.get('topic') if cloud_metadata and cloud_metadata.get('topic') else (task_info.get('topic') if task_info else progress_data.get('topic')),
                         }
                         
                         # 如果有 script，提取前100字符作为内容预览
