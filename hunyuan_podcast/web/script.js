@@ -1,17 +1,5 @@
 let charCount = 0;
 
-// API 服务器基础地址（后端端口 8000）
-const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-  ? 'http://localhost:8000'
-  : `http://${window.location.hostname}:8000`;
-
-// 构建完整的 API URL
-function getApiUrl(endpoint) {
-  // 确保 endpoint 以 / 开头
-  const path = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
-  return API_BASE_URL + path;
-}
-
 function switchTab(tab) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -205,7 +193,7 @@ async function analyzeText() {
   btn.disabled = true;
   log('analyze', '分析中，请稍候...');
   try {
-    const resp = await fetch(getApiUrl('/api/v1/podcast/analyze'), {
+    const resp = await fetch('/api/v1/podcast/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text })

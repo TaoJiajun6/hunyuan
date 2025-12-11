@@ -3513,46 +3513,16 @@ async def shutdown_event():
 
 if __name__ == "__main__":
     import argparse
-    import socket
-    
     parser = argparse.ArgumentParser(description="混元AI播客生成API服务")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="API服务主机")
     parser.add_argument("--port", type=int, default=8000, help="API服务端口")
     args = parser.parse_args()
     
-    # 获取本机IP地址
-    def get_local_ip():
-        try:
-            # 连接到一个远程地址来获取本机IP
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            return ip
-        except Exception:
-            return None
-    
-    local_ip = get_local_ip()
-    cloud_studio_url = os.getenv("CLOUD_STUDIO_URL", None)
-    
-    print(f"\n🚀 启动混元AI播客生成API服务\n")
-    print(f"访问地址：\n")
-    print(f"  本地访问: http://127.0.0.1:{args.port}")
-    print(f"  或使用: http://localhost:{args.port}")
-    if local_ip:
-        print(f"  局域网访问: http://{local_ip}:{args.port}")
-    if cloud_studio_url:
-        print(f"\nAPI文档: {cloud_studio_url}/docs")
-        print(f"健康检查: {cloud_studio_url}/health")
-    else:
-        print(f"\nAPI文档: http://127.0.0.1:{args.port}/docs")
-        print(f"健康检查: http://127.0.0.1:{args.port}/health")
-    print(f"\nAPI端点:\n")
-    print(f"  • 多角色播客: POST /api/v1/podcast/multi_role")
-    print(f"  • 自定义角色: POST /api/v1/podcast/character")
-    print(f"  • 主题深度播客: POST /api/v1/podcast/deep")
-    print(f"  • 文本分析: POST /api/v1/podcast/analyze")
-    print(f"\n⚙️  最大并发任务数: {MAX_CONCURRENT_PODCAST_TASKS} (可通过环境变量 MAX_CONCURRENT_PODCAST_TASKS 配置)\n")
+    print(f"🚀 启动混元AI播客生成API服务")
+    print(f"📡 API地址: http://{args.host}:{args.port}")
+    print(f"📚 API文档: http://{args.host}:{args.port}/docs")
+    print(f"💡 健康检查: http://{args.host}:{args.port}/health")
+    print(f"⚙️  最大并发任务数: {MAX_CONCURRENT_PODCAST_TASKS} (可通过环境变量 MAX_CONCURRENT_PODCAST_TASKS 配置)")
     
     uvicorn.run(app, host=args.host, port=args.port)
 
