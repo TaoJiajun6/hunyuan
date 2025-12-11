@@ -8,8 +8,9 @@ import { FileUtils, TextFileInfo } from '../../utils/FileUtils';
 import { picker } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
 import { Logger } from 'lib_common';
-import { podcastService, MultiRoleRequest, PodcastListItem } from 'lib_api';
+import { podcastService, MultiRoleRequest, PodcastListItem, cloudDatabaseService } from 'lib_api';
 import { AppStorageV2 } from '@kit.ArkUI';
+import { cloudStorage } from '@kit.CloudFoundationKit';
 
 /**
  * 多角色播客页面路由参数
@@ -33,6 +34,8 @@ export struct PodcastPage {
   @Local musicModel: MusicModel = getMusicModel(); // 音乐模型
   @Local isShowUploadMenu: boolean = false; // 是否显示上传菜单
   @Local isGenerating: boolean = false; // 是否正在生成播客
+  @Local showDeleteMenu: boolean = false; // 是否显示删除菜单
+  @Local selectedPodcastId: string = ''; // 选中的播客ID
   // 存储播客ID到创建时间的映射（用于从云数据库获取的播客）
   private podcastCreatedAtMap: Map<string, number> = new Map();
   @Param headerBarHeight: Length = $r('app.float.nav_header_height');
@@ -368,7 +371,138 @@ export struct PodcastPage {
    * 播放播客
    */
   playPodcast(song: SongItem): void {
-    MediaService.getInstance().playSong(song);
+    Logger.info('PodcastPage', `开始播放播客: ${song.title}, id: ${song.id}, src: ${song.src}`);
+    try {
+      MediaService.getInstance().playSong(song);
+      Logger.info('PodcastPage', `已调用MediaService.playSong`);
+    } catch (error) {
+      Logger.error('PodcastPage', `播放播客失败: ${String(error)}`);
+      promptAction.showToast({
+        message: `播放失败: ${String(error)}`,
+        duration: 3000
+      });
+    }
+  }
+
+  /**
+   * 显示删除菜单
+   */
+  showDeleteActionSheet(song: SongItem): void {
+    this.selectedPodcastId = song.id;
+    // 使用 promptAction.showDialog 显示删除确认对话框
+    promptAction.showDialog({
+      title: '删除播客',
+      message: '确定要删除这个播客吗？删除后无法恢复。',
+      buttons: [
+        {
+          text: '取消',
+          color: $r('sys.color.font_primary')
+        },
+        {
+          text: '删除',
+          color: '#FFE94949'
+        }
+      ]
+    }).then((data) => {
+      if (data.index === 1) {
+        // 用户点击了"删除"按钮
+        this.deletePodcast();
+      } else {
+        // 用户点击了"取消"或关闭对话框
+        this.showDeleteMenu = false;
+        this.selectedPodcastId = '';
+      }
+    }).catch(() => {
+      this.showDeleteMenu = false;
+      this.selectedPodcastId = '';
+    });
+  }
+
+  /**
+   * 删除播客
+   */
+  async deletePodcast(): Promise<void> {
+    if (!this.selectedPodcastId) {
+      return;
+    }
+
+    try {
+      // 先获取要删除的播客信息（用于删除云存储文件）
+      const podcastToDelete = this.recentPodcasts.find(song => song.id === this.selectedPodcastId);
+      const audioUrl = podcastToDelete?.src;
+
+      // 1. 从云数据库删除
+      const deleted = await cloudDatabaseService.deletePodcastById(this.selectedPodcastId);
+      if (deleted) {
+        Logger.info('PodcastPage', `从云数据库删除播客成功: ${this.selectedPodcastId}`);
+      } else {
+        Logger.warn('PodcastPage', `从云数据库删除播客失败: ${this.selectedPodcastId}`);
+      }
+
+      // 2. 从播放列表删除
+      MediaService.getInstance().removeSongById(this.selectedPodcastId);
+
+      // 3. 从映射表删除
+      this.podcastCreatedAtMap.delete(this.selectedPodcastId);
+
+      // 4. 从最近播客列表删除
+      this.recentPodcasts = this.recentPodcasts.filter(song => song.id !== this.selectedPodcastId);
+
+      // 5. 尝试从云存储删除音频文件（如果存在）
+      if (audioUrl) {
+        try {
+          const cloudPath = this.extractCloudPathFromUrl(audioUrl);
+          if (cloudPath) {
+            const storageBucket = cloudStorage.bucket();
+            await storageBucket.deleteFile(cloudPath);
+            Logger.info('PodcastPage', `从云存储删除文件成功: ${cloudPath}`);
+          }
+        } catch (cloudError) {
+          Logger.warn('PodcastPage', `从云存储删除文件失败: ${cloudError}`);
+        }
+      }
+
+      promptAction.showToast({
+        message: '播客已删除',
+        duration: 2000
+      });
+
+      // 刷新列表
+      await this.loadRecentPodcasts();
+    } catch (error) {
+      Logger.error('PodcastPage', `删除播客失败: ${error}`);
+      promptAction.showToast({
+        message: `删除失败: ${String(error)}`,
+        duration: 3000
+      });
+    } finally {
+      this.showDeleteMenu = false;
+      this.selectedPodcastId = '';
+    }
+  }
+
+  /**
+   * 从URL提取云存储路径
+   */
+  extractCloudPathFromUrl(url: string): string | null {
+    if (!url) {
+      return null;
+    }
+    try {
+      // 匹配 outputs/podcasts/文件名.wav 格式
+      const match = url.match(/outputs\/podcasts\/[^\/]+\.(wav|mp3|m4a|aac|flac|ogg|wma)/i);
+      if (match && match[0]) {
+        return match[0];
+      }
+      // 如果URL包含 /outputs/，提取后面的路径
+      const outputsIndex = url.indexOf('/outputs/');
+      if (outputsIndex !== -1) {
+        return url.substring(outputsIndex + 1);
+      }
+    } catch (error) {
+      Logger.warn('PodcastPage', `提取云存储路径失败: ${error}`);
+    }
+    return null;
   }
 
   /**
@@ -804,7 +938,6 @@ export struct PodcastPage {
       })
       .width(CommonConstants.FULL_PERCENT)
       .backgroundColor('#fff8f8f8')
-
     }
     .hideTitleBar(true)
   }
@@ -974,7 +1107,13 @@ export struct PodcastPage {
     .onClick(() => {
       this.playPodcast(song);
     })
+    .gesture(
+      LongPressGesture({ duration: 500 }).onAction(() => {
+        this.showDeleteActionSheet(song);
+      })
+    )
   }
+
 }
 
 

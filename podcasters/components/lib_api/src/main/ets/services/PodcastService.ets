@@ -1440,76 +1440,10 @@ export class PodcastService {
   }
 
   /**
-   * 从API服务器获取播客列表（备用方案）
+   * 获取播客列表（从云数据库获取）
    * @param limit 限制返回数量
    * @param category 按分类筛选
-   * @returns 播客列表
-   */
-  async getPodcastListFromAPI(
-    limit?: number,
-    category?: string
-  ): Promise<PodcastListItem[]> {
-    return new Promise<PodcastListItem[]>((resolve) => {
-      try {
-        const httpRequest = http.createHttp();
-        let url = this.buildApiUrl('/api/v1/podcast/history');
-        const params: string[] = [];
-        
-        if (limit && limit > 0) {
-          params.push(`limit=${limit}`);
-        }
-        if (category && category.trim() !== '') {
-          params.push(`category=${encodeURIComponent(category)}`);
-        }
-        
-        if (params.length > 0) {
-          url += `?${params.join('&')}`;
-        }
-
-        const options: http.HttpRequestOptions = {
-          method: http.RequestMethod.GET,
-          connectTimeout: 30000,
-          readTimeout: 30000
-        };
-
-        Logger.info(TAG, `请求播客列表: ${url}`);
-
-        httpRequest.request(url, options, (err: BusinessError, data: http.HttpResponse) => {
-          httpRequest.destroy();
-          
-          if (err || !data || data.responseCode !== 200) {
-            Logger.error(TAG, `获取播客列表失败: ${err?.message || '未知错误'}`);
-            resolve([]);
-            return;
-          }
-
-          try {
-            const response = JSON.parse(data.result.toString()) as ApiResponse<PodcastListResponseData>;
-            if (response.success && response.data && response.data.podcasts) {
-              const podcasts: PodcastListItem[] = response.data.podcasts;
-              Logger.info(TAG, `从API获取播客列表成功，共 ${podcasts.length} 条`);
-              resolve(podcasts);
-            } else {
-              Logger.warn(TAG, `API返回数据格式异常: ${JSON.stringify(response)}`);
-              resolve([]);
-            }
-          } catch (parseError) {
-            Logger.error(TAG, `解析API响应失败: ${JSON.stringify(parseError)}`);
-            resolve([]);
-          }
-        });
-      } catch (error) {
-        Logger.error(TAG, `获取播客列表异常: ${JSON.stringify(error)}`);
-        resolve([]);
-      }
-    });
-  }
-
-  /**
-   * 获取播客列表（优先从云数据库获取，失败则从API获取）
-   * @param limit 限制返回数量
-   * @param category 按分类筛选
-   * @param useCloudDB 是否优先使用云数据库，默认true
+   * @param useCloudDB 是否使用云数据库，默认true
    * @returns 播客列表
    */
   async getPodcastList(
@@ -1517,21 +1451,16 @@ export class PodcastService {
     category?: string,
     useCloudDB: boolean = true
   ): Promise<PodcastListItem[]> {
-    if (useCloudDB) {
-      try {
-        const list = await this.getPodcastListFromCloudDB(limit, category);
-        if (list.length > 0) {
-          return list;
-        }
-        // 如果云数据库返回空列表，尝试从API获取
-        Logger.info(TAG, '云数据库返回空列表，尝试从API获取');
-      } catch (error) {
-        Logger.warn(TAG, `从云数据库获取失败，尝试从API获取: ${JSON.stringify(error)}`);
-      }
+    // 从云数据库获取
+    try {
+      const list = await this.getPodcastListFromCloudDB(limit, category);
+      Logger.info(TAG, `从云数据库获取播客列表成功，共 ${list.length} 条`);
+      return list;
+    } catch (error) {
+      Logger.error(TAG, `从云数据库获取播客列表失败: ${JSON.stringify(error)}`);
+      // 返回空列表
+      return [];
     }
-
-    // 从API获取
-    return await this.getPodcastListFromAPI(limit, category);
   }
 
   /**

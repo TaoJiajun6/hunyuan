@@ -2763,12 +2763,49 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
             except Exception as e:
                 logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
 
+            # 构建播客元数据
+            # 尝试获取音频时长
+            duration_seconds = get_audio_duration(output_path)
+            
+            # 获取角色名称列表
+            character_names = [char.name for char in request.characters]
+            
+            podcast_metadata = {
+                "id": request.job_id,
+                "title": podcast_title,
+                "audio_url": agc_result.get('url') if isinstance(agc_result, dict) else None,
+                "local_file": os.path.basename(output_path) if output_path else None,
+                "created_at": int(time.time()),  # 秒级时间戳
+                "duration": duration_seconds,  # 时长（秒）
+                "category": request.category,
+                "status": "completed",
+                "script": cleaned_text,
+                "file_size_mb": round(file_size, 2),
+                "topic": request.topic,
+                "roles": character_names
+            }
+            
+            # 保存到AGC云数据库（如果配置了）
+            try:
+                from .agc_database import get_database_client
+                db_client = get_database_client()
+                if db_client:
+                    success = db_client.save_podcast(podcast_metadata)
+                    if success:
+                        logger.info("播客元数据已保存到AGC云数据库")
+                    else:
+                        logger.warning("播客元数据保存到云数据库失败（不影响主流程）")
+                else:
+                    logger.debug("未配置云数据库客户端，跳过保存")
+            except Exception as e:
+                logger.warning(f"保存播客元数据到云数据库失败（不影响主流程）: {e}", exc_info=True)
+
             data = {
                     "audio_base64": audio_base64,
                 "audio_path": output_path,  # 默认使用本地路径
                     "file_size_mb": round(file_size, 2),
                     "script": cleaned_text,
-                    "characters": [char.name for char in request.characters]
+                    "characters": character_names
                 }
             if agc_result:
                 data['agc_upload_status'] = agc_result
@@ -3110,6 +3147,43 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
                     _update_progress(request.job_id, "completed", 100, "生成完成", done=True)
             except Exception as e:
                 logger.warning(f"准备 AGC 上传任务时出错（不影响主流程）: {str(e)}")
+
+            # 构建播客元数据
+            # 尝试获取音频时长
+            duration_seconds = get_audio_duration(output_path)
+            
+            # 获取角色名称列表（从解析的对话中提取）
+            roles_list = list(unique_roles)
+            
+            podcast_metadata = {
+                "id": request.job_id,
+                "title": podcast_title,
+                "audio_url": agc_result.get('url') if isinstance(agc_result, dict) else None,
+                "local_file": os.path.basename(output_path) if output_path else None,
+                "created_at": int(time.time()),  # 秒级时间戳
+                "duration": duration_seconds,  # 时长（秒）
+                "category": request.category,
+                "status": "completed",
+                "script": cleaned_text,
+                "file_size_mb": round(file_size, 2),
+                "topic": request.topic,
+                "roles": roles_list
+            }
+            
+            # 保存到AGC云数据库（如果配置了）
+            try:
+                from .agc_database import get_database_client
+                db_client = get_database_client()
+                if db_client:
+                    success = db_client.save_podcast(podcast_metadata)
+                    if success:
+                        logger.info("播客元数据已保存到AGC云数据库")
+                    else:
+                        logger.warning("播客元数据保存到云数据库失败（不影响主流程）")
+                else:
+                    logger.debug("未配置云数据库客户端，跳过保存")
+            except Exception as e:
+                logger.warning(f"保存播客元数据到云数据库失败（不影响主流程）: {e}", exc_info=True)
 
             data = {
                     "audio_base64": audio_base64,

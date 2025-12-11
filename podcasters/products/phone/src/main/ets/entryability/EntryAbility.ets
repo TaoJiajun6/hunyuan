@@ -16,6 +16,8 @@ export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam) {
     Logger.info(TAG, 'Ability onCreate');
     GlobalContext.initContext(this.context);
+    // 将context存储到AppStorage，供其他模块使用
+    AppStorage.setOrCreate('context', this.context);
     // 初始化云数据库服务
     try {
       cloudDatabaseService.initialize();

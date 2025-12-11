@@ -103,8 +103,8 @@ const podcasts = await podcastService.getPodcastListFromCloudDB(20, '科学与�
 ```typescript
 import { podcastService } from 'lib_api';
 
-// 从API获取播客列表
-const podcasts = await podcastService.getPodcastListFromAPI(20, '科学与科技');
+// 从云数据库获取播客列表（仅支持云数据库）
+const podcasts = await podcastService.getPodcastList(20, '科学与科技');
 ```
 
 #### 自动选择数据源（推荐）

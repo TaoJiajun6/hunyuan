@@ -53,10 +53,10 @@ export enum AudioQuality {
 
 export class MediaService {
   private static instance: MediaService;
-  private context: common.UIAbilityContext = AppStorage.get('context') as common.UIAbilityContext;
+  private context: common.UIAbilityContext | undefined = undefined;
   public avPlayer?: media.AVPlayer;
   private session?: avSession.AVSession;
-  private songItemBuilder: SongItemBuilder = new SongItemBuilder(this.context);
+  private songItemBuilder: SongItemBuilder | null = null;
   private state: AudioPlayerState = AudioPlayerState.IDLE;
   private isFirstLoadAsset: boolean = true;
   private isPrepared: boolean = false;
@@ -137,8 +137,13 @@ export class MediaService {
       case 'playing':
         Logger.info(TAG, 'avPlayerStateChangeCall AVPlayer state playing called.');
         if (this.isFirstLoadAsset) {
-          BackgroundUtil.startContinuousTask(this.context);
-          this.isFirstLoadAsset = false;
+          try {
+            const context = this.getValidContext();
+            BackgroundUtil.startContinuousTask(context);
+            this.isFirstLoadAsset = false;
+          } catch (error) {
+            Logger.error(TAG, `启动后台任务失败: ${String(error)}`);
+          }
         }
         this.state = AudioPlayerState.PLAY;
         this.setCallBackData(true);
@@ -159,6 +164,7 @@ export class MediaService {
       case 'stopped':
         Logger.info(TAG, 'avPlayerStateChangeCall AVPlayer state stopped called.');
         this.state = AudioPlayerState.STOP;
+        this.isPrepared = false;
         this.reset();
         break;
       case 'error':
@@ -317,15 +323,16 @@ export class MediaService {
    * 创建session
    */
   private async createSession(): Promise<void> {
-    this.session = await avSession.createAVSession(this.context, 'SESSION_NAME', 'audio');
+    const context = this.getValidContext();
+    this.session = await avSession.createAVSession(context, 'SESSION_NAME', 'audio');
     this.session.activate();
     Logger.info(TAG, `session create done : sessionId : ${this.session.sessionId}`);
     this.setAVMetadata();
     let wantAgentInfo: wantAgent.WantAgentInfo = {
       wants: [
         {
-          bundleName: this.context.abilityInfo.bundleName,
-          abilityName: this.context.abilityInfo.name
+          bundleName: context.abilityInfo.bundleName,
+          abilityName: context.abilityInfo.name
         }
       ],
       actionType: wantAgent.OperationType.START_ABILITIES,
@@ -363,8 +370,9 @@ export class MediaService {
   private async setAVMetadata(): Promise<void> {
     try {
       //判断label是网络图还是资源图片
+      const context = this.getValidContext();
       let mediaImage =
-        await MediaTools.getPixelMapBylabel(this.context, this.changedData.songList[this.musicIndex].label as Resource);
+        await MediaTools.getPixelMapBylabel(context, this.changedData.songList[this.musicIndex].label as Resource);
       Logger.info(TAG, 'getPixelMapFromResource success' + JSON.stringify(mediaImage));
       let metadata: avSession.AVMetadata = {
         assetId: this.changedData.songList[this.musicIndex].id,
@@ -406,6 +414,7 @@ export class MediaService {
    * @param musicIndex
    */
   public controlPlay(musicIndex: number): void {
+    Logger.info(TAG, `controlPlay called, musicIndex: ${musicIndex}, songList length: ${this.changedData.songList.length}`);
     // 检查播放器是否已初始化
     if (!this.avPlayer) {
       Logger.info(TAG, `播放器未初始化，开始初始化播放器，musicIndex: ${musicIndex}`);
@@ -421,6 +430,7 @@ export class MediaService {
       }
       // 初始化播放器
       const currentSong = this.changedData.songList[musicIndex];
+      Logger.info(TAG, `初始化播放器，当前歌曲: ${currentSong.title}, src: ${currentSong.src}`);
       this.initAudioPlayer(this.changedData.songList, currentSong);
       return;
     }
@@ -548,23 +558,45 @@ export class MediaService {
   }
 
   public async playByIndex(musicIndex: number): Promise<void> {
+    Logger.info(TAG, `playByIndex called, musicIndex: ${musicIndex}, songList length: ${this.changedData.songList.length}`);
     if (musicIndex >= this.changedData.songList.length) {
       Logger.error(TAG,
         `playByIndex error, index is ${musicIndex} out of songList length ${this.changedData.songList.length}`);
       return;
     }
     this.updateMusicIndex(musicIndex);
+    
+    // 如果播放器未准备好，直接加载新资源
+    if (!this.isPrepared || !this.avPlayer) {
+      Logger.info(TAG, `playByIndex: 播放器未准备好或不存在，直接加载资源`);
+      await this.loadAsset();
+      return;
+    }
+    
+    // 如果播放器已准备好，先停止当前播放
     await this.stop();
+    
+    // 停止后会触发 'stopped' 状态，在状态回调中会调用 reset()，然后触发 'idle' 状态，在 'idle' 状态中会调用 loadAsset()
+    // 但为了确保资源被加载，我们也可以在这里直接调用 loadAsset（如果 stop 没有触发状态变化）
+    // 实际上，stop() 会触发状态变化到 'stopped'，然后 reset() 会触发 'idle'，'idle' 会调用 loadAsset()
+    // 所以这里不需要额外调用 loadAsset()
   }
 
   public async release(): Promise<void> {
-    if (this.avPlayer && this.session && this.context) {
-      this.avPlayer.release();
-      this.songItemBuilder.release();
-      BackgroundUtil.stopContinuousTask(this.context);
-      this.unregisterSessionListener();
-      this.session.destroy();
-      this.timerId = null;
+    if (this.avPlayer && this.session) {
+      try {
+        const context = this.getValidContext();
+        this.avPlayer.release();
+        if (this.songItemBuilder) {
+          this.songItemBuilder.release();
+        }
+        BackgroundUtil.stopContinuousTask(context);
+        this.unregisterSessionListener();
+        this.session.destroy();
+        this.timerId = null;
+      } catch (error) {
+        Logger.error(TAG, `release error: ${String(error)}`);
+      }
     }
   }
 
@@ -602,6 +634,11 @@ export class MediaService {
       // 沙箱文件路径判断 - 以 '/' 开头的绝对路径视为沙箱文件
       this.loadAssetSandbox(currentSong);
     } else {
+      // 初始化songItemBuilder（如果未初始化）
+      if (!this.songItemBuilder) {
+        const context = this.getValidContext();
+        this.songItemBuilder = new SongItemBuilder(context);
+      }
       await this.songItemBuilder.build(this.changedData.songList[this.musicIndex]);
       let url = this.songItemBuilder.getRealUrl();
       if (url) {
@@ -658,18 +695,61 @@ export class MediaService {
   }
 
   /**
+   * 获取有效的context
+   */
+  private getValidContext(): common.UIAbilityContext {
+    // AppStorage是全局可用的，不需要导入
+    // 直接使用全局的AppStorage（在HarmonyOS中，AppStorage是全局对象）
+    let context: common.UIAbilityContext | undefined = undefined;
+    
+    // 优先从AppStorage获取
+    try {
+      // AppStorage是全局对象，可以直接使用
+      context = AppStorage.get('context') as common.UIAbilityContext | undefined;
+      if (context) {
+        Logger.info(TAG, '从AppStorage成功获取context');
+        return context;
+      }
+    } catch (e) {
+      // 如果AppStorage获取失败，继续尝试其他方式
+      Logger.warn(TAG, `从AppStorage获取context失败: ${String(e)}`);
+    }
+    
+    // 如果AppStorage中没有，尝试使用全局的getContext()函数
+    try {
+      const globalContext = getContext();
+      if (globalContext && typeof (globalContext as common.UIAbilityContext).windowStage !== 'undefined') {
+        context = globalContext as common.UIAbilityContext;
+        Logger.info(TAG, '从getContext()成功获取context');
+        return context;
+      }
+    } catch (e) {
+      Logger.warn(TAG, `从getContext()获取context失败: ${String(e)}`);
+    }
+    
+    // 如果以上方式都失败，抛出错误
+    if (!context) {
+      Logger.error(TAG, '无法获取有效的UIAbilityContext');
+      throw new Error('无法获取有效的UIAbilityContext，请确保在EntryAbility中已设置AppStorage.setOrCreate("context", this.context)');
+    }
+    return context;
+  }
+
+  /**
    * 从云存储下载文件
    */
   private async downloadFromCloudStorage(cloudPath: string): Promise<string> {
     return new Promise<string>((resolve, reject) => {
       try {
+        // 获取有效的context
+        const context = this.getValidContext();
         const storageBucket = cloudStorage.bucket();
 
         // 生成本地文件名
         const fileName = cloudPath.split('/').pop() || `audio_${Date.now()}.wav`;
         const localPath = fileName;
 
-        storageBucket.downloadFile(this.context, {
+        storageBucket.downloadFile(context, {
           localPath: localPath,
           cloudPath: cloudPath,
           overwrite: true // 允许覆盖已存在的文件
@@ -683,7 +763,7 @@ export class MediaService {
           // 监听下载完成
           task.on('completed', (progress: request.agent.Progress) => {
             // 文件已下载到 context.cacheDir/localPath
-            const localFilePath = `${this.context.cacheDir}/${localPath}`;
+            const localFilePath = `${context.cacheDir}/${localPath}`;
             Logger.info(TAG, `云存储文件下载完成: ${localFilePath}`);
             resolve(localFilePath);
           });
@@ -1099,27 +1179,34 @@ export class MediaService {
    * @param isShowPlayPage true 显示播放页面 默认不显示播放页面
    */
   public playSong(song: ESObject, isShowPlayPage: boolean = false): void {
+    Logger.info(TAG, `playSong called, song: ${(song as SongItem).title}, id: ${(song as SongItem).id}, src: ${(song as SongItem).src}`);
     // 判断歌曲是否为空
     if (!song) {
+      Logger.error(TAG, 'playSong: song is null or undefined');
       return;
     }
     let songList: SongItem[] = [];
     songList = songList.concat(this.changedData.songList)
     if (songList.length === 0) {
-      songList = [song];
+      songList = [song as SongItem];
+      Logger.info(TAG, `playSong: 播放列表为空，添加第一首歌曲`);
     } else {
-      if (song.id === '') {
-        song.id = this.getUniqueId()
+      if ((song as SongItem).id === '') {
+        (song as SongItem).id = this.getUniqueId()
       }
 
-      if (songList.findIndex((item) => item.title === song.title) !== -1) {
-        songList.splice(songList.findIndex((item) => item.title === song.title), 1);
+      const existingIndex = songList.findIndex((item) => item.title === (song as SongItem).title);
+      if (existingIndex !== -1) {
+        songList.splice(existingIndex, 1);
+        Logger.info(TAG, `playSong: 移除重复歌曲，索引: ${existingIndex}`);
       }
 
-      songList.unshift(song);
+      songList.unshift(song as SongItem);
+      Logger.info(TAG, `playSong: 将歌曲添加到列表开头，当前列表长度: ${songList.length}`);
     }
 
     this.changedData.setSongList(songList);
+    Logger.info(TAG, `playSong: 设置播放列表完成，准备播放索引0的歌曲`);
     this.controlPlay(0);
     if (isShowPlayPage) {
       this.changedData.isShowPlay = true;
