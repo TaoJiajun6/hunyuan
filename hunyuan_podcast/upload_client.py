@@ -338,53 +338,55 @@ def upload_file_to_agc(storage_url: str, bucket: str, object_name: str, file_pat
                 logger.info(f"上传成功！")
                 return resp
             else:
+                # 对于客户端错误（4xx，如403认证失败），直接抛出异常，不重试
+                # 因为认证问题不会因为重试而解决
+                if 400 <= resp.status_code < 500:
+                    error_msg = f"上传失败: HTTP {resp.status_code}"
+                    if resp.text:
+                        error_msg += f" - {resp.text[:200]}"
+                    logger.error(error_msg)
+                    raise AGCUploadError(error_msg)
+                # 对于服务器错误（5xx），也直接抛出异常，不重试
+                # 等待一次性上传完毕，不进行重试
                 resp.raise_for_status()
                 return resp
         except requests.exceptions.Timeout as e:
-            last_exc = e
-            # 检查是否是写入超时，如果是且还有重试机会，继续重试
-            # 写入超时可能发生在数据传输过程中，但服务器可能已经接收了完整数据
+            # 超时错误，直接抛出异常，不重试
+            # 等待一次性上传完毕，不进行重试
             is_write_timeout = "write operation timed out" in str(e).lower() or "timed out" in str(e).lower()
-            logger.error(f"上传超时 (attempt {attempt}): {str(e)}")
+            logger.error(f"上传超时: {str(e)}")
             logger.error(f"  文件大小: {file_size_mb:.2f} MB")
             logger.error(f"  超时设置: 连接={connect_timeout}秒, 读取={read_timeout}秒")
             if is_write_timeout:
-                logger.warning(f"  检测到写入超时，但数据可能已经成功上传到服务器")
-            # 无限重试，每次重试前等待
-            wait = min(backoff_factor * (2 ** (attempt - 1)), 60)  # 最大等待60秒
-            logger.warning(f"  {wait:.1f}s 后重试（无重试次数限制，将持续重试直到成功）...")
-            time.sleep(wait)
-            continue  # 继续重试
-        except (requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
-            last_exc = e
-            # 检查是否有响应，如果有且状态码是成功的，则认为上传成功
+                logger.warning(f"  检测到写入超时")
+            raise AGCUploadError(f"上传超时: {e}") from e
+        except requests.exceptions.HTTPError as e:
+            # HTTP错误（4xx/5xx），直接抛出异常，不重试
+            # 等待一次性上传完毕，不进行重试
             if hasattr(e, 'response') and e.response is not None:
-                if 200 <= e.response.status_code < 300:
-                    logger.warning(f"上传过程中出现异常，但响应状态码为 {e.response.status_code}，认为上传成功")
-                    logger.info(f"  响应头: {dict(e.response.headers)}")
-                    return e.response
-                logger.error(f"上传失败 (attempt {attempt}): HTTP {e.response.status_code}")
+                status_code = e.response.status_code
+                logger.error(f"上传失败: HTTP {status_code}")
                 logger.error(f"  响应头: {dict(e.response.headers)}")
                 logger.error(f"  响应内容: {e.response.text[:500] if e.response.text else '(empty)'}")
+                error_msg = f"上传失败: HTTP {status_code}"
+                if e.response.text:
+                    error_msg += f" - {e.response.text[:200]}"
+                raise AGCUploadError(error_msg) from e
             else:
-                # 对于连接错误（如写入超时），持续重试
-                error_str = str(e).lower()
-                logger.error(f"上传失败 (attempt {attempt}): {e}")
-                if "write operation timed out" in error_str or "connection aborted" in error_str:
-                    logger.warning(f"  检测到写入超时或连接中断，但数据可能已经成功上传，将继续重试")
-            # 无限重试，每次重试前等待
-            wait = min(backoff_factor * (2 ** (attempt - 1)), 60)  # 最大等待60秒
-            logger.warning(f"  {wait:.1f}s 后重试（无重试次数限制，将持续重试直到成功）...")
-            time.sleep(wait)
-            continue  # 继续重试
+                raise AGCUploadError(f"上传失败: {e}") from e
+        except (requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+            # 对于连接错误，也直接抛出异常，不重试
+            # 等待一次性上传完毕，不进行重试
+            error_str = str(e).lower()
+            logger.error(f"上传失败: {e}")
+            if "write operation timed out" in error_str or "connection aborted" in error_str:
+                logger.warning(f"  检测到写入超时或连接中断")
+            raise AGCUploadError(f"上传失败: {e}") from e
         except Exception as e:
-            # 捕获其他未预期的异常，也进行重试
-            last_exc = e
-            logger.error(f"上传出现未预期错误 (attempt {attempt}): {e}")
-            wait = min(backoff_factor * (2 ** (attempt - 1)), 60)  # 最大等待60秒
-            logger.warning(f"  {wait:.1f}s 后重试（无重试次数限制，将持续重试直到成功）...")
-            time.sleep(wait)
-            continue  # 继续重试
+            # 捕获其他未预期的异常，直接抛出，不重试
+            # 等待一次性上传完毕，不进行重试
+            logger.error(f"上传出现未预期错误: {e}")
+            raise AGCUploadError(f"上传失败: {e}") from e
 
 
 def upload_generated_podcast(

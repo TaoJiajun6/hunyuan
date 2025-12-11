@@ -758,7 +758,7 @@ async def log_requests(request: Request, call_next):
                     # 记录关键字段，但不记录完整的base64数据
                     log_body: Dict[str, Any] = {}
                     for key, value in body_json.items():
-                        if key in ['role_voices', 'role_voice_urls'] and isinstance(value, dict):
+                        if key == 'role_voice_urls' and isinstance(value, dict):
                             log_body[key] = f"{{角色数量: {len(value)}, 角色: {list(value.keys())}}}"
                         elif key == 'text':
                             log_body[key] = f"长度: {len(str(value))} 字符"
@@ -772,7 +772,6 @@ async def log_requests(request: Request, call_next):
                         has_text_file = body_json.get("text_file_url") and str(body_json.get("text_file_url")).strip()
                         has_input_url = body_json.get("input_url") and str(body_json.get("input_url")).strip()
                         has_voice_urls = body_json.get("role_voice_urls") and len(body_json.get("role_voice_urls", {})) > 0
-                        has_voices = body_json.get("role_voices") and len(body_json.get("role_voices", {})) > 0
                         input_type = body_json.get("input_type", "").strip()
                         
                         # 根据输入类型验证必需的输入
@@ -797,8 +796,8 @@ async def log_requests(request: Request, call_next):
                             if not has_text and not has_text_file and not has_input_url:
                                 logger.error("缺少必需字段: text、text_file_url或input_url至少需要一个")
                         
-                        if not has_voice_urls and not has_voices:
-                            logger.error("缺少必需字段: role_voice_urls 或 role_voices 至少需要一个")
+                        if not has_voice_urls:
+                            logger.error("缺少必需字段: role_voice_urls（必须提供至少2个角色的云存储URL）")
                 except ValueError as e:  # json.JSONDecodeError是ValueError的子类
                     logger.error(f"请求体JSON解析失败: {str(e)}")
                 except Exception as e:
@@ -842,8 +841,7 @@ class MultiRoleRequest(BaseModel):
     input_type: Optional[str] = Field(None, description="输入类型，可选值：文字、文字+指令、公众号、公众号+指令、网页、网页+指令、文件、文件+指令、文字+英文指令")
     input_url: Optional[str] = Field(None, description="输入URL（用于公众号、网页、PDF等类型）")
     instruction: Optional[str] = Field(None, description="指令内容（可选，用于控制播客生成过程，如'生成5分钟播客'、'使用轻松风格'等）")
-    role_voice_urls: Optional[Dict[str, str]] = Field(None, description="角色音色映射，云存储URL（如果使用云存储，键为角色名，值为云存储下载URL）")
-    role_voices: Optional[Dict[str, str]] = Field(None, description="[已废弃] 角色音色映射，base64编码的音频文件（已废弃，请使用role_voice_urls）")
+    role_voice_urls: Dict[str, str] = Field(..., description="角色音色映射，云存储URL（必需，键为角色名，值为云存储下载URL，至少需要2个角色）")
     silence_interval: int = Field(800, description="角色切换静音间隔（毫秒），默认800ms以增加角色之间的间隔，让对话更清晰", ge=200, le=1500)
     podcast_name: Optional[str] = Field(None, description="播客名称（可选）")
     topic: Optional[str] = Field(None, description="本期主题（可选）")
@@ -876,8 +874,7 @@ class CharacterInfo(BaseModel):
     catchphrase: Optional[str] = Field(None, description="口头禅/说话习惯")
     speaking_style: Optional[str] = Field(None, description="说话风格")
     relationship: Optional[str] = Field(None, description="与其他角色的关系")
-    voice_url: Optional[str] = Field(None, description="音色文件云存储URL（如果使用云存储）")
-    voice: Optional[str] = Field(None, description="音色文件，base64编码（如果使用base64，voice_url和voice至少提供一个）")
+    voice_url: str = Field(..., description="音色文件云存储URL（必需）")
 
 
 class CharacterRequest(BaseModel):
@@ -895,8 +892,7 @@ class CharacterRequest(BaseModel):
 class DeepPodcastRequest(BaseModel):
     """主题深度播客请求"""
     topic: str = Field(..., description="播客主题")
-    role_voice_urls: Dict[str, str] = Field(..., description="角色音色映射，云存储URL（必需，键为角色名，值为云存储下载URL）")
-    role_voices: Optional[Dict[str, str]] = Field(None, description="[已废弃] 角色音色映射，base64编码的音频文件（已废弃，请使用role_voice_urls）")
+    role_voice_urls: Dict[str, str] = Field(..., description="角色音色映射，云存储URL（必需，键为角色名，值为云存储下载URL，至少需要1个角色）")
     num_characters: int = Field(2, description="角色数量", ge=1, le=3)
     depth_level: str = Field("深度", description="深度级别", pattern="^(深度|中等|浅层)$")
     instruction: Optional[str] = Field(None, description="指令内容（可选，用于控制播客生成过程，如'生成1分钟播客'、'使用轻松风格'等）")
@@ -1710,11 +1706,11 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
     
     ## 注意事项
     
-    - 音色文件支持两种方式：云存储URL（role_voice_urls）或base64编码（role_voices）
-    - 推荐使用云存储URL方式，base64编码会增加请求体大小，但适合小文件或本地开发
-    - 如果输入普通文本，系统会自动转换为多角色对话，需要至少上传2个角色的音色文件
+    - **音色文件必须使用云存储URL**：所有音色文件必须先上传到云存储，然后使用 `role_voice_urls` 提供下载URL
+    - 如果输入普通文本，系统会自动转换为多角色对话，需要至少提供2个角色的音色文件URL
     - 系统会自动选择背景音乐，无需手动指定
     - 生成过程可能需要几分钟，建议使用job_id轮询进度
+    - 使用云存储URL可以避免请求体过大，提高传输效率和稳定性
     """
     # 生成或使用提供的 job_id
     if not request.job_id:
@@ -1915,28 +1911,23 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
             if "立场冲突的激烈辩论" not in request.scene_types:
                 request.scene_types.append("立场冲突的激烈辩论")
     
-    # 验证音色数据（role_voice_urls或role_voices至少有一个）
-    has_voice_urls = request.role_voice_urls and len(request.role_voice_urls) > 0
-    has_voices = request.role_voices and len(request.role_voices) > 0
-    
-    if not has_voice_urls and not has_voices:
+    # 验证音色数据（必须使用role_voice_urls）
+    if not request.role_voice_urls or len(request.role_voice_urls) < 2:
         raise HTTPException(
             status_code=400, 
-            detail="至少需要提供一个角色的音色文件（role_voice_urls或role_voices）"
+            detail="必须提供至少2个角色的音色文件URL（role_voice_urls），每个角色需要提供云存储URL"
         )
     
-    # 确定使用哪个字段
-    use_cloud_storage = has_voice_urls
-    role_voice_data = request.role_voice_urls if use_cloud_storage else request.role_voices
+    role_voice_data = request.role_voice_urls
     
-    logger.info(f"开始生成多角色播客: 角色数量={len(role_voice_data)}, 文本长度={len(text_content)}, 使用云存储={use_cloud_storage}")
+    logger.info(f"开始生成多角色播客: 角色数量={len(role_voice_data)}, 文本长度={len(text_content)}, 使用云存储")
     start_time = time.time()
     
     try:
         gen = get_generator()
         processor = TextProcessor()
         
-        # 获取音频文件（从云存储URL或base64）
+        # 获取音频文件（从云存储URL下载）
         temp_files = []
         role_voices = {}
         
@@ -1948,19 +1939,13 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
             _update_progress(request.job_id, "downloading_voices", 5, "正在下载角色音色文件")
             voice_download_start = time.time()
             downloaded_roles = []
-            for role, voice_data in role_voice_data.items():
+            for role, voice_url in role_voice_data.items():
                 role_download_start = time.time()
                 logger.info(f"获取角色 '{role}' 的音频文件...")
-                if use_cloud_storage:
-                    # 从云存储URL下载
-                    logger.info(f"从云存储下载: {voice_data}")
-                    temp_file = download_audio_from_url(voice_data)
-                    search_content = f"角色: {role}, URL: {voice_data[:50]}..." if len(voice_data) > 50 else f"角色: {role}, URL: {voice_data}"
-                else:
-                    # 从base64解码
-                    logger.info(f"从base64解码")
-                    temp_file = decode_base64_audio(voice_data)
-                    search_content = f"角色: {role}, base64长度: {len(voice_data)} 字符"
+                # 从云存储URL下载
+                logger.info(f"从云存储下载: {voice_url}")
+                temp_file = download_audio_from_url(voice_url)
+                search_content = f"角色: {role}, URL: {voice_url[:50]}..." if len(voice_url) > 50 else f"角色: {role}, URL: {voice_url}"
                 role_download_time = time.time() - role_download_start
                 retrieval_timings[f"角色音色下载_{role}"] = role_download_time
                 retrieval_details[f"角色音色下载_{role}"] = {"搜索内容": search_content}
@@ -2376,8 +2361,7 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
     ### 必需参数
     - **characters** (必需): 角色列表（至少2个，最多4个），每个角色必须提供以下信息：
         - **name** (必需): 角色名称
-        - **voice_url** (可选): 音色文件云存储URL（如果使用云存储）
-        - **voice** (可选): 音色文件base64编码（如果使用base64，voice_url和voice至少提供一个）
+        - **voice_url** (必需): 音色文件云存储URL（必须先上传到云存储）
         - **identity** (可选): 身份/职业
         - **personality** (可选): 核心性格
         - **catchphrase** (可选): 口头禅/说话习惯
@@ -2413,11 +2397,12 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
     
     ## 注意事项
     
-    - 本接口仅支持云存储URL，不再支持base64编码的音频文件
-    - 至少需要提供2个角色的完整信息（名称和音色文件）
+    - **音色文件必须使用云存储URL**：所有音色文件必须先上传到云存储，然后使用 `voice_url` 提供下载URL
+    - 至少需要提供2个角色的完整信息（名称和音色文件URL）
     - 系统会根据角色人设生成符合风格的对话
     - 系统会自动选择背景音乐，无需手动指定
     - 生成过程可能需要几分钟，建议使用job_id轮询进度
+    - 使用云存储URL可以避免请求体过大，提高传输效率和稳定性
     """
     # 立即创建初始进度，确保前端轮询时能立即获取到状态
     _update_progress(request.job_id, "queued", 1, "任务已提交，准备开始处理")
@@ -2442,17 +2427,13 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
         role_voices = {}
         
         try:
-            _update_progress(request.job_id, "downloading_voices", 5, "正在处理角色音色文件")
+            _update_progress(request.job_id, "downloading_voices", 5, "正在下载角色音色文件")
             for char in request.characters:
-                # 支持 voice_url（云存储URL）或 voice（base64编码）
-                if char.voice_url:
-                    logger.info(f"从云存储下载角色 '{char.name}' 的音频文件: {char.voice_url}")
-                    temp_file = download_audio_from_url(char.voice_url)
-                elif char.voice:
-                    logger.info(f"从base64解码角色 '{char.name}' 的音频文件")
-                    temp_file = decode_base64_audio(char.voice)
-                else:
-                    raise HTTPException(status_code=400, detail=f"角色 '{char.name}' 缺少音色文件（voice_url 或 voice）")
+                # 从云存储URL下载（必需）
+                if not char.voice_url:
+                    raise HTTPException(status_code=400, detail=f"角色 '{char.name}' 缺少音色文件URL（voice_url）")
+                logger.info(f"从云存储下载角色 '{char.name}' 的音频文件: {char.voice_url}")
+                temp_file = download_audio_from_url(char.voice_url)
                 
                 temp_files.append(temp_file)
                 role_voices[char.name] = temp_file
@@ -2778,11 +2759,12 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
     
     ## 注意事项
     
-    - 本接口仅支持云存储URL，不再支持base64编码的音频文件
+    - **音色文件必须使用云存储URL**：所有音色文件必须先上传到云存储，然后使用 `role_voice_urls` 提供下载URL
     - 需要为每个角色提供音色文件（角色名必须为"角色A"、"角色B"、"角色C"）
     - 深度级别影响生成内容的深度和复杂度
     - 系统会自动选择背景音乐，无需手动指定
     - 生成过程可能需要几分钟，建议使用job_id轮询进度
+    - 使用云存储URL可以避免请求体过大，提高传输效率和稳定性
     """
     # 立即创建初始进度，确保前端轮询时能立即获取到状态
     _update_progress(request.job_id, "queued", 1, "任务已提交，准备开始处理")

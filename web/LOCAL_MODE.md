@@ -1,128 +1,87 @@
-# 本地模式说明
+# ⚠️ 本地模式已废弃
 
-Web端已修改为**本地模式**，所有内容不再上传到云存储，而是通过本地处理。
+**重要提示**: 本地模式（使用base64编码）已不再支持。所有API接口现在**仅支持云存储URL方式**。
 
-## 主要变更
+## 变更说明
 
-### 1. 音色文件处理
+### 为什么移除base64支持？
 
-- **之前**: 音色文件上传到云存储，使用URL
-- **现在**: 音色文件转换为base64编码，直接发送到API
+1. **请求体过大**: base64编码会增加约33%的数据量，导致请求体过大（1-2MB），容易导致请求超时
+2. **传输效率低**: 大请求体在网络传输时容易失败，影响用户体验
+3. **服务器压力**: 大请求体增加服务器处理压力，可能导致内存问题
 
-**实现方式**:
-- 从 `public/voices/` 目录读取音色文件
-- 使用 `FileReader` 转换为base64编码
-- 在API请求中使用 `role_voices` 字段（base64数据）而不是 `role_voice_urls`
+### 现在必须使用云存储URL
 
-### 2. 文本文件处理
-
-- **之前**: 文本文件上传到云存储，使用URL
-- **现在**: 文本文件内容直接读取，合并到 `text` 字段
-
-**实现方式**:
-- 使用 `file.text()` 读取文件内容
-- 多个文件内容合并后放入 `text` 字段
-- 不再使用 `text_file_url` 字段
-
-### 3. API请求格式
-
-#### 多角色播客请求
+所有音色文件必须先上传到云存储，然后使用URL：
 
 ```typescript
 {
-  text: "播客文本内容",  // 直接文本或从文件读取
-  role_voices: {          // base64编码的音色数据
-    "角色A": "base64...",
-    "角色B": "base64..."
-  },
-  // 不再使用 role_voice_urls
-  // 不再使用 text_file_url
+  text: "播客文本内容",
+  role_voice_urls: {          // 必须使用云存储URL
+    "角色A": "https://your-cloud-storage.com/voices/voice_a.wav",
+    "角色B": "https://your-cloud-storage.com/voices/voice_b.wav"
+  }
 }
 ```
 
-#### 自定义角色播客请求
+## 迁移指南
+
+### 前端修改
+
+1. **移除base64编码逻辑**: 不再需要将文件转换为base64
+2. **添加上传功能**: 需要先将音色文件上传到云存储
+3. **使用URL**: 上传后获取URL，在API请求中使用 `role_voice_urls`
+
+### 示例代码
 
 ```typescript
-{
-  characters: [
-    {
-      name: "角色A",
-      voice_base64: "base64...",  // base64编码的音色数据
-      // 不再使用 voice_url
-    }
-  ],
-  text: "文本素材内容"
-}
-```
+// 1. 上传音色文件到云存储
+const uploadVoice = async (file: File) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  const response = await fetch('/api/upload', {
+    method: 'POST',
+    body: formData
+  });
+  
+  const { url } = await response.json();
+  return url;
+};
 
-#### 主题深度播客请求
-
-```typescript
-{
-  topic: "播客主题",
-  role_voices: {          // base64编码的音色数据
-    "角色A": "base64...",
-    "角色B": "base64..."
-  },
-  // 不再使用 role_voice_urls
-}
+// 2. 使用URL生成播客
+const generatePodcast = async (text: string, voiceFiles: File[]) => {
+  // 上传所有音色文件
+  const voiceUrls: Record<string, string> = {};
+  for (const [role, file] of Object.entries(voiceFiles)) {
+    voiceUrls[role] = await uploadVoice(file);
+  }
+  
+  // 使用URL请求API
+  const response = await fetch('/api/v1/podcast/multi_role', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text,
+      role_voice_urls: voiceUrls
+    })
+  });
+  
+  return response.json();
+};
 ```
 
 ## 优势
 
-1. **无需云存储配置**: 不需要配置云存储服务
-2. **更快的响应**: 无需等待文件上传
-3. **更简单的部署**: 减少外部依赖
-4. **更好的隐私**: 数据不经过云存储
+使用云存储URL方式具有以下优势：
 
-## 注意事项
+1. **请求体小**: 只传输URL字符串，请求体通常只有几KB
+2. **传输稳定**: 不会因为请求体过大导致超时
+3. **可复用**: 上传一次，可以多次使用
+4. **性能好**: 减少服务器内存压力
 
-1. **文件大小限制**: 
-   - base64编码会增加约33%的数据量
-   - 建议音色文件不超过5MB
-   - 文本文件建议不超过10MB
+## 相关文档
 
-2. **网络传输**:
-   - 请求体可能较大，需要确保网络稳定
-   - API服务器需要支持较大的请求体
-
-3. **浏览器兼容性**:
-   - 使用 `FileReader` API，现代浏览器都支持
-   - 需要支持ES6+语法
-
-## 后端支持情况
-
-### 已支持base64的接口
-
-1. **多角色播客** (`/api/v1/podcast/multi_role`)
-   - ✅ 支持 `role_voices`: base64编码的音频数据
-   - ✅ 支持 `role_voice_urls`: 云存储URL（兼容）
-   - ✅ 支持直接文本内容
-
-### 需要后端修改的接口
-
-2. **自定义角色播客** (`/api/v1/podcast/character`)
-   - ❌ 当前仅支持 `voice_url`（云存储URL）
-   - ⚠️ 需要后端添加 `voice_base64` 字段支持
-
-3. **主题深度播客** (`/api/v1/podcast/deep`)
-   - ❌ 当前仅支持 `role_voice_urls`（云存储URL）
-   - ⚠️ 需要后端添加 `role_voices` 字段支持
-
-### 后端修改建议
-
-如果需要完全支持本地模式，需要在后端添加：
-
-1. **CharacterInfo** 模型添加 `voice_base64` 字段
-2. **DeepPodcastRequest** 模型添加 `role_voices` 字段
-3. 处理逻辑中检测base64并使用 `decode_base64_audio` 函数
-
-参考 `api_server.py` 中多角色播客的处理方式（约1788行）。
-
-## 回退到云存储模式
-
-如果需要回退到云存储模式，可以：
-1. 恢复 `uploadFile` 相关代码
-2. 使用 `role_voice_urls` 和 `text_file_url` 字段
-3. 修改 `VoiceSelector` 组件恢复上传逻辑
-
+- [云存储配置指南](../CLOUDDB_SETUP.md)
+- [API快速开始](../API_QUICKSTART.md)
+- [上传客户端文档](../tools/UPLOAD_MUSIC_README.md)

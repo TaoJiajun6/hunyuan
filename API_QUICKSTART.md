@@ -62,18 +62,19 @@ import base64
 response = requests.get("http://localhost:8000/health")
 print(response.json())
 
-# 读取音频文件并编码
-with open("path/to/voice.wav", "rb") as f:
-    audio_base64 = base64.b64encode(f.read()).decode("utf-8")
+# 注意：音色文件必须先上传到云存储，获取URL
+# 这里假设已经上传并获得了URL
+voice_url_a = "https://your-cloud-storage.com/voices/voice_a.wav"
+voice_url_b = "https://your-cloud-storage.com/voices/voice_b.wav"
 
 # 生成多角色播客
 response = requests.post(
     "http://localhost:8000/api/v1/podcast/multi_role",
     json={
         "text": "中科曙光发布640卡超节点，算力密度提升20倍...",
-        "role_voices": {
-            "角色A": audio_base64,
-            "角色B": audio_base64
+        "role_voice_urls": {
+            "角色A": voice_url_a,
+            "角色B": voice_url_b
         },
         "silence_interval": 300
     }
@@ -127,13 +128,15 @@ else:
 ```json
 {
   "text": "播客文本（支持角色标记或普通文本）",
-  "role_voices": {
-    "角色A": "base64编码的音频数据",
-    "角色B": "base64编码的音频数据"
+  "role_voice_urls": {
+    "角色A": "https://your-cloud-storage.com/voices/voice_a.wav",
+    "角色B": "https://your-cloud-storage.com/voices/voice_b.wav"
   },
   "silence_interval": 300
 }
 ```
+
+**注意**: 音色文件必须先上传到云存储，然后使用 `role_voice_urls` 提供下载URL。不再支持base64编码方式。
 
 ### 2. 自定义角色播客
 
@@ -152,13 +155,16 @@ else:
       "catchphrase": "口头禅/说话习惯",
       "speaking_style": "说话风格",
       "relationship": "与其他角色的关系",
-      "voice": "base64编码的音频数据"
+      "voice_url": "https://your-cloud-storage.com/voices/voice.wav"
     }
   ],
+  "text": "文本素材（必需）",
   "topic": "播客主题（可选）",
   "silence_interval": 300
 }
 ```
+
+**注意**: 音色文件必须先上传到云存储，然后使用 `voice_url` 提供下载URL。不再支持base64编码方式。
 
 ### 3. 主题深度播客
 
@@ -170,15 +176,17 @@ else:
 ```json
 {
   "topic": "播客主题",
-  "role_voices": {
-    "角色A": "base64编码的音频数据",
-    "角色B": "base64编码的音频数据"
+  "role_voice_urls": {
+    "角色A": "https://your-cloud-storage.com/voices/voice_a.wav",
+    "角色B": "https://your-cloud-storage.com/voices/voice_b.wav"
   },
   "num_characters": 2,
   "depth_level": "深度",
   "silence_interval": 300
 }
 ```
+
+**注意**: 音色文件必须先上传到云存储，然后使用 `role_voice_urls` 提供下载URL。不再支持base64编码方式。
 
 ## 响应格式
 
