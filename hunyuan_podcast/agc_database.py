@@ -336,16 +336,24 @@ class AGCDatabaseClient:
             resp.raise_for_status()
             
             result = resp.json()
-            ret_code = result.get('ret', {}).get('code')
-            ret_msg = result.get('ret', {}).get('msg', '未知错误')
             
-            if ret_code == 0:
+            # 检查响应状态：云数据库可能返回 ret.code 或 resInfo.resCode
+            ret_code = result.get('ret', {}).get('code')
+            res_code = result.get('resInfo', {}).get('resCode')
+            
+            # resCode 1002000 表示成功
+            if ret_code == 0 or res_code == 1002000:
                 logger.info(f"播客数据已保存到云数据库: {podcast_data['id']}")
                 return True
             else:
+                ret_msg = result.get('ret', {}).get('msg', '未知错误')
+                res_msg = result.get('resInfo', {}).get('resMsg', '')
+                error_msg = ret_msg if ret_msg != '未知错误' else res_msg if res_msg else '未知错误'
+                
                 logger.error(f"保存播客数据到云数据库失败:")
-                logger.error(f"  错误码: {ret_code}")
-                logger.error(f"  错误信息: {ret_msg}")
+                logger.error(f"  ret.code: {ret_code}")
+                logger.error(f"  resInfo.resCode: {res_code}")
+                logger.error(f"  错误信息: {error_msg}")
                 logger.error(f"  完整响应: {json.dumps(result, ensure_ascii=False, indent=2)}")
                 logger.error(f"  播客数据ID: {podcast_data.get('id')}")
                 logger.error(f"  播客数据标题: {podcast_data.get('title')}")

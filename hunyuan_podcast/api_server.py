@@ -2109,19 +2109,25 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 roles = processor.extract_roles(text_content)
             
             # 生成播客标题（在生成音频之前，用于文件命名）
-            # 优先使用用户提供的标题，否则从脚本内容生成
+            # 优先使用用户提供的标题，否则从脚本内容生成总结性标题
             podcast_title = None
             if request.podcast_name:
                 podcast_title = request.podcast_name
             elif request.topic:
                 podcast_title = request.topic
             elif text_content and len(text_content.strip()) > 20:
-                # 从脚本内容生成标题
+                # 从脚本内容生成总结性标题（使用AI生成，而不是直接截取）
                 try:
-                    podcast_title = processor.generate_title_from_script(text_content)
+                    podcast_title = processor.generate_title_from_script(text_content, api_client=api_client)
+                    logger.debug(f"从脚本生成总结性标题: {podcast_title}")
                 except Exception as e:
-                    logger.debug(f"生成标题失败: {e}，使用默认标题")
-                    podcast_title = text_content[:50] + "..." if len(text_content) > 50 else text_content
+                    logger.debug(f"生成标题失败: {e}，使用脚本第一句话作为标题")
+                    # 如果生成失败，使用脚本的第一句话或前30个字符作为标题
+                    first_line = text_content.split('\n')[0].strip()
+                    if first_line and len(first_line) > 10:
+                        podcast_title = first_line[:50] + "..." if len(first_line) > 50 else first_line
+                    else:
+                        podcast_title = text_content[:30] + "..." if len(text_content) > 30 else text_content
             else:
                 podcast_title = "未命名播客"
             
@@ -2331,8 +2337,20 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
             total_time = time.time() - start_time
             logger.info(f"多角色播客生成成功，总耗时: {total_time:.2f}s，输出文件大小: {file_size:.2f} MB")
             
-            # 生成播客标题（从文本内容提取或使用默认）
-            podcast_title = request.podcast_name or request.topic or (text_content[:50] + "..." if len(text_content) > 50 else text_content)
+            # 使用之前生成的播客标题（在生成音频之前已经生成，使用AI总结而不是脚本内容）
+            # 如果之前没有生成（例如直接从文本生成的情况），则使用简单的逻辑
+            if 'podcast_title' not in locals() or not podcast_title:
+                if request.podcast_name:
+                    podcast_title = request.podcast_name
+                elif request.topic:
+                    podcast_title = request.topic
+                else:
+                    # 如果都没有，使用脚本的第一句话作为标题（而不是整个脚本内容）
+                    first_line = text_content.split('\n')[0].strip()
+                    if first_line and len(first_line) > 10:
+                        podcast_title = first_line[:50] + "..." if len(first_line) > 50 else first_line
+                    else:
+                        podcast_title = "未命名播客"
             
             # 更新进度，保存完整的播客信息
             _update_progress(request.job_id, "completed", 100, podcast_title, done=True, 
