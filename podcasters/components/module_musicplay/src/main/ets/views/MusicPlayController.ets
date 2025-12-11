@@ -103,9 +103,15 @@ export struct MusicPlayController {
     }
     .width('100%')
     .height(55)
-    .backgroundColor(Color.White)
+    .linearGradient({
+      angle: 90,
+      colors: [
+        ['#ffb3e0', 0.0],
+        ['#c085f5', 0.5],
+        ['#a0e5ff', 1.0]
+      ]
+    })
     .borderRadius(14)
-    .border()
     .shadow({
       radius: 14,
       color: '#1F000000',
@@ -223,7 +229,7 @@ export struct MusicPlayController {
         if (this.musicModel.currentSong?.singer) {
           Text(this.musicModel.currentSong.singer)//作者
             .fontSize(12)
-            .fontColor('#666666')
+            .fontColor('#000000')
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
@@ -264,7 +270,7 @@ export struct MusicPlayController {
     .width(40)
     .height(40)
     .borderRadius(20)
-    .backgroundColor(this.themeColor || '#FF1949')
+    .backgroundColor(Color.Transparent)
     .onClick(singleClick(() => {
       MediaService.getInstance().playAndPause();
     }, 1000))
@@ -277,12 +283,12 @@ export struct MusicPlayController {
       Image($r('app.media.ic_music_list'))// 当前播放列表入口
         .width(20)
         .height(20)
-        .fillColor(this.themeColor || '#FF1949')
+        .fillColor(Color.White)
     }
     .width(40)
     .height(40)
     .borderRadius(20)
-    .backgroundColor('#F5F5F5')
+    .backgroundColor(Color.Transparent)
     .bindSheet($$this.isShowSheet, this.PlayListSheet(), {
       height: '68%',
       dragBar: true,

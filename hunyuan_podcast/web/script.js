@@ -23,6 +23,11 @@ function switchPage(page) {
   if (page === 'explore') {
     loadHistory();
   }
+  
+  // 详情页不需要导航栏高亮
+  if (page === 'detail') {
+    // 保持当前导航状态
+  }
 }
 
 // 播客类型切换
@@ -753,16 +758,18 @@ function createPodcastCard(podcast) {
   card.innerHTML = `
     <div class="podcast-thumbnail"></div>
     <div class="podcast-card-content">
-      <div class="podcast-title">${podcast.title || '未命名播客'}</div>
-      <div class="podcast-author">${dateStr}</div>
-      ${contentPreview ? `<div style="font-size: 13px; color: var(--text-muted); margin: 8px 0; line-height: 1.4;">${contentPreview}</div>` : ''}
-      <div class="podcast-meta">
-        <div class="podcast-meta-item">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <path d="M7 1 L7 7 L11 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            <circle cx="7" cy="7" r="6" stroke="currentColor" stroke-width="1.5" fill="none"/>
-          </svg>
-          <span>${durationStr}</span>
+      <div class="podcast-card-main" onclick="openPodcastDetail('${podcast.id}', event)" style="cursor: pointer;">
+        <div class="podcast-title">${podcast.title || '未命名播客'}</div>
+        <div class="podcast-author">${dateStr}</div>
+        ${contentPreview ? `<div style="font-size: 13px; color: var(--text-muted); margin: 8px 0; line-height: 1.4;">${contentPreview}</div>` : ''}
+        <div class="podcast-meta">
+          <div class="podcast-meta-item">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M7 1 L7 7 L11 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <circle cx="7" cy="7" r="6" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            </svg>
+            <span>${durationStr}</span>
+          </div>
         </div>
       </div>
       <div class="podcast-actions">
