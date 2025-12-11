@@ -270,11 +270,15 @@ class AGCDatabaseClient:
                     "host": self.domain
                 }
             else:
+                # 根据官方文档，需要同时使用 Authorization: Bearer 和 access_token
+                # Authorization: Bearer 是必须的（客户端token）
+                # access_token 是可选的（用户登录token，匿名账号可以为空）
                 headers = {
                     "content-type": "application/json",
                     "client_id": self.client_id,
-                    "access_token": token,
+                    "Authorization": f"Bearer {token}",
                     "productId": self.product_id,
+                    "access_token": "",  # 匿名账号，设置为空字符串
                     "host": self.domain
                 }
             
@@ -339,11 +343,15 @@ class AGCDatabaseClient:
                     "host": self.domain
                 }
             else:
+                # 根据官方文档，需要同时使用 Authorization: Bearer 和 access_token
+                # Authorization: Bearer 是必须的（客户端token）
+                # access_token 是可选的（用户登录token，匿名账号可以为空）
                 headers = {
                     "content-type": "application/json",
                     "client_id": self.client_id,
-                    "access_token": token,
+                    "Authorization": f"Bearer {token}",
                     "productId": self.product_id,
+                    "access_token": "",  # 匿名账号，设置为空字符串
                     "host": self.domain
                 }
             
@@ -432,11 +440,15 @@ class AGCDatabaseClient:
                     "host": self.domain
                 }
             else:
+                # 根据官方文档，需要同时使用 Authorization: Bearer 和 access_token
+                # Authorization: Bearer 是必须的（客户端token）
+                # access_token 是可选的（用户登录token，匿名账号可以为空）
                 headers = {
                     "content-type": "application/json",
                     "client_id": self.client_id,
-                    "access_token": token,
+                    "Authorization": f"Bearer {token}",
                     "productId": self.product_id,
+                    "access_token": "",  # 匿名账号，设置为空字符串
                     "host": self.domain
                 }
             
@@ -551,11 +563,15 @@ class AGCDatabaseClient:
                     "host": self.domain
                 }
             else:
+                # 根据官方文档，需要同时使用 Authorization: Bearer 和 access_token
+                # Authorization: Bearer 是必须的（客户端token）
+                # access_token 是可选的（用户登录token，匿名账号可以为空）
                 headers = {
                     "content-type": "application/json",
                     "client_id": self.client_id,
-                    "access_token": token,
+                    "Authorization": f"Bearer {token}",
                     "productId": self.product_id,
+                    "access_token": "",  # 匿名账号，设置为空字符串
                     "host": self.domain
                 }
             
