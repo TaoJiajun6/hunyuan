@@ -44,14 +44,17 @@ AGC_DOMAIN=connect-api.cloud.huawei.com
 2. **AGC_BUCKET**: 云存储实例名称
    - 例如：`podcasters-y0qig`
 
-3. **AGC_STORAGE_CLIENT_ID** / **AGC_STORAGE_CLIENT_SECRET**: 云存储专用凭证（推荐）
-   - 如果云存储和云数据库使用不同的 client_id，请分别配置
-   - 从 AGC 控制台获取（云存储项目的凭证）
+3. **AGC_STORAGE_CLIENT_ID** / **AGC_STORAGE_CLIENT_SECRET**: 云存储专用凭证（**强烈推荐**）
+   - **必须**：从 AGC 控制台的**云存储项目**中获取
+   - 在 AGC 控制台 > 我的项目 > 项目设置 > 常规 中查看
+   - 如果云存储和云数据库使用不同的项目，**必须**分别配置
    - ⚠️ **重要**：请妥善保管，不要提交到代码仓库
+   - ⚠️ **注意**：如果使用云数据库项目的 client_id，会导致 "invalid client id" 错误
 
-4. **AGC_DATABASE_CLIENT_ID** / **AGC_DATABASE_CLIENT_SECRET**: 云数据库专用凭证（推荐）
-   - 如果云存储和云数据库使用不同的 client_id，请分别配置
-   - 从 AGC 控制台获取（云数据库项目的凭证）
+4. **AGC_DATABASE_CLIENT_ID** / **AGC_DATABASE_CLIENT_SECRET**: 云数据库专用凭证（**强烈推荐**）
+   - **必须**：从 AGC 控制台的**云数据库项目**中获取
+   - 在 AGC 控制台 > 我的项目 > 项目设置 > 常规 中查看
+   - 如果云存储和云数据库使用不同的项目，**必须**分别配置
    - ⚠️ **重要**：请妥善保管，不要提交到代码仓库
 
 5. **AGC_CLIENT_ID** / **AGC_CLIENT_SECRET**: 通用凭证（可选）
@@ -128,5 +131,10 @@ AGC_DATABASE_DOMAIN=connect-drcn.dbankcloud.cn
    - 云存储使用 `AGC_STORAGE_CLIENT_ID` / `AGC_STORAGE_CLIENT_SECRET` / `AGC_STORAGE_DOMAIN`
    - 云数据库使用 `AGC_DATABASE_CLIENT_ID` / `AGC_DATABASE_CLIENT_SECRET` / `AGC_DATABASE_DOMAIN`
    - 如果两者使用相同的凭证和域名，可以只配置 `AGC_CLIENT_ID` / `AGC_CLIENT_SECRET` / `AGC_DOMAIN`
-4. 服务器重启后，需要确保 `.env` 文件被正确加载
+   - ⚠️ **重要**：如果云存储和云数据库是不同的项目，**必须**分别配置，否则会出现 "invalid client id" 错误
+4. **常见错误**：
+   - 错误：`invalid client id` 或 `203882498`
+   - 原因：使用了云数据库项目的 client_id 来访问云存储，或反之
+   - 解决：确保 `AGC_STORAGE_CLIENT_ID` 是云存储项目的凭证，`AGC_DATABASE_CLIENT_ID` 是云数据库项目的凭证
+5. 服务器重启后，需要确保 `.env` 文件被正确加载
 

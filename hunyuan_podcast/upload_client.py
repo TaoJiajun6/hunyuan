@@ -200,7 +200,15 @@ def get_agc_token(domain: str, client_id: str, client_secret: str, timeout: int 
             data = resp.json()
             token = data.get('access_token')
             if not token:
+                error_code = data.get('ret', {}).get('code') if isinstance(data.get('ret'), dict) else None
+                error_msg = data.get('ret', {}).get('msg') if isinstance(data.get('ret'), dict) else None
                 logger.error(f"获取 access_token 失败，响应: {data}")
+                if error_code == 203882498 or (error_msg and 'invalid client id' in error_msg.lower()):
+                    logger.error("  错误原因：client_id 无效")
+                    logger.error("  解决方案：")
+                    logger.error("    1. 确保配置了正确的 AGC_STORAGE_CLIENT_ID 和 AGC_STORAGE_CLIENT_SECRET")
+                    logger.error("    2. 确保 client_id 是云存储项目的凭证，不是云数据库的凭证")
+                    logger.error("    3. 检查 client_id 是否与项目的数据处理位置匹配")
                 raise AGCUploadError(f"获取 access_token 失败，响应: {data}")
             expires_in = int(data.get('expires_in', 3600))
             _TOKEN_CACHE[cache_key] = {'token': token, 'expires_at': now + expires_in - 10}
@@ -501,9 +509,24 @@ def upload_generated_podcast(
     object_name = object_name or ('outputs/podcasts/' + os.path.basename(output_path))
 
     logger.info(f"准备上传文件: {output_path}")
+    logger.info(f"  Storage URL: {storage_url}")
+    logger.info(f"  Bucket: {bucket}")
+    logger.info(f"  Domain: {domain}")
     logger.info(f"  Token client_id: {'已设置' if token_client_id else '未设置'}")
+    if token_client_id:
+        # 显示 client_id 的前几位和后几位，用于调试但不暴露完整信息
+        client_id_display = f"{token_client_id[:8]}...{token_client_id[-4:]}" if len(token_client_id) > 12 else "***"
+        logger.info(f"  Token client_id (部分): {client_id_display}")
     logger.info(f"  上传 client_id: {'已设置' if upload_client_id else '未设置'}")
     logger.info(f"  product_id: {'已设置' if product_id else '未设置'}")
+    
+    # 检查 client_id 来源
+    if os.getenv('AGC_STORAGE_CLIENT_ID'):
+        logger.info(f"  使用环境变量 AGC_STORAGE_CLIENT_ID")
+    elif os.getenv('AGC_CLIENT_ID'):
+        logger.warning(f"  使用环境变量 AGC_CLIENT_ID（建议使用 AGC_STORAGE_CLIENT_ID）")
+    else:
+        logger.warning(f"  从 agc-apiclient-*.json 文件读取 client_id（建议使用环境变量 AGC_STORAGE_CLIENT_ID）")
 
     # 获取 token（使用token_client_id和client_secret）
     # 传入 storage_url 以便自动推断正确的Token接口（云存储 vs 云数据库）
