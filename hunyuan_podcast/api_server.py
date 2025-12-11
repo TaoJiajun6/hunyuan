@@ -3529,6 +3529,115 @@ async def get_task_status(task_id: str):
         raise HTTPException(status_code=500, detail=f"查询任务状态失败: {str(e)}")
 
 
+@app.delete("/api/v1/podcast/{podcast_id}", response_model=ApiResponse)
+async def delete_podcast(podcast_id: str):
+    """
+    删除播客
+    
+    参数：
+    - podcast_id: 播客ID（job_id 或 file_开头的ID）
+    
+    删除操作包括：
+    - 删除音频文件（如果存在）
+    - 删除进度文件（如果存在）
+    - 从任务管理器中移除（如果存在）
+    """
+    try:
+        deleted_items = []
+        
+        # 1. 尝试从任务管理器获取任务信息
+        try:
+            task_manager = get_task_manager()
+            task = task_manager.get_task(podcast_id)
+            if task and task.result:
+                # 获取音频文件路径
+                audio_path = task.result.get('audio_path')
+                if audio_path:
+                    # 如果是绝对路径，直接使用
+                    if os.path.isabs(audio_path):
+                        if os.path.exists(audio_path):
+                            os.remove(audio_path)
+                            deleted_items.append(f"音频文件: {audio_path}")
+                    else:
+                        # 如果是相对路径，尝试拼接
+                        full_path = os.path.join(OUTPUT_DIR, os.path.basename(audio_path))
+                        if os.path.exists(full_path):
+                            os.remove(full_path)
+                            deleted_items.append(f"音频文件: {full_path}")
+        except Exception as e:
+            logger.debug(f"从任务管理器获取信息失败: {e}")
+        
+        # 2. 尝试从进度文件获取信息
+        progress_file = _progress_path(podcast_id)
+        if os.path.exists(progress_file):
+            try:
+                with open(progress_file, 'r', encoding='utf-8') as f:
+                    progress_data = json.load(f)
+                
+                # 获取音频URL，尝试找到本地文件
+                audio_url = progress_data.get('audio_url')
+                if audio_url and audio_url.startswith('/api/v1/podcast/file/'):
+                    # 提取文件名
+                    filename = audio_url.replace('/api/v1/podcast/file/', '')
+                    file_path = os.path.join(OUTPUT_DIR, filename)
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                        deleted_items.append(f"音频文件: {file_path}")
+            except Exception as e:
+                logger.debug(f"读取进度文件失败: {e}")
+            
+            # 删除进度文件
+            try:
+                os.remove(progress_file)
+                deleted_items.append(f"进度文件: {progress_file}")
+            except Exception as e:
+                logger.warning(f"删除进度文件失败: {e}")
+        
+        # 3. 如果是 file_ 开头的ID，尝试直接删除文件
+        if podcast_id.startswith('file_'):
+            filename = podcast_id.replace('file_', '')
+            file_path = os.path.join(OUTPUT_DIR, filename)
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                deleted_items.append(f"音频文件: {file_path}")
+        
+        # 4. 从任务管理器中移除任务（如果存在）
+        try:
+            task_manager = get_task_manager()
+            if podcast_id in task_manager.tasks:
+                del task_manager.tasks[podcast_id]
+                deleted_items.append(f"任务记录: {podcast_id}")
+        except Exception as e:
+            logger.debug(f"从任务管理器移除任务失败: {e}")
+        
+        # 5. 从进度缓存中移除
+        if podcast_id in _PROGRESS_CACHE:
+            del _PROGRESS_CACHE[podcast_id]
+        
+        if deleted_items:
+            return ApiResponse(
+                success=True,
+                message=f"播客删除成功，已删除 {len(deleted_items)} 项",
+                data={
+                    "deleted_items": deleted_items,
+                    "podcast_id": podcast_id
+                }
+            )
+        else:
+            return ApiResponse(
+                success=True,
+                message="未找到可删除的播客数据",
+                data={
+                    "podcast_id": podcast_id,
+                    "note": "可能该播客已被删除或不存在"
+                }
+            )
+    
+    except Exception as e:
+        logger.error(f"删除播客失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"删除播客失败: {str(e)}")
+
+
 @app.get("/api/v1/podcast/history", response_model=ApiResponse)
 async def get_podcast_history(limit: int = 50, category: Optional[str] = None, debug: bool = False):
     """

@@ -589,10 +589,12 @@ body {
 .podcast-actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
-.play-btn {
+.play-btn,
+.delete-btn {
   width: 40px;
   height: 40px;
   border-radius: 50%;
@@ -603,6 +605,7 @@ body {
   justify-content: center;
   cursor: pointer;
   transition: all 0.2s;
+  color: var(--text-primary);
 }
 
 .play-btn:hover {
@@ -611,9 +614,19 @@ body {
   transform: scale(1.1);
 }
 
-.play-btn svg {
+.delete-btn:hover {
+  background: #f05454;
+  border-color: #f05454;
+  transform: scale(1.1);
+}
+
+.play-btn svg,
+.delete-btn svg {
   width: 16px;
   height: 16px;
+}
+
+.play-btn svg {
   margin-left: 2px;
 }
 

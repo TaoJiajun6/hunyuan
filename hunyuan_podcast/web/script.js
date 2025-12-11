@@ -672,9 +672,14 @@ function createPodcastCard(podcast) {
         </div>
       </div>
       <div class="podcast-actions">
-        <button class="play-btn" onclick="playPodcast('${podcast.audio_url}', event)">
+        <button class="play-btn" onclick="playPodcast('${podcast.audio_url}', event)" title="播放">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
             <path d="M6 4 L12 8 L6 12 Z"/>
+          </svg>
+        </button>
+        <button class="delete-btn" onclick="deletePodcast('${podcast.id}', event)" title="删除">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M4 4 L12 12 M12 4 L4 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
           </svg>
         </button>
       </div>
@@ -693,6 +698,48 @@ function playPodcast(audioUrl, event) {
     player.src = audioUrl;
     player.style.display = 'block';
     player.play();
+  }
+}
+
+// 删除播客
+async function deletePodcast(podcastId, event) {
+  event.stopPropagation();
+  
+  // 确认删除
+  if (!confirm('确定要删除这个播客吗？此操作不可恢复。')) {
+    return;
+  }
+  
+  try {
+    const resp = await fetch(`/api/v1/podcast/${podcastId}`, {
+      method: 'DELETE'
+    });
+    
+    if (!resp.ok) {
+      const errorData = await resp.json();
+      throw new Error(errorData.detail || `HTTP ${resp.status}`);
+    }
+    
+    const data = await resp.json();
+    if (data.success) {
+      // 从页面中移除该卡片
+      const card = event.target.closest('.podcast-card');
+      if (card) {
+        card.style.opacity = '0.5';
+        card.style.transition = 'opacity 0.3s';
+        setTimeout(() => {
+          card.remove();
+          // 重新加载列表
+          loadHistory();
+        }, 300);
+      }
+      alert('播客已删除');
+    } else {
+      throw new Error(data.message || '删除失败');
+    }
+  } catch (e) {
+    console.error('删除播客失败:', e);
+    alert('删除失败: ' + e.message);
   }
 }
 
