@@ -663,7 +663,7 @@ export struct PodcastPage {
       .borderRadius(20)
       .width(40)
       .height(40)
-      .bindMenu(this.MyMenu)
+      //.bindMenu(this.MyMenu)
 
       // 搜索按钮
       Button() {

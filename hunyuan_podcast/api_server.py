@@ -737,10 +737,21 @@ async def log_requests(request: Request, call_next):
             logger.info(f"收到请求: {method} {path} from {client_ip}")
     
     # 对于POST请求，尝试记录请求体（仅用于调试）
+    # 注意：对于大请求体，如果读取失败，不应该阻止请求继续处理
+    body_bytes = None
     if method == "POST" and path.startswith("/api/v1/podcast"):
         try:
             # 读取请求体（注意：读取后需要重新创建请求流）
-            body_bytes = await request.body()
+            # 添加超时保护，避免大请求体读取时阻塞太久
+            try:
+                body_bytes = await asyncio.wait_for(request.body(), timeout=30.0)
+            except asyncio.TimeoutError:
+                logger.warning(f"读取请求体超时（30秒），请求体可能过大")
+                body_bytes = None
+            except Exception as e:
+                logger.warning(f"读取请求体时出错: {str(e)}")
+                body_bytes = None
+            
             if body_bytes:
                 try:
                     body_json = json.loads(body_bytes.decode('utf-8'))
@@ -794,11 +805,21 @@ async def log_requests(request: Request, call_next):
                     logger.warning(f"处理请求体失败: {str(e)}")
             
             # 重新创建请求流（因为已经读取过了）
-            async def receive():
-                return {"type": "http.request", "body": body_bytes}
-            request._receive = receive
+            # 只有在成功读取了请求体时才重新创建流
+            if body_bytes is not None:
+                async def receive():
+                    return {"type": "http.request", "body": body_bytes}
+                request._receive = receive
+                logger.debug(f"已重新创建请求流，请求体大小: {len(body_bytes)} 字节")
+            else:
+                # 如果读取失败，不重新创建流，让 FastAPI 自己处理
+                # 这样可以避免请求流损坏导致端点无法读取请求体
+                logger.debug("中间件读取请求体失败，将让 FastAPI 端点直接处理请求体")
         except Exception as e:
-            logger.warning(f"无法读取请求体: {str(e)}")
+            logger.warning(f"中间件处理请求体时出错: {str(e)}")
+            # 如果出现异常，确保不重新创建请求流，让 FastAPI 自己处理
+            body_bytes = None
+            logger.debug("中间件异常，将让 FastAPI 端点直接处理请求体")
     
     response = await call_next(request)
     
