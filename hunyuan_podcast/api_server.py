@@ -3617,13 +3617,14 @@ async def generate_podcast_cover(request: GenerateCoverRequest):
         info_text = "\n".join(info_parts) if info_parts else "播客内容"
         
         # 使用混元大模型生成图像提示词
-        prompt_generation_prompt = f"""根据以下播客信息，生成一个简洁、吸引人的英文图像生成提示词（prompt），用于生成播客封面图。
+        # Qwen-Image-Edit-2509支持中文提示词，生成中文提示词效果更好
+        prompt_generation_prompt = f"""根据以下播客信息，生成一个简洁、吸引人的中文图像生成提示词，用于生成播客封面图。
 
 播客信息：
 {info_text}
 
 要求：
-1. 提示词应该是英文，简洁明了（不超过50个单词）
+1. 提示词应该是中文，简洁明了（不超过50字）
 2. 应该包含播客的主题、风格和氛围
 3. 适合作为播客封面图，具有视觉吸引力
 4. 风格应该是现代、专业、简洁
@@ -3646,15 +3647,15 @@ async def generate_podcast_cover(request: GenerateCoverRequest):
             logger.info(f"生成的图像提示词: {image_prompt}")
         except Exception as e:
             logger.warning(f"使用混元模型生成提示词失败，使用默认提示词: {e}")
-            # 如果生成失败，使用默认提示词
+            # 如果生成失败，使用默认中文提示词（Qwen-Image-Edit-2509支持中文）
             if request.topic:
-                image_prompt = f"Podcast cover art, {request.topic}, modern, professional, minimalist design, vibrant colors"
+                image_prompt = f"播客封面图，主题：{request.topic}，现代、专业、简洁设计，鲜艳色彩"
             elif request.podcast_name:
-                image_prompt = f"Podcast cover art, {request.podcast_name}, modern, professional, minimalist design"
+                image_prompt = f"播客封面图，{request.podcast_name}，现代、专业、简洁设计"
             else:
-                image_prompt = "Podcast cover art, modern, professional, minimalist design, vibrant colors"
+                image_prompt = "播客封面图，现代、专业、简洁设计，鲜艳色彩"
         
-        # 使用SiliconFlow的图像生成API（Stable Diffusion）
+        # 使用SiliconFlow的图像生成API（Qwen-Image-Edit-2509）
         # 注意：这里需要配置SiliconFlow的API Key
         siliconflow_api_key = os.getenv("SILICONFLOW_API_KEY", "sk-tpoapasxdwjyexqfagbiigtvwsoydwravbptrmrrmwjfdwbh")
         siliconflow_api_base = "https://api.siliconflow.cn/v1"
@@ -3678,31 +3679,32 @@ async def generate_podcast_cover(request: GenerateCoverRequest):
                 }
             )
         
-        # 调用SiliconFlow的图像生成API
+        # 调用SiliconFlow的图像生成API（使用Qwen-Image-Edit-2509模型）
         try:
             headers = {
                 "Authorization": f"Bearer {siliconflow_api_key}",
                 "Content-Type": "application/json"
             }
             
-            # 使用Stable Diffusion模型
+            # 使用Qwen-Image-Edit-2509模型
+            # 该模型支持中文提示词，生成质量高
             payload = {
-                "model": "stabilityai/stable-diffusion-xl-base-1.0",
-                "prompt": image_prompt,
-                "negative_prompt": "blurry, low quality, distorted, ugly, bad anatomy",
-                "width": 512,
-                "height": 512,
-                "num_inference_steps": 20,
+                "model": "Qwen/Qwen-Image-Edit-2509",
+                "prompt": image_prompt,  # 使用中文提示词
+                "negative_prompt": "模糊, 低质量, 扭曲, 丑陋, 不良解剖结构",
+                "width": 1024,  # Qwen-Image-Edit-2509支持更高分辨率
+                "height": 1024,
+                "num_inference_steps": 30,  # 增加步数以获得更好质量
                 "guidance_scale": 7.5
             }
             
-            logger.info(f"调用SiliconFlow图像生成API: {image_prompt[:50]}...")
+            logger.info(f"调用SiliconFlow Qwen-Image-Edit-2509 API: {image_prompt[:50]}...")
             
             response = requests.post(
                 f"{siliconflow_api_base}/images/generations",
                 headers=headers,
                 json=payload,
-                timeout=60
+                timeout=120  # Qwen-Image-Edit-2509可能需要更长时间
             )
             
             if response.status_code == 200:

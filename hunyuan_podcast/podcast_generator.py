@@ -403,10 +403,12 @@ class PodcastGenerator:
             print(f"提示词: {prompt[:200]}...")
         
         # 调用混元模型生成对话文本
+        # 默认使用较高的tokens以支持5-8分钟播客
+        max_tokens = 6000  # 默认值，支持5-8分钟播客
         generated_text = self.api_client.generate_text(
             prompt=prompt,
             temperature=0.7,  # 降低温度以加快生成速度
-            max_tokens=3000  # 增加到3000以支持更长的对话（5-6分钟播客）
+            max_tokens=max_tokens  # 支持5-8分钟播客
         )
         
         if verbose:
@@ -460,10 +462,12 @@ class PodcastGenerator:
             print(f"提示词: {prompt[:200]}...")
         
         # 调用混元模型生成对话文本
+        # 根据深度级别调整max_tokens：深度播客需要更多tokens
+        max_tokens = 8000 if depth_level == "深度" else 6000 if depth_level == "中等" else 4000
         generated_text = self.api_client.generate_text(
             prompt=prompt,
             temperature=0.7,
-            max_tokens=3000  # 增加到3000以支持更长的对话（5-6分钟播客）
+            max_tokens=max_tokens  # 根据深度级别动态调整，支持5-8分钟深度播客
         )
         
         if verbose:
@@ -508,10 +512,12 @@ class PodcastGenerator:
             print("正在调用混元模型生成对话...")
         
         # 调用混元模型生成对话文本
+        # 默认使用较高的tokens以支持5-8分钟播客
+        max_tokens = 6000  # 支持5-8分钟播客
         generated_text = self.api_client.generate_text(
             prompt=prompt,
             temperature=0.7,  # 降低温度以加快生成速度
-            max_tokens=3500  # 增加到3500以支持更长的对话（5-6分钟播客）
+            max_tokens=max_tokens  # 支持5-8分钟播客
         )
         
         if verbose:
