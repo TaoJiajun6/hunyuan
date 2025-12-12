@@ -1070,23 +1070,115 @@ def is_pcm_file(file_path: str) -> bool:
         return False
 
 
+def _normalize_voice_url(voice_url: str) -> str:
+    """规范化音色文件URL
+    
+    如果输入是完整URL（以http://或https://开头），直接返回。
+    如果输入是文件名或云存储路径，构造完整的云存储下载URL。
+    
+    Args:
+        voice_url: 音色文件URL、文件名或云存储路径
+        
+    Returns:
+        完整的下载URL
+        
+    Raises:
+        ValueError: 如果voice_url为空或None
+    """
+    if not voice_url or not voice_url.strip():
+        raise ValueError("音色文件URL不能为空")
+    
+    voice_url = voice_url.strip()
+    
+    # 如果已经是完整URL，直接返回
+    if voice_url.startswith('http://') or voice_url.startswith('https://'):
+        return voice_url
+    
+    # 否则，构造云存储URL
+    # 从环境变量获取云存储配置
+    storage_url = os.getenv('AGC_STORAGE_URL', 'https://ops-server-drcn.agcstorage.link/v0/')
+    bucket = os.getenv('AGC_BUCKET', 'podcasters-y0qig')
+    
+    # 确保storage_url以/结尾
+    if not storage_url.endswith('/'):
+        storage_url += '/'
+    
+    # 处理云存储路径
+    # 如果voice_url包含路径分隔符，假设它是完整的云存储路径
+    # 否则，假设文件在根目录或voices目录下
+    if '/' in voice_url:
+        # 已经是路径格式，直接使用
+        cloud_path = voice_url.lstrip('/')
+    else:
+        # 只是文件名，尝试常见的位置
+        # 优先尝试 voices/ 目录，如果没有则尝试根目录
+        cloud_path = f"voices/{voice_url}"
+    
+    # URL编码路径（保留斜杠）
+    from urllib.parse import quote
+    encoded_path = '/'.join(quote(part, safe='') for part in cloud_path.split('/'))
+    
+    # 构造完整URL
+    full_url = f"{storage_url}{bucket}/{encoded_path}"
+    logger.info(f"规范化音色URL: '{voice_url}' -> '{full_url}'")
+    return full_url
+
+
 def download_audio_from_url(url: str, suffix: str = ".wav", timeout: int = 60) -> str:
     """从URL下载音频文件并保存到临时文件
     
-    注意：华为AGC云存储的下载URL通常可以直接访问，不需要额外认证。
-    如果下载失败（如403 Forbidden），可能需要检查云存储的安全规则配置。
+    支持两种格式：
+    1. 完整URL（以http://或https://开头）
+    2. 文件名或云存储路径（会自动构造完整URL）
+    
+    注意：华为AGC云存储的下载URL可能需要认证。
+    如果下载失败（如403 Forbidden），可能需要检查云存储的安全规则配置或添加认证。
     
     如果下载的文件是PCM格式（扩展名为.wav但实际是PCM），会自动转换为WAV格式。
     """
+    normalized_url = url  # 初始化，用于错误处理
     try:
-        logger.info(f"从URL下载音频文件: {url}")
+        # 规范化URL（如果是文件名或路径，构造完整URL）
+        normalized_url = _normalize_voice_url(url)
+        logger.info(f"从URL下载音频文件: {normalized_url}")
         
-        # 下载文件（华为AGC云存储的下载URL通常可以直接访问）
-        # 如果URL需要认证，可以在headers中添加Authorization头
+        # 检查是否是华为AGC云存储URL
+        is_agc_url = 'agcstorage.link' in normalized_url or 'ops-server' in normalized_url
+        
+        # 准备请求头
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Content-Type': 'application/json'
         }
-        response = requests.get(url, timeout=timeout, stream=True, headers=headers)
+        
+        # 如果是AGC云存储URL，尝试添加认证（如果配置了）
+        if is_agc_url:
+            try:
+                from .upload_client import get_agc_token
+                client_id = os.getenv('AGC_STORAGE_CLIENT_ID') or os.getenv('AGC_CLIENT_ID')
+                client_secret = os.getenv('AGC_STORAGE_CLIENT_SECRET') or os.getenv('AGC_CLIENT_SECRET')
+                product_id = os.getenv('AGC_PRODUCT_ID')
+                domain = os.getenv('AGC_STORAGE_DOMAIN') or os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
+                
+                if client_id and client_secret:
+                    try:
+                        token, _ = get_agc_token(
+                            domain=domain,
+                            client_id=client_id,
+                            client_secret=client_secret
+                        )
+                        headers['Authorization'] = f'Bearer {token}'
+                        headers['client_id'] = client_id
+                        if product_id:
+                            headers['productId'] = product_id
+                        logger.debug(f"已添加AGC认证头（client_id: {'已设置' if client_id else '未设置'}）")
+                    except Exception as e:
+                        logger.warning(f"获取AGC token失败，尝试无认证下载: {str(e)}")
+            except ImportError:
+                logger.debug("upload_client模块不可用，使用无认证方式下载")
+        
+        # 下载文件
+        response = requests.get(normalized_url, timeout=timeout, stream=True, headers=headers)
         response.raise_for_status()
         
         # 检查Content-Length
@@ -1143,21 +1235,41 @@ def download_audio_from_url(url: str, suffix: str = ".wav", timeout: int = 60) -
                 return temp_file.name
         
         return temp_file.name
+    except ValueError as e:
+        # URL规范化失败（如空URL）
+        logger.error(f"音色URL规范化失败: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"音色文件URL无效: {str(e)}")
     except requests.exceptions.HTTPError as e:
         if e.response.status_code == 403:
             logger.error(f"下载音频文件失败: 403 Forbidden - 可能是云存储安全规则限制或需要认证")
             logger.error(f"请检查华为AGC云存储的安全规则配置，确保下载URL可以公开访问")
-            raise HTTPException(status_code=400, detail=f"下载音频文件失败: 403 Forbidden - 请检查云存储安全规则配置")
+            logger.error(f"尝试下载的URL: {normalized_url}")
+            raise HTTPException(status_code=400, detail=f"下载音频文件失败: 403 Forbidden - 请检查云存储安全规则配置或认证信息")
+        elif e.response.status_code == 404:
+            logger.error(f"下载音频文件失败: 404 Not Found - 文件不存在")
+            logger.error(f"尝试下载的URL: {normalized_url}")
+            logger.error(f"原始输入: {url}")
+            raise HTTPException(status_code=400, detail=f"下载音频文件失败: 404 Not Found - 文件不存在。请检查音色文件URL是否正确，或确认文件已上传到云存储")
         else:
             logger.error(f"下载音频文件失败: HTTP {e.response.status_code} - {str(e)}")
+            logger.error(f"尝试下载的URL: {normalized_url}")
             raise HTTPException(status_code=400, detail=f"下载音频文件失败: HTTP {e.response.status_code} - {str(e)}")
+    except requests.exceptions.InvalidURL as e:
+        logger.error(f"下载音频文件失败: 无效的URL格式 - {str(e)}")
+        logger.error(f"原始输入: {url}")
+        logger.error(f"规范化后的URL: {normalized_url}")
+        raise HTTPException(status_code=400, detail=f"下载音频文件失败: 无效的URL格式 - {str(e)}。请提供完整的云存储URL或正确的文件名")
     except requests.exceptions.RequestException as e:
         logger.error(f"下载音频文件失败: {str(e)}")
+        logger.error(f"尝试下载的URL: {normalized_url}")
         raise HTTPException(status_code=400, detail=f"下载音频文件失败: {str(e)}")
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"下载音频文件异常: {str(e)}")
+        logger.error(f"尝试下载的URL: {normalized_url}")
+        import traceback
+        logger.error(f"异常堆栈: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"下载音频文件异常: {str(e)}")
 
 
@@ -1648,9 +1760,10 @@ async def generate_and_upload_cover_image(
                             agc_bucket,
                             agc_product_id,
                             agc_domain,
-                            cover_object_name,
                             agc_client_id,
-                            agc_client_secret
+                            agc_client_secret,
+                            None,  # job_id (封面图上传不需要更新进度)
+                            cover_object_name
                         )
                         
                         # 构建封面图URL（使用云存储URL格式）
@@ -2484,97 +2597,16 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
             duration_seconds = get_audio_duration(output_path)
             
             # 生成封面图
-            cover_image_url = None
-            try:
-                logger.info("开始生成播客封面图...")
-                _update_progress(request.job_id, "generating_cover", 98, "正在生成封面图")
-                
-                # 调用封面图生成API
-                cover_request = GenerateCoverRequest(
-                    text=text_content[:500] if text_content else None,  # 只使用前500字
-                    topic=request.topic,
-                    podcast_name=podcast_title,
-                    category=request.category,
-                    characters=list(roles) if roles else None
-                )
-                
-                cover_result = await generate_podcast_cover(cover_request)
-                
-                if cover_result.success and cover_result.data and cover_result.data.get('image_url'):
-                    cover_image_url_raw = cover_result.data['image_url']
-                    
-                    # 如果返回的是base64，需要先保存为文件再上传
-                    if cover_image_url_raw.startswith('data:image'):
-                        # 提取base64数据
-                        import base64
-                        from io import BytesIO
-                        from PIL import Image
-                        
-                        # 解析base64数据
-                        header, encoded = cover_image_url_raw.split(',', 1)
-                        image_data = base64.b64decode(encoded)
-                        
-                        # 保存为临时文件
-                        cover_temp_path = os.path.join(OUTPUT_DIR, f"cover_{podcast_id}.png")
-                        with open(cover_temp_path, 'wb') as f:
-                            f.write(image_data)
-                        
-                        # 上传封面图到云存储
-                        try:
-                            agc_storage_url = os.getenv('AGC_STORAGE_URL')
-                            agc_bucket = os.getenv('AGC_BUCKET')
-                            agc_domain = os.getenv('AGC_STORAGE_DOMAIN') or os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
-                            agc_client_id = os.getenv('AGC_STORAGE_CLIENT_ID') or os.getenv('AGC_CLIENT_ID')
-                            agc_client_secret = os.getenv('AGC_STORAGE_CLIENT_SECRET') or os.getenv('AGC_CLIENT_SECRET')
-                            agc_product_id = os.getenv('AGC_PRODUCT_ID')
-                            
-                            if not agc_client_id or not agc_client_secret:
-                                cfg_path = _find_agc_client_json()
-                                if cfg_path:
-                                    cid, csecret, proj = _load_agc_credentials_from_file(cfg_path)
-                                    agc_client_id = agc_client_id or cid
-                                    agc_client_secret = agc_client_secret or csecret
-                                    agc_product_id = agc_product_id or proj
-                            
-                            if agc_storage_url and agc_bucket and agc_client_id and agc_client_secret:
-                                # 上传封面图
-                                cover_object_name = f"outputs/podcasts/covers/cover_{podcast_id}.png"
-                                
-                                # 使用后台上传，避免阻塞
-                                background_tasks.add_task(
-                                    do_agc_upload,
-                                    cover_temp_path,
-                                    agc_storage_url,
-                                    agc_bucket,
-                                    agc_product_id,
-                                    agc_domain,
-                                    cover_object_name,
-                                    agc_client_id,
-                                    agc_client_secret
-                                )
-                                
-                                # 构建封面图URL（使用云存储URL格式）
-                                # 注意：这里假设上传成功后会返回URL，实际可能需要等待上传完成
-                                # 为了不阻塞，先使用预期的URL格式
-                                cover_image_url = f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{cover_object_name}"
-                                logger.info(f"封面图已加入上传队列: {cover_object_name}")
-                            else:
-                                # 如果没有配置云存储，使用base64 URL
-                                cover_image_url = cover_image_url_raw
-                                logger.warning("未配置云存储，封面图使用base64格式")
-                        except Exception as upload_error:
-                            logger.warning(f"上传封面图失败（不影响主流程）: {upload_error}")
-                            # 如果上传失败，使用base64 URL
-                            cover_image_url = cover_image_url_raw
-                    else:
-                        # 如果返回的是URL，直接使用
-                        cover_image_url = cover_image_url_raw
-                    
-                    logger.info("封面图生成成功")
-                else:
-                    logger.warning("封面图生成失败或返回数据为空")
-            except Exception as e:
-                logger.warning(f"生成封面图失败（不影响主流程）: {e}", exc_info=True)
+            cover_image_url = await generate_and_upload_cover_image(
+                podcast_id=podcast_id,
+                podcast_title=podcast_title,
+                text_content=text_content,
+                topic=request.topic,
+                category=request.category,
+                roles=list(roles) if roles else None,
+                background_tasks=background_tasks,
+                request_job_id=request.job_id
+            )
             
             podcast_metadata = {
                 "id": podcast_id,  # 使用独立的podcast_id作为数据库id

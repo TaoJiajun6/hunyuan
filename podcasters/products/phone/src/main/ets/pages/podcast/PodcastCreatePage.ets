@@ -137,7 +137,6 @@ export struct PodcastCreatePage {
   @Local playingVoiceId: string = ''; // 正在播放预览的音色ID
   @Local voiceList: VoiceInfo[] = []; // 从API获取的音色列表
   @Local voicePlayer: media.AVPlayer | null = null; // 音色播放器
-  @Local expandedVoiceRoles: Record<string, boolean> = {}; // 记录每个角色的音色列表是否展开
   // ========== 分类选择相关 ==========
   @Local showCategoryPicker: boolean = false; // 是否显示分类选择器
   // 播客分类选项列表
@@ -213,7 +212,7 @@ export struct PodcastCreatePage {
       // 如果已经选择了输入类型，保持在步骤1，直接显示对应的输入区域
       // 不再自动跳转到步骤2
     }
-    
+
     // 页面加载时获取音色列表
     this.loadVoiceList();
   }
@@ -510,7 +509,7 @@ export struct PodcastCreatePage {
       // 获取音频URL（优先使用url，因为file可能只是文件名）
       const audioUrl = voice.url || voice.file;
       Logger.info('PodcastCreatePage', `音色信息: id=${voice.id}, name=${voice.name}, file=${voice.file}, url=${voice.url}, audioUrl=${audioUrl}`);
-      
+
       if (!audioUrl) {
         Logger.error('PodcastCreatePage', `音色文件URL不存在: voice=${JSON.stringify(voice)}`);
         promptAction.showToast({
@@ -528,10 +527,10 @@ export struct PodcastCreatePage {
       // 如果是云存储URL，使用代理接口；否则直接使用URL
       let playUrl: string;
       const audioUrlStr = String(audioUrl).trim();
-      
+
       // 检查是否是云存储URL（更宽松的检查）
-      if (audioUrlStr.includes('agcstorage') || 
-          audioUrlStr.includes('ops-server') || 
+      if (audioUrlStr.includes('agcstorage') ||
+          audioUrlStr.includes('ops-server') ||
           audioUrlStr.includes('cloud.huawei.com') ||
           audioUrlStr.includes('/voices/') ||
           audioUrlStr.includes('/hunyuan/')) {
@@ -601,7 +600,7 @@ export struct PodcastCreatePage {
           this.playingVoiceId = '';
         }
       });
-      
+
       // 设置音量（在 prepared 状态后设置）
       // 注意：在 initialized 状态时不能设置音量，需要在 prepared 状态后设置
     } catch (error) {
@@ -726,7 +725,7 @@ export struct PodcastCreatePage {
             Logger.info('PodcastCreatePage', `音色文件下载成功: ${localFilePath}`);
             resolve(localFilePath);
           });
-          
+
           // 监听下载失败（参考 AudioPlayer）
           task.on('wait', (reason: request.agent.WaitingReason) => {
             Logger.error('PodcastCreatePage', `下载音色文件失败: ${reason}`);
@@ -784,7 +783,7 @@ export struct PodcastCreatePage {
           message: `${roleName}自定义音色已上传`,
           duration: 2000
         });
-        
+
         // 上传成功后，刷新音色列表
         await this.loadVoiceList();
       }
@@ -831,7 +830,7 @@ export struct PodcastCreatePage {
           message: `${this.characters[index].name || '角色'}音色已选择`,
           duration: 2000
         });
-        
+
         // 上传成功后，刷新音色列表
         await this.loadVoiceList();
       }
@@ -925,7 +924,7 @@ export struct PodcastCreatePage {
         // 将 .pcm 扩展名改为 .wav（如果需要）
         const finalFileName = fileName.replace('.pcm', '.wav');
         const cloudInfo = await FileUtils.uploadAudioToCloud(context, recordResult.filePath, finalFileName, 'voices/');
-        
+
         if (cloudInfo) {
           // 使用 cloudPath 作为标识符
           const voiceIdentifier = cloudInfo.cloudPath || cloudInfo.cloudUrl;
@@ -952,7 +951,7 @@ export struct PodcastCreatePage {
             message: '录制完成并已上传到云存储',
             duration: 2000
           });
-          
+
           // 上传成功后，刷新音色列表
           await this.loadVoiceList();
         } else {
@@ -1936,7 +1935,7 @@ export struct PodcastCreatePage {
                         duration: 1500
                       });
                     })
-                  
+
                   Button('上传自定义音色')
                     .type(ButtonType.Normal)
                     .fontSize(13)
@@ -1964,13 +1963,13 @@ export struct PodcastCreatePage {
                     Row({ space: 12 }) {
                       // 播放图标（可点击播放/暂停）
                       Button() {
-                        Image(this.playingVoiceId === voice.id ? 
-                          $r('sys.media.ohos_ic_public_pause') : 
+                        Image(this.playingVoiceId === voice.id ?
+                          $r('sys.media.ohos_ic_public_pause') :
                           $r('sys.media.ohos_ic_public_play'))
                           .width(20)
                           .height(20)
-                          .fillColor(this.roleVoiceUrls[roleName] === voice.file ? 
-                            BUTTON_COLORS[index % 3] : 
+                          .fillColor(this.roleVoiceUrls[roleName] === voice.file ?
+                            BUTTON_COLORS[index % 3] :
                             '#999999')
                       }
                       .type(ButtonType.Normal)
@@ -1981,7 +1980,7 @@ export struct PodcastCreatePage {
                         // 播放/暂停音色
                         this.playVoicePreview(voice);
                       })
-                      
+
                       // 音色名称和描述
                       Column({ space: 4 }) {
                         Text(voice.name)
@@ -2024,16 +2023,9 @@ export struct PodcastCreatePage {
                         duration: 2000
                       });
                     })
-                      }, (voice: VoiceInfo) => voice.id)
-                    }
-                    .width('100%')
-                    .padding({ top: 8, left: 16, right: 16, bottom: 16 })
-                    .backgroundColor('#FAFAFA')
-                    .borderRadius({ bottomLeft: 12, bottomRight: 12 })
-                  }
+                  }, (voice: VoiceInfo) => voice.id)
                 }
                 .width('100%')
-                .margin({ top: 8 })
               } else {
                 // 如果没有音色列表，显示提示
                 Text('暂无可用音色，请上传自定义音色')
@@ -2598,7 +2590,7 @@ export struct PodcastCreatePage {
                         duration: 1500
                       });
                     })
-                  
+
                   Button('上传自定义音色')
                     .type(ButtonType.Normal)
                     .fontSize(13)
@@ -2626,13 +2618,13 @@ export struct PodcastCreatePage {
                     Row({ space: 12 }) {
                       // 播放图标（可点击播放/暂停）
                       Button() {
-                        Image(this.playingVoiceId === voice.id ? 
-                          $r('sys.media.ohos_ic_public_pause') : 
+                        Image(this.playingVoiceId === voice.id ?
+                          $r('sys.media.ohos_ic_public_pause') :
                           $r('sys.media.ohos_ic_public_play'))
                           .width(20)
                           .height(20)
-                          .fillColor(this.roleVoiceUrls[roleName] === voice.file ? 
-                            BUTTON_COLORS[index % 3] : 
+                          .fillColor(this.roleVoiceUrls[roleName] === voice.file ?
+                            BUTTON_COLORS[index % 3] :
                             '#999999')
                       }
                       .type(ButtonType.Normal)
@@ -2643,7 +2635,7 @@ export struct PodcastCreatePage {
                         // 播放/暂停音色
                         this.playVoicePreview(voice);
                       })
-                      
+
                       // 音色名称和描述
                       Column({ space: 4 }) {
                         Text(voice.name)
@@ -2686,16 +2678,9 @@ export struct PodcastCreatePage {
                         duration: 2000
                       });
                     })
-                      }, (voice: VoiceInfo) => voice.id)
-                    }
-                    .width('100%')
-                    .padding({ top: 8, left: 16, right: 16, bottom: 16 })
-                    .backgroundColor('#FAFAFA')
-                    .borderRadius({ bottomLeft: 12, bottomRight: 12 })
-                  }
+                  }, (voice: VoiceInfo) => voice.id)
                 }
                 .width('100%')
-                .margin({ top: 8 })
               } else {
                 // 如果没有音色列表，显示提示
                 Text('暂无可用音色，请上传自定义音色')
