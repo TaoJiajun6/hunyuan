@@ -1586,7 +1586,11 @@ export class PodcastService {
 
           if (data.responseCode === 200) {
             try {
-              const result = JSON.parse(data.result.toString()) as ApiResponse<{ voices: VoiceInfo[] }>;
+              // 定义响应数据接口
+              interface VoiceListResponseData {
+                voices: VoiceInfo[];
+              }
+              const result = JSON.parse(data.result.toString()) as ApiResponse<VoiceListResponseData>;
               if (result.success && result.data && result.data.voices) {
                 Logger.info(TAG, `获取到 ${result.data.voices.length} 个音色文件`);
                 resolve(result.data.voices);

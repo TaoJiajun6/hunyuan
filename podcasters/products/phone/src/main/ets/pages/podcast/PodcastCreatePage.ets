@@ -23,7 +23,8 @@ import {
   CharacterInfo,
   PodcastResult,
   ProgressStatus,
-  VoiceInfo
+  VoiceInfo,
+  PodcastConfig
 } from 'lib_api';
 import { FileUtils, TextFileInfo } from '../../utils/FileUtils';
 import { AudioRecorderUtils } from '../../utils/AudioRecorderUtils';
@@ -32,6 +33,10 @@ import { common } from '@kit.AbilityKit';
 import { MediaService, SongItem } from 'module_musicplay';
 import { CloudStorageMusicUtils, CloudAudioFile } from '../../common/CloudStorageMusicUtils';
 import { Logger } from 'lib_common';
+import { media } from '@kit.MediaKit';
+import { cloudStorage } from '@kit.CloudFoundationKit';
+import fs from '@ohos.file.fs';
+import { BusinessError, request } from '@kit.BasicServicesKit';
 
 // 播客类型枚举
 enum PodcastType {
@@ -131,6 +136,7 @@ export struct PodcastCreatePage {
   @Local currentSelectingRole: string = ''; // 当前正在选择音色的角色名
   @Local playingVoiceId: string = ''; // 正在播放预览的音色ID
   @Local voiceList: VoiceInfo[] = []; // 从API获取的音色列表
+  @Local voicePlayer: media.AVPlayer | null = null; // 音色播放器
   // ========== 分类选择相关 ==========
   @Local showCategoryPicker: boolean = false; // 是否显示分类选择器
   // 播客分类选项列表
@@ -205,6 +211,26 @@ export struct PodcastCreatePage {
       }
       // 如果已经选择了输入类型，保持在步骤1，直接显示对应的输入区域
       // 不再自动跳转到步骤2
+    }
+    
+    // 页面加载时获取音色列表
+    this.loadVoiceList();
+  }
+
+  /**
+   * 加载音色列表
+   */
+  async loadVoiceList(): Promise<void> {
+    try {
+      this.voiceList = await podcastService.getVoiceList();
+      if (this.voiceList.length === 0) {
+        Logger.warn('PodcastCreatePage', '未获取到音色列表，将使用预设音色');
+      } else {
+        Logger.info('PodcastCreatePage', `成功加载 ${this.voiceList.length} 个音色`);
+      }
+    } catch (error) {
+      Logger.error('PodcastCreatePage', `加载音色列表失败: ${error}`);
+      this.voiceList = [];
     }
   }
 
@@ -418,33 +444,6 @@ export struct PodcastCreatePage {
     this.playingVoiceId = '';
   }
 
-  /**
-   * 选择预设音色
-   */
-  selectPresetVoice(voiceId: string): void {
-    if (!this.currentSelectingRole) {
-      return;
-    }
-
-    // TODO: 从后端获取预设音色的URL，这里先用空字符串占位
-    // 实际应该调用API获取预设音色的云存储URL
-    const voiceUrl = `preset://${voiceId}`; // 使用预设音色标识符
-
-    const updatedRoleVoiceUrls: Record<string, string> = {};
-    const keys = Object.keys(this.roleVoiceUrls);
-    for (let i = 0; i < keys.length; i++) {
-      updatedRoleVoiceUrls[keys[i]] = this.roleVoiceUrls[keys[i]];
-    }
-    updatedRoleVoiceUrls[this.currentSelectingRole] = voiceUrl;
-    this.roleVoiceUrls = updatedRoleVoiceUrls;
-
-    promptAction.showToast({
-      message: `${this.currentSelectingRole}已选择${this.getVoiceName(voiceId)}`,
-      duration: 2000
-    });
-
-    this.closeVoiceSelector();
-  }
 
   /**
    * 上传自定义音色文件
@@ -481,18 +480,261 @@ export struct PodcastCreatePage {
   /**
    * 播放音色预览
    */
-  playVoicePreview(voiceId: string): void {
-    // TODO: 实现音色预览播放
-    this.playingVoiceId = voiceId;
-    promptAction.showToast({
-      message: `播放 ${this.getVoiceName(voiceId)} 预览`,
-      duration: 1500
-    });
+  async playVoicePreview(voice: VoiceInfo): Promise<void> {
+    try {
+      // 如果正在播放同一个音色，则停止播放
+      if (this.playingVoiceId === voice.id && this.voicePlayer) {
+        await this.stopVoicePreview();
+        return;
+      }
 
-    // 模拟播放，3秒后停止
-    setTimeout(() => {
+      // 如果正在播放其他音色，先停止
+      if (this.voicePlayer) {
+        await this.stopVoicePreview();
+      }
+
+      // 获取音频URL（优先使用url，因为file可能只是文件名）
+      const audioUrl = voice.url || voice.file;
+      Logger.info('PodcastCreatePage', `音色信息: id=${voice.id}, name=${voice.name}, file=${voice.file}, url=${voice.url}, audioUrl=${audioUrl}`);
+      
+      if (!audioUrl) {
+        Logger.error('PodcastCreatePage', `音色文件URL不存在: voice=${JSON.stringify(voice)}`);
+        promptAction.showToast({
+          message: '音色文件URL不存在',
+          duration: 2000
+        });
+        return;
+      }
+
+      // 创建播放器
+      this.voicePlayer = await media.createAVPlayer();
+      this.playingVoiceId = voice.id;
+
+      // 使用代理接口播放云存储音频（避免本地文件权限问题）
+      // 如果是云存储URL，使用代理接口；否则直接使用URL
+      let playUrl: string;
+      const audioUrlStr = String(audioUrl).trim();
+      
+      // 检查是否是云存储URL（更宽松的检查）
+      if (audioUrlStr.includes('agcstorage') || 
+          audioUrlStr.includes('ops-server') || 
+          audioUrlStr.includes('cloud.huawei.com') ||
+          audioUrlStr.includes('/voices/') ||
+          audioUrlStr.includes('/hunyuan/')) {
+        // 使用代理接口播放云存储音频
+        const proxyUrl = `${PodcastConfig.API_BASE_URL}api/v1/podcast/proxy_audio?url=${encodeURIComponent(audioUrlStr)}`;
+        playUrl = proxyUrl;
+        Logger.info('PodcastCreatePage', `使用代理接口播放: ${proxyUrl}`);
+      } else if (audioUrlStr.startsWith('http://') || audioUrlStr.startsWith('https://')) {
+        // 直接使用网络URL
+        playUrl = audioUrlStr;
+        Logger.info('PodcastCreatePage', `使用网络URL播放: ${audioUrlStr}`);
+      } else {
+        // 如果URL格式不正确，记录详细信息并抛出错误
+        Logger.error('PodcastCreatePage', `音色文件URL格式不正确: audioUrl="${audioUrlStr}", type=${typeof audioUrl}, voice=${JSON.stringify(voice)}`);
+        throw new Error(`音色文件URL格式不正确: "${audioUrlStr}"，必须是云存储URL或网络地址`);
+      }
+
+      // 设置播放器URL（直接使用网络URL，不需要下载到本地）
+      this.voicePlayer.url = playUrl;
+      Logger.info('PodcastCreatePage', `设置播放器URL: ${playUrl}`);
+
+      // 监听播放错误
+      this.voicePlayer.on('error', (error: BusinessError) => {
+        Logger.error('PodcastCreatePage', `播放错误: code=${error.code}, message=${error.message}`);
+        promptAction.showToast({
+          message: `播放失败: ${error.message}`,
+          duration: 2000
+        });
+        this.playingVoiceId = '';
+        if (this.voicePlayer) {
+          this.voicePlayer.release();
+          this.voicePlayer = null;
+        }
+      });
+
+      // 监听播放状态变化（参考 MediaService 的实现）
+      this.voicePlayer.on('stateChange', async (state: string) => {
+        Logger.info('PodcastCreatePage', `播放状态变化: ${state}`);
+        if (state === 'initialized') {
+          // 状态变为 initialized 时，调用 prepare
+          try {
+            await this.voicePlayer?.prepare();
+            Logger.info('PodcastCreatePage', '播放器准备完成');
+          } catch (error) {
+            Logger.error('PodcastCreatePage', `准备播放器失败: ${error}`);
+          }
+        } else if (state === 'prepared') {
+          // 状态变为 prepared 时，设置音量并开始播放
+          try {
+            if (this.voicePlayer) {
+              this.voicePlayer.setVolume(1.0);
+              this.voicePlayer.play();
+              Logger.info('PodcastCreatePage', '开始播放');
+              promptAction.showToast({
+                message: `正在播放 ${voice.name}`,
+                duration: 1500
+              });
+            }
+          } catch (error) {
+            Logger.error('PodcastCreatePage', `播放失败: ${error}`);
+          }
+        } else if (state === 'playing') {
+          // 播放中
+          Logger.info('PodcastCreatePage', '播放中');
+        } else if (state === 'idle' || state === 'stopped') {
+          // 播放完成或停止
+          this.playingVoiceId = '';
+        }
+      });
+      
+      // 设置音量（在 prepared 状态后设置）
+      // 注意：在 initialized 状态时不能设置音量，需要在 prepared 状态后设置
+    } catch (error) {
+      Logger.error('PodcastCreatePage', `播放音色失败: ${error}`);
+      promptAction.showToast({
+        message: `播放失败: ${error}`,
+        duration: 2000
+      });
       this.playingVoiceId = '';
-    }, 3000);
+      if (this.voicePlayer) {
+        this.voicePlayer.release();
+        this.voicePlayer = null;
+      }
+    }
+  }
+
+  /**
+   * 停止音色预览
+   */
+  async stopVoicePreview(): Promise<void> {
+    if (this.voicePlayer) {
+      try {
+        await this.voicePlayer.pause();
+        await this.voicePlayer.stop();
+        this.voicePlayer.release();
+      } catch (error) {
+        Logger.error('PodcastCreatePage', `停止播放失败: ${error}`);
+      }
+      this.voicePlayer = null;
+    }
+    this.playingVoiceId = '';
+  }
+
+  /**
+   * 从云存储URL中提取云侧文件路径
+   * 参考 AudioPlayer 的实现
+   */
+  private extractCloudPathFromUrl(url: string): string | null {
+    try {
+      // 查找 /outputs/ 来确定路径起始位置（这是最可靠的方式）
+      const outputsIndex = url.indexOf('/outputs/');
+      if (outputsIndex !== -1) {
+        // 提取从 /outputs/ 开始到URL结尾的所有内容
+        const cloudPath = url.substring(outputsIndex + 1); // +1 去掉开头的 /
+        return cloudPath;
+      }
+
+      // 查找 voices/ 路径
+      const voicesIndex = url.indexOf('/voices/');
+      if (voicesIndex !== -1) {
+        return url.substring(voicesIndex + 1); // 去掉开头的 /
+      }
+
+      // 查找 hunyuan/ 路径（向后兼容）
+      const hunyuanIndex = url.indexOf('/hunyuan/');
+      if (hunyuanIndex !== -1) {
+        return url.substring(hunyuanIndex + 1);
+      }
+
+      // 如果没有找到，尝试其他方式
+      // 查找 bucket 名称后的路径（例如：podcasters-y0qig/voices/xxx.wav）
+      const bucketMatch = url.match(/\/[^\/]+\/(voices\/[^\/]+\/.+)$/);
+      if (bucketMatch && bucketMatch[1]) {
+        return bucketMatch[1];
+      }
+
+      // 最后尝试：只提取文件名，假设在 voices/ 目录下
+      const lastSlashIndex = url.lastIndexOf('/');
+      if (lastSlashIndex !== -1) {
+        const fileName = url.substring(lastSlashIndex + 1);
+        // 如果文件名看起来像音频文件，假设它在 voices/ 目录下
+        if (fileName.match(/\.(wav|mp3|m4a|aac)$/i)) {
+          return `voices/${fileName}`;
+        }
+      }
+
+      return null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /**
+   * 从云存储下载音色文件
+   * 参考 AudioPlayer 的实现
+   */
+  private async downloadVoiceFromCloud(cloudPath: string, context: common.UIAbilityContext): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      try {
+        const storageBucket = cloudStorage.bucket();
+        // 生成本地文件名（参考 AudioPlayer，只使用文件名作为 localPath）
+        const fileName = cloudPath.split('/').pop() || `voice_${Date.now()}.wav`;
+        const localPath = fileName;
+        const localFilePath = `${context.cacheDir}/${localPath}`;
+
+        // 检查文件是否已存在（参考 AudioPlayer）
+        try {
+          const stat = fs.statSync(localFilePath);
+          if (stat.isFile()) {
+            Logger.info('PodcastCreatePage', `音色文件已存在，跳过下载: ${localFilePath}`);
+            resolve(localFilePath);
+            return;
+          }
+        } catch {
+          // 文件不存在，继续下载
+        }
+
+        // 从云存储下载文件（参考 AudioPlayer 的实现）
+        storageBucket.downloadFile(context, {
+          localPath: localPath,
+          cloudPath: cloudPath,
+          overwrite: true // 允许覆盖已存在的文件
+        }).then((task: request.agent.Task) => {
+          // 监听下载进度
+          task.on('progress', (progress) => {
+            // 可以在这里更新下载进度UI
+          });
+
+          // 监听下载完成（参考 AudioPlayer）
+          task.on('completed', () => {
+            // 文件已下载到 context.cacheDir/localPath
+            Logger.info('PodcastCreatePage', `音色文件下载成功: ${localFilePath}`);
+            resolve(localFilePath);
+          });
+          
+          // 监听下载失败（参考 AudioPlayer）
+          task.on('wait', (reason: request.agent.WaitingReason) => {
+            Logger.error('PodcastCreatePage', `下载音色文件失败: ${reason}`);
+            reject(new Error(`下载失败: ${reason}`));
+          });
+
+          // 启动下载任务
+          task.start((err: BusinessError) => {
+            if (err) {
+              Logger.error('PodcastCreatePage', `启动下载任务失败: ${err.message}`);
+              reject(new Error(`启动下载任务失败: ${err.message || String(err)}`));
+            }
+          });
+        }).catch((err: BusinessError) => {
+          Logger.error('PodcastCreatePage', `下载音色文件失败: ${err.message}`);
+          reject(new Error(`下载文件失败: ${err.message || String(err)}`));
+        });
+      } catch (error) {
+        Logger.error('PodcastCreatePage', `下载音色文件异常: ${error}`);
+        reject(error);
+      }
+    });
   }
 
   /**
@@ -505,10 +747,36 @@ export struct PodcastCreatePage {
 
   /**
    * 选择角色音色文件（多角色互动播客和主题深度播客）
-   * 现在改为打开音色选择器
    */
   async selectVoiceFile(roleName: string): Promise<void> {
-    this.openVoiceSelector(roleName);
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      // 上传音色文件到 voices/ 目录
+      const audioFileInfo = await FileUtils.pickAudioFile(context, true, 'voices/');
+
+      if (audioFileInfo && audioFileInfo.cloudUrl) {
+        // 使用 cloudPath 作为标识符，而不是 cloudUrl
+        // 因为后端API需要根据 cloudPath 来匹配音色
+        const voiceIdentifier = audioFileInfo.cloudPath || audioFileInfo.cloudUrl;
+        const keys = Object.keys(this.roleVoiceUrls);
+        const updatedRoleVoiceUrls: Record<string, string> = {};
+        for (let i = 0; i < keys.length; i++) {
+          updatedRoleVoiceUrls[keys[i]] = this.roleVoiceUrls[keys[i]];
+        }
+        updatedRoleVoiceUrls[roleName] = voiceIdentifier;
+        this.roleVoiceUrls = updatedRoleVoiceUrls;
+
+        promptAction.showToast({
+          message: `${roleName}自定义音色已上传`,
+          duration: 2000
+        });
+      }
+    } catch (error) {
+      promptAction.showToast({
+        message: `上传失败: ${error}`,
+        duration: 2000
+      });
+    }
   }
 
   /**
@@ -517,9 +785,12 @@ export struct PodcastCreatePage {
   async selectCharacterVoiceFile(index: number): Promise<void> {
     try {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      const audioFileInfo = await FileUtils.pickAudioFile(context, true);
+      // 上传音色文件到 voices/ 目录
+      const audioFileInfo = await FileUtils.pickAudioFile(context, true, 'voices/');
 
       if (audioFileInfo && audioFileInfo.cloudUrl) {
+        // 使用 cloudPath 作为标识符，而不是 cloudUrl
+        const voiceIdentifier = audioFileInfo.cloudPath || audioFileInfo.cloudUrl;
         const updatedCharacters: CharacterInfo[] = [];
         for (let i = 0; i < this.characters.length; i++) {
           if (i === index) {
@@ -531,7 +802,7 @@ export struct PodcastCreatePage {
               catchphrase: char.catchphrase,
               speaking_style: char.speaking_style,
               relationship: char.relationship,
-              voice_url: audioFileInfo.cloudUrl
+              voice_url: voiceIdentifier
             });
           } else {
             updatedCharacters.push(this.characters[i]);
@@ -625,11 +896,19 @@ export struct PodcastCreatePage {
     }
 
     try {
-      const audioFileInfo = await AudioRecorderUtils.stopRecording();
+      const recordResult = await AudioRecorderUtils.stopRecording();
 
-      if (audioFileInfo && audioFileInfo.cloudUrl && this.recordingIndex >= 0) {
-        const cloudUrl = audioFileInfo.cloudUrl;
-        if (cloudUrl) {
+      if (recordResult && this.recordingIndex >= 0) {
+        // 上传录制的音频文件到 voices/ 目录
+        const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+        const fileName = recordResult.filePath.split('/').pop() || `voice_${Date.now()}.pcm`;
+        // 将 .pcm 扩展名改为 .wav（如果需要）
+        const finalFileName = fileName.replace('.pcm', '.wav');
+        const cloudInfo = await FileUtils.uploadAudioToCloud(context, recordResult.filePath, finalFileName, 'voices/');
+        
+        if (cloudInfo) {
+          // 使用 cloudPath 作为标识符
+          const voiceIdentifier = cloudInfo.cloudPath || cloudInfo.cloudUrl;
           const updatedCharacters: CharacterInfo[] = [];
           for (let i = 0; i < this.characters.length; i++) {
             if (i === this.recordingIndex) {
@@ -641,7 +920,7 @@ export struct PodcastCreatePage {
                 catchphrase: char.catchphrase,
                 speaking_style: char.speaking_style,
                 relationship: char.relationship,
-                voice_url: cloudUrl
+                voice_url: voiceIdentifier
               });
             } else {
               updatedCharacters.push(this.characters[i]);
@@ -650,7 +929,12 @@ export struct PodcastCreatePage {
           this.characters = updatedCharacters;
 
           promptAction.showToast({
-            message: '录制完成并已上传',
+            message: '录制完成并已上传到云存储',
+            duration: 2000
+          });
+        } else {
+          promptAction.showToast({
+            message: '录制完成，但上传失败',
             duration: 2000
           });
         }
@@ -1581,63 +1865,135 @@ export struct PodcastCreatePage {
         // 角色音色选择列表
         Column({ space: 12 }) {
           ForEach(this.roleNames, (roleName: string, index: number) => {
-            Row({ space: 12 }) {
-              // 角色图标
-              Column() {
-                Text(roleName.charAt(roleName.length - 1))
-                  .fontSize(18)
-                  .fontWeight(FontWeight.Bold)
-                  .fontColor('#FFFFFF')
-              }
-              .width(44)
-              .height(44)
-              .borderRadius(22)
-              .backgroundColor(BUTTON_COLORS[index % 3])
-              .justifyContent(FlexAlign.Center)
-              .alignItems(HorizontalAlign.Center)
-
-              Column({ space: 4 }) {
-                Text(roleName)
-                  .fontSize(16)
-                  .fontWeight(FontWeight.Medium)
-                  .fontColor('#333333')
-                if (this.roleVoiceUrls[roleName]) {
-                  Text(this.getSelectedVoiceName(roleName))
-                    .fontSize(13)
-                    .fontColor('#999999')
+            Column({ space: 8 }) {
+              // 角色名称和上传按钮
+              Row({ space: 12 }) {
+                // 角色图标
+                Column() {
+                  Text(roleName.charAt(roleName.length - 1))
+                    .fontSize(18)
+                    .fontWeight(FontWeight.Bold)
+                    .fontColor('#FFFFFF')
                 }
-              }
-              .layoutWeight(1)
-              .alignItems(HorizontalAlign.Start)
-              .justifyContent(FlexAlign.Center)
+                .width(44)
+                .height(44)
+                .borderRadius(22)
+                .backgroundColor(BUTTON_COLORS[index % 3])
+                .justifyContent(FlexAlign.Center)
+                .alignItems(HorizontalAlign.Center)
 
-              Button(this.roleVoiceUrls[roleName] ? '已选择' : '选择音色')
-                .type(ButtonType.Normal)
-                .backgroundColor(this.roleVoiceUrls[roleName] ? BUTTON_COLORS[index % 3] : '#FFFFFF')
-                .fontColor(this.roleVoiceUrls[roleName] ? '#FFFFFF' : '#333333')
-                .fontSize(15)
-                .fontWeight(this.roleVoiceUrls[roleName] ? FontWeight.Bold : FontWeight.Medium)
-                .borderRadius(20)
-                .border({
-                  width: this.roleVoiceUrls[roleName] ? 0 : 1,
-                  color: '#E0E0E0',
-                  style: BorderStyle.Solid
-                })
-                .padding({ left: 20, right: 20 })
-                .height(40)
-                .shadow({
-                  radius: 14,
-                  color: '#1F000000',
-                  offsetX: 0,
-                  offsetY: 20
-                })
-                .bindSheet(this.showVoiceSelector, this.voiceSelectorSheet(), {
-                  height: '80%',
-                  dragBar: true,
-                  showClose: true,
-                  title: { title: '选择音色' }
-                })
-                .onClick(() => this.openVoiceSelector(roleName))
+                Column({ space: 4 }) {
+                  Text(roleName)
+                    .fontSize(16)
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor('#333333')
+                  if (this.roleVoiceUrls[roleName]) {
+                    Text(this.getSelectedVoiceName(roleName))
+                      .fontSize(13)
+                      .fontColor('#999999')
+                  }
+                }
+                .layoutWeight(1)
+                .alignItems(HorizontalAlign.Start)
+                .justifyContent(FlexAlign.Center)
+
+                Button('上传自定义音色')
+                  .type(ButtonType.Normal)
+                  .fontSize(13)
+                  .backgroundColor('#FFFFFF')
+                  .fontColor('#666666')
+                  .borderRadius(20)
+                  .border({
+                    width: 1,
+                    color: '#E0E0E0',
+                    style: BorderStyle.Solid
+                  })
+                  .padding({ left: 16, right: 16 })
+                  .height(36)
+                  .onClick(() => {
+                    this.selectVoiceFile(roleName);
+                  })
+              }
+              .width('100%')
+
+              // 音色列表（如果有）
+              if (this.voiceList.length > 0) {
+                Column({ space: 8 }) {
+                  ForEach(this.voiceList, (voice: VoiceInfo) => {
+                    Row({ space: 12 }) {
+                      // 播放图标（可点击播放/暂停）
+                      Button() {
+                        Image(this.playingVoiceId === voice.id ? 
+                          $r('sys.media.ohos_ic_public_pause') : 
+                          $r('sys.media.ohos_ic_public_play'))
+                          .width(20)
+                          .height(20)
+                          .fillColor(this.roleVoiceUrls[roleName] === voice.file ? 
+                            BUTTON_COLORS[index % 3] : 
+                            '#999999')
+                      }
+                      .type(ButtonType.Normal)
+                      .backgroundColor('#00000000')
+                      .width(32)
+                      .height(32)
+                      .onClick(() => {
+                        // 播放/暂停音色
+                        this.playVoicePreview(voice);
+                      })
+                      
+                      // 音色名称和描述
+                      Column({ space: 4 }) {
+                        Text(voice.name)
+                          .fontSize(15)
+                          .fontColor('#333333')
+                        if (voice.description) {
+                          Text(voice.description)
+                            .fontSize(12)
+                            .fontColor('#999999')
+                        }
+                      }
+                      .layoutWeight(1)
+                      .alignItems(HorizontalAlign.Start)
+
+                      // 选中标记
+                      if (this.roleVoiceUrls[roleName] === voice.file) {
+                        Image($r('sys.symbol.checkmark'))
+                          .width(20)
+                          .height(20)
+                          .fillColor(BUTTON_COLORS[index % 3])
+                      }
+                    }
+                    .width('100%')
+                    .padding(12)
+                    .borderRadius(12)
+                    .backgroundColor(this.roleVoiceUrls[roleName] === voice.file ?
+                      '#F3E5F5' :
+                      '#FAFAFA')
+                    .onClick(() => {
+                      // 选择音色
+                      const keys = Object.keys(this.roleVoiceUrls);
+                      const updatedRoleVoiceUrls: Record<string, string> = {};
+                      for (let i = 0; i < keys.length; i++) {
+                        updatedRoleVoiceUrls[keys[i]] = this.roleVoiceUrls[keys[i]];
+                      }
+                      updatedRoleVoiceUrls[roleName] = voice.file;
+                      this.roleVoiceUrls = updatedRoleVoiceUrls;
+                      promptAction.showToast({
+                        message: `${roleName}音色已选择: ${voice.name}`,
+                        duration: 2000
+                      });
+                    })
+                  }, (voice: VoiceInfo) => voice.id)
+                }
+                .width('100%')
+              } else {
+                // 如果没有音色列表，显示提示
+                Text('暂无可用音色，请上传自定义音色')
+                  .fontSize(13)
+                  .fontColor('#999999')
+                  .width('100%')
+                  .padding(12)
+              }
             }
             .width('100%')
             .padding({
@@ -2146,57 +2502,135 @@ export struct PodcastCreatePage {
 
         Column({ space: 12 }) {
           ForEach(this.roleNames, (roleName: string, index: number) => {
-            Row({ space: 12 }) {
-              // 角色图标
-              Column() {
-                Text(roleName.charAt(roleName.length - 1))
-                  .fontSize(18)
-                  .fontWeight(FontWeight.Bold)
-                  .fontColor('#FFFFFF')
-              }
-              .width(44)
-              .height(44)
-              .borderRadius(22)
-              .backgroundColor(BUTTON_COLORS[index % 3])
-              .justifyContent(FlexAlign.Center)
-              .alignItems(HorizontalAlign.Center)
-
-              Column({ space: 4 }) {
-                Text(roleName)
-                  .fontSize(16)
-                  .fontWeight(FontWeight.Medium)
-                  .fontColor('#333333')
-                if (this.roleVoiceUrls[roleName]) {
-                  Text('音色已选择')
-                    .fontSize(13)
-                    .fontColor('#999999')
+            Column({ space: 8 }) {
+              // 角色名称和上传按钮
+              Row({ space: 12 }) {
+                // 角色图标
+                Column() {
+                  Text(roleName.charAt(roleName.length - 1))
+                    .fontSize(18)
+                    .fontWeight(FontWeight.Bold)
+                    .fontColor('#FFFFFF')
                 }
-              }
-              .layoutWeight(1)
-              .alignItems(HorizontalAlign.Start)
-              .justifyContent(FlexAlign.Center)
+                .width(44)
+                .height(44)
+                .borderRadius(22)
+                .backgroundColor(BUTTON_COLORS[index % 3])
+                .justifyContent(FlexAlign.Center)
+                .alignItems(HorizontalAlign.Center)
 
-              Button(this.roleVoiceUrls[roleName] ? '已选择' : '选择音色')
-                .type(ButtonType.Normal)
-                .backgroundColor(this.roleVoiceUrls[roleName] ? BUTTON_COLORS[index % 3] : '#FFFFFF')
-                .fontColor(this.roleVoiceUrls[roleName] ? '#FFFFFF' : '#666666')
-                .fontSize(14)
-                .fontWeight(this.roleVoiceUrls[roleName] ? FontWeight.Bold : FontWeight.Medium)
-                .borderRadius(20)
-                .border({
-                  width: this.roleVoiceUrls[roleName] ? 0 : 1,
-                  color: '#E0E0E0',
-                  style: BorderStyle.Solid
-                })
-                .padding({ left: 20, right: 20 })
-                .height(40)
-                .shadow({
-                  radius: 14,
-                  color: '#1F000000',
-                  offsetX: 0,
-                  offsetY: 20
-                })
-                .onClick(() => this.selectVoiceFile(roleName))
+                Column({ space: 4 }) {
+                  Text(roleName)
+                    .fontSize(16)
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor('#333333')
+                  if (this.roleVoiceUrls[roleName]) {
+                    Text(this.getSelectedVoiceName(roleName))
+                      .fontSize(13)
+                      .fontColor('#999999')
+                  }
+                }
+                .layoutWeight(1)
+                .alignItems(HorizontalAlign.Start)
+                .justifyContent(FlexAlign.Center)
+
+                Button('上传自定义音色')
+                  .type(ButtonType.Normal)
+                  .fontSize(13)
+                  .backgroundColor('#FFFFFF')
+                  .fontColor('#666666')
+                  .borderRadius(20)
+                  .border({
+                    width: 1,
+                    color: '#E0E0E0',
+                    style: BorderStyle.Solid
+                  })
+                  .padding({ left: 16, right: 16 })
+                  .height(36)
+                  .onClick(() => {
+                    this.selectVoiceFile(roleName);
+                  })
+              }
+              .width('100%')
+
+              // 音色列表（如果有）
+              if (this.voiceList.length > 0) {
+                Column({ space: 8 }) {
+                  ForEach(this.voiceList, (voice: VoiceInfo) => {
+                    Row({ space: 12 }) {
+                      // 播放图标（可点击播放/暂停）
+                      Button() {
+                        Image(this.playingVoiceId === voice.id ? 
+                          $r('sys.media.ohos_ic_public_pause') : 
+                          $r('sys.media.ohos_ic_public_play'))
+                          .width(20)
+                          .height(20)
+                          .fillColor(this.roleVoiceUrls[roleName] === voice.file ? 
+                            BUTTON_COLORS[index % 3] : 
+                            '#999999')
+                      }
+                      .type(ButtonType.Normal)
+                      .backgroundColor('#00000000')
+                      .width(32)
+                      .height(32)
+                      .onClick(() => {
+                        // 播放/暂停音色
+                        this.playVoicePreview(voice);
+                      })
+                      
+                      // 音色名称和描述
+                      Column({ space: 4 }) {
+                        Text(voice.name)
+                          .fontSize(15)
+                          .fontColor('#333333')
+                        if (voice.description) {
+                          Text(voice.description)
+                            .fontSize(12)
+                            .fontColor('#999999')
+                        }
+                      }
+                      .layoutWeight(1)
+                      .alignItems(HorizontalAlign.Start)
+
+                      // 选中标记
+                      if (this.roleVoiceUrls[roleName] === voice.file) {
+                        Image($r('sys.symbol.checkmark'))
+                          .width(20)
+                          .height(20)
+                          .fillColor(BUTTON_COLORS[index % 3])
+                      }
+                    }
+                    .width('100%')
+                    .padding(12)
+                    .borderRadius(12)
+                    .backgroundColor(this.roleVoiceUrls[roleName] === voice.file ?
+                      '#F3E5F5' :
+                      '#FAFAFA')
+                    .onClick(() => {
+                      // 选择音色
+                      const keys = Object.keys(this.roleVoiceUrls);
+                      const updatedRoleVoiceUrls: Record<string, string> = {};
+                      for (let i = 0; i < keys.length; i++) {
+                        updatedRoleVoiceUrls[keys[i]] = this.roleVoiceUrls[keys[i]];
+                      }
+                      updatedRoleVoiceUrls[roleName] = voice.file;
+                      this.roleVoiceUrls = updatedRoleVoiceUrls;
+                      promptAction.showToast({
+                        message: `${roleName}音色已选择: ${voice.name}`,
+                        duration: 2000
+                      });
+                    })
+                  }, (voice: VoiceInfo) => voice.id)
+                }
+                .width('100%')
+              } else {
+                // 如果没有音色列表，显示提示
+                Text('暂无可用音色，请上传自定义音色')
+                  .fontSize(13)
+                  .fontColor('#999999')
+                  .width('100%')
+                  .padding(12)
+              }
             }
             .width('100%')
             .padding({
@@ -2551,6 +2985,12 @@ export struct PodcastCreatePage {
       return '已选择';
     }
 
+    // 先检查是否是从API获取的音色
+    const apiVoice: VoiceInfo | undefined = this.voiceList.find((v: VoiceInfo) => v.url === voiceUrl);
+    if (apiVoice) {
+      return apiVoice.name;
+    }
+
     // 如果是预设音色
     if (voiceUrl.startsWith('preset://')) {
       const voiceId = voiceUrl.replace('preset://', '');
@@ -2562,57 +3002,6 @@ export struct PodcastCreatePage {
     return '自定义音色';
   }
 
-  /**
-   * 音色选择器弹窗内容
-   */
-  @Builder
-  voiceSelectorSheet() {
-    Column() {
-      // 添加自定义音色选项
-      Row({ space: 4 }) {
-        Text('添加你自己的音色')
-          .fontSize(14)
-          .fontColor('#ffc78cfd')
-          .fontWeight(FontWeight.Medium)
-        Image($r("sys.symbol.star_fill"))
-          .width(16)
-          .height(16)
-          .fillColor('#ffc78cfd')
-      }
-      .width('100%')
-      .padding({
-        left: 20,
-        right: 20,
-        top: 16,
-        bottom: 16
-      })
-      .onClick(() => this.uploadCustomVoice())
-
-      // 音色列表
-      Scroll() {
-        Grid() {
-          ForEach(this.presetVoices, (voice: PresetVoice) => {
-            this.voiceSelectorItem(voice)
-          })
-        }
-        .columnsTemplate('1fr 1fr')
-        .rowsGap(12)
-        .columnsGap(12)
-        .width('100%')
-      }
-      .layoutWeight(1)
-      .width('100%')
-      .padding({
-        left: 20,
-        right: 20,
-        top: 8,
-        bottom: 20
-      })
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor('#FFFFFF')
-  }
 
   /**
    * 分类选择器弹窗
@@ -2657,64 +3046,9 @@ export struct PodcastCreatePage {
     .backgroundColor('#FFFFFF')
   }
 
-  @Builder
-  voiceSelectorItem(voice: PresetVoice) {
-    Row({ space: 8 }) {
-      // 播放按钮
-      Button() {
-        Image(this.playingVoiceId === voice.id ? $r("sys.symbol.pause_fill") : $r("sys.symbol.play_fill"))
-          .width(20)
-          .height(20)
-          .fillColor(voice.gender === 'female' ? '#FF6B9D' : '#4A90E2')
-      }
-      .type(ButtonType.Normal)
-      .width(32)
-      .height(32)
-      .backgroundColor('#FFFFFF')
-      .borderRadius(16)
-      .onClick(() => this.playVoicePreview(voice.id))
-
-      // 音色名称
-      Text(voice.name)
-        .fontSize(15)
-        .fontWeight(FontWeight.Medium)
-        .fontColor('#333333')
-        .layoutWeight(1)
-
-      // 选中标记
-      if (this.isVoiceSelected(voice.id)) {
-        Image($r("sys.symbol.checkmark"))
-          .width(20)
-          .height(20)
-          .fillColor('#4CAF50')
-      }
-    }
-    .width('100%')
-    .height(56)
-    .padding({
-      left: 16,
-      right: 16,
-      top: 12,
-      bottom: 12
-    })
-    .backgroundColor(this.isVoiceSelected(voice.id) ? '#F3E5F5' : '#FFFFFF')
-    .borderRadius(16)
-    .border({
-      width: this.isVoiceSelected(voice.id) ? 2 : 1,
-      color: this.isVoiceSelected(voice.id) ? '#ffc78cfd' : '#E0E0E0',
-      style: BorderStyle.Solid
-    })
-    .shadow({
-      radius: 14,
-      color: '#1F000000',
-      offsetX: 0,
-      offsetY: 20
-    })
-    .onClick(() => this.selectPresetVoice(voice.id))
-  }
 
   /**
-   * 检查音色是否被选中
+   * 检查音色是否被选中（预设音色）
    */
   private isVoiceSelected(voiceId: string): boolean {
     const voiceUrl = this.roleVoiceUrls[this.currentSelectingRole];
@@ -2722,6 +3056,22 @@ export struct PodcastCreatePage {
       return false;
     }
     return voiceUrl.includes(voiceId) || voiceUrl === `preset://${voiceId}`;
+  }
+
+  /**
+   * 检查音色是否被选中（从API获取的音色）
+   */
+  private isVoiceSelectedFromAPI(voiceId: string): boolean {
+    const voiceUrl = this.roleVoiceUrls[this.currentSelectingRole];
+    if (!voiceUrl) {
+      return false;
+    }
+    // 检查URL是否匹配
+    const voice: VoiceInfo | undefined = this.voiceList.find((v: VoiceInfo) => v.id === voiceId);
+    if (voice && voice.url === voiceUrl) {
+      return true;
+    }
+    return false;
   }
 
   /**

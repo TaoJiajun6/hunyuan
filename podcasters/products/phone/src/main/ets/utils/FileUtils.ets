@@ -112,11 +112,13 @@ export class FileUtils {
    * @param uploadToCloud 是否上传到云存储，默认false
    *                      - true: 上传到云存储，不读取文件内容，不计算base64，返回cloudUrl
    *                      - false: 读取文件内容并转换为base64，不上传到云存储
+   * @param cloudPathPrefix 云存储路径前缀，默认 'hunyuan/'，例如 'voices/' 用于音色文件
    * @returns 音频文件信息，包括数据、base64、URI等（使用云存储时base64为空字符串，data为空数组）
    */
   static async pickAudioFile(
     context?: common.UIAbilityContext,
-    uploadToCloud: boolean = false
+    uploadToCloud: boolean = false,
+    cloudPathPrefix: string = 'hunyuan/'
   ): Promise<AudioFileInfo | null> {
     try {
       // 获取上下文
@@ -169,7 +171,7 @@ export class FileUtils {
 
         // 如果使用云存储，直接上传，不读取文件内容
         if (uploadToCloud) {
-          const cloudInfo = await FileUtils.uploadAudioToCloud(uiContext, fileUri, fileName);
+          const cloudInfo = await FileUtils.uploadAudioToCloud(uiContext, fileUri, fileName, cloudPathPrefix);
           if (!cloudInfo) {
             promptAction.showToast({
               message: '文件上传到云存储失败',
@@ -254,10 +256,11 @@ export class FileUtils {
   static async uploadAudioToCloud(
     context: common.UIAbilityContext,
     fileUri: string,
-    fileName: string
+    fileName: string,
+    cloudPathPrefix: string = 'hunyuan/'
   ): Promise<CloudStorageInfo | null> {
     // 复用通用上传方法
-    return await FileUtils.uploadFileToCloud(context, fileUri, fileName);
+    return await FileUtils.uploadFileToCloud(context, fileUri, fileName, cloudPathPrefix);
   }
 
   /**
@@ -386,17 +389,21 @@ export class FileUtils {
    * @param context UIAbility上下文
    * @param fileUri 文件URI
    * @param fileName 文件名
+   * @param cloudPathPrefix 云存储路径前缀，默认 'hunyuan/'，例如 'voices/' 用于音色文件
    * @returns 云存储路径和下载URL
    */
   private static async uploadFileToCloud(
     context: common.UIAbilityContext,
     fileUri: string,
-    fileName: string
+    fileName: string,
+    cloudPathPrefix: string = 'hunyuan/'
   ): Promise<CloudStorageInfo | null> {
     return new Promise<CloudStorageInfo | null>(async (resolve) => {
       try {
+        // 确保路径前缀以 / 结尾
+        const prefix = cloudPathPrefix.endsWith('/') ? cloudPathPrefix : `${cloudPathPrefix}/`;
         //生成云存储路径
-        const cloudPath = `hunyuan/${fileName}`;
+        const cloudPath = `${prefix}${fileName}`;
         const cacheFile = context.cacheDir + '/' + fileName;
         
         Logger.info(TAG, `开始上传文件到云存储: ${cloudPath}`);

@@ -30,7 +30,8 @@ export {
   ProgressStatus,
   AnalyzeTextRequest,
   AnalyzeTextResult,
-  PodcastListItem
+  PodcastListItem,
+  VoiceInfo
 } from './src/main/ets/services/PodcastService'
 
 // 云数据库服务

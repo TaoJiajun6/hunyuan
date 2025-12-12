@@ -61,21 +61,6 @@
       "buildFunction": "PodcastCreatePageBuilder"
     },
     {
-      "name": "PodcastMultiRolePage",
-      "pageSourceFile": "src/main/ets/pages/podcast/PodcastMultiRolePage.ets",
-      "buildFunction": "PodcastMultiRolePageBuilder"
-    },
-    {
-      "name": "PodcastCharacterPage",
-      "pageSourceFile": "src/main/ets/pages/podcast/PodcastCharacterPage.ets",
-      "buildFunction": "PodcastCharacterPageBuilder"
-    },
-    {
-      "name": "PodcastDeepPage",
-      "pageSourceFile": "src/main/ets/pages/podcast/PodcastDeepPage.ets",
-      "buildFunction": "PodcastDeepPageBuilder"
-    },
-    {
       "name": "VoiceClonePage",
       "pageSourceFile": "src/main/ets/pages/podcast/VoiceClonePage.ets",
       "buildFunction": "VoiceClonePageBuilder"
