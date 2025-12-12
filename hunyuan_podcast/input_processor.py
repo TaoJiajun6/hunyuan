@@ -30,6 +30,7 @@ except ImportError:
 
 try:
     from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+    import threading
     HAS_PLAYWRIGHT = True
 except ImportError:
     HAS_PLAYWRIGHT = False
@@ -46,6 +47,7 @@ class InputProcessor:
     def extract_text_from_wechat_article(self, url: str, timeout: int = 30) -> str:
         """
         从微信公众号文章URL提取文本内容
+        使用BeautifulSoup进行更准确的提取
         
         Args:
             url: 微信公众号文章URL
@@ -59,7 +61,9 @@ class InputProcessor:
             
             # 设置请求头，模拟浏览器访问
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
             }
             
             # 获取文章内容
@@ -68,10 +72,38 @@ class InputProcessor:
             
             html = response.text
             
-            # 微信公众号文章的HTML结构：内容通常在 <div id="js_content"> 或类似的容器中
-            # 尝试多种可能的选择器
-            import re
+            # 使用BeautifulSoup提取（如果可用）
+            if HAS_BS4:
+                try:
+                    soup = BeautifulSoup(html, 'lxml')
+                    
+                    # 移除脚本、样式等
+                    for element in soup(["script", "style", "noscript", "iframe", "nav", "header", "footer", "aside"]):
+                        element.decompose()
+                    
+                    # 微信公众号文章的主要内容在 id="js_content" 的div中
+                    content_div = soup.find('div', id='js_content')
+                    if not content_div:
+                        # 尝试查找其他可能的内容容器
+                        content_div = soup.find('div', class_=re.compile(r'rich_media_content', re.I))
+                    
+                    if content_div:
+                        # 提取文本，保留段落结构
+                        text = content_div.get_text(separator='\n', strip=True)
+                        
+                        # 清理文本
+                        text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)  # 多个换行合并为两个
+                        text = text.strip()
+                        
+                        if len(text) > 100:
+                            logger.info(f"BeautifulSoup提取微信公众号文章成功: {len(text)} 字符")
+                            return text
+                        else:
+                            logger.warning(f"BeautifulSoup提取的内容过短（{len(text)}字符），尝试备用方法")
+                except Exception as e:
+                    logger.warning(f"BeautifulSoup提取失败: {str(e)}，尝试备用方法")
             
+            # 备用方法：使用正则表达式
             # 方法1: 查找 js_content 容器
             content_match = re.search(r'<div[^>]*id=["\']js_content["\'][^>]*>(.*?)</div>', html, re.DOTALL | re.IGNORECASE)
             if content_match:
@@ -82,8 +114,7 @@ class InputProcessor:
                 if content_match:
                     content_html = content_match.group(1)
                 else:
-                    # 方法3: 尝试查找包含文章正文的区域（通常包含多个段落）
-                    # 查找包含 <p> 标签较多的区域
+                    # 方法3: 尝试查找包含文章正文的区域
                     content_match = re.search(r'<div[^>]*>(.*?<p[^>]*>.*?</p>.*?)</div>', html, re.DOTALL | re.IGNORECASE)
                     if content_match:
                         content_html = content_match.group(1)
@@ -92,7 +123,6 @@ class InputProcessor:
                         content_html = html
             
             # 提取纯文本：移除HTML标签
-            # 先处理一些特殊的标签
             content_html = re.sub(r'<script[^>]*>.*?</script>', '', content_html, flags=re.DOTALL | re.IGNORECASE)
             content_html = re.sub(r'<style[^>]*>.*?</style>', '', content_html, flags=re.DOTALL | re.IGNORECASE)
             content_html = re.sub(r'<iframe[^>]*>.*?</iframe>', '', content_html, flags=re.DOTALL | re.IGNORECASE)
@@ -106,19 +136,33 @@ class InputProcessor:
             text = re.sub(r'<[^>]+>', '', content_html)
             
             # 清理文本：移除多余的空白字符
+            text = re.sub(r'&nbsp;', ' ', text)
+            text = re.sub(r'&lt;', '<', text)
+            text = re.sub(r'&gt;', '>', text)
+            text = re.sub(r'&amp;', '&', text)
+            text = re.sub(r'&quot;', '"', text)
+            text = re.sub(r'&apos;', "'", text)
             text = re.sub(r'\s+', ' ', text)  # 多个空格合并为一个
             text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)  # 多个换行合并为两个
             text = text.strip()
             
-            # 如果提取的文本太短（可能是提取失败），尝试其他方法
+            # 如果提取的文本太短（可能是提取失败），尝试使用html2text
+            if len(text) < 100 and HAS_HTML2TEXT:
+                try:
+                    logger.warning(f"正则提取的文本内容过短（{len(text)}字符），尝试使用html2text")
+                    h = html2text.HTML2Text()
+                    h.ignore_links = True
+                    h.ignore_images = True
+                    h.body_width = 0
+                    text = h.handle(html)
+                    text = re.sub(r'\s+', ' ', text)
+                    text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)
+                    text = text.strip()
+                except Exception as e:
+                    logger.warning(f"html2text提取失败: {str(e)}")
+            
             if len(text) < 100:
-                logger.warning(f"提取的文本内容过短（{len(text)}字符），尝试备用方法")
-                # 尝试使用正则表达式直接提取可见文本
-                text = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
-                text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
-                text = re.sub(r'<[^>]+>', '', text)
-                text = re.sub(r'\s+', ' ', text)
-                text = text.strip()
+                raise Exception(f'无法从微信公众号文章提取有效文本内容（仅提取到{len(text)}字符，内容: "{text[:50]}..."）。可能原因：1) 文章需要登录才能查看；2) 文章已被删除；3) 网页结构发生变化。建议：1) 复制文章文本内容直接输入；2) 使用"文字+指令"类型')
             
             logger.info(f"微信公众号文章提取成功: {len(text)} 字符")
             return text
@@ -133,6 +177,7 @@ class InputProcessor:
     def _extract_with_playwright(self, url: str, timeout: int = 30) -> Optional[str]:
         """
         使用Playwright提取需要JavaScript渲染的网页内容
+        使用线程来避免在异步环境中使用同步API的问题
         
         Args:
             url: 网页URL
@@ -146,59 +191,84 @@ class InputProcessor:
         
         try:
             logger.info(f"尝试使用Playwright提取网页内容: {url}")
-            with sync_playwright() as p:
-                # 启动浏览器（使用chromium）
-                browser = p.chromium.launch(headless=True)
-                context = browser.new_context(
-                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                )
-                page = context.new_page()
-                
-                # 访问页面并等待内容加载
-                page.goto(url, wait_until='networkidle', timeout=timeout * 1000)
-                
-                # 等待页面内容加载（额外等待2秒）
-                page.wait_for_timeout(2000)
-                
-                # 获取页面HTML
-                html = page.content()
-                
-                browser.close()
-                
-                # 使用BeautifulSoup或html2text提取文本
-                if HAS_BS4:
-                    soup = BeautifulSoup(html, 'lxml')
-                    # 移除脚本和样式
-                    for script in soup(["script", "style", "noscript", "iframe"]):
-                        script.decompose()
-                    # 提取文本
-                    text = soup.get_text(separator='\n', strip=True)
-                elif HAS_HTML2TEXT:
-                    h = html2text.HTML2Text()
-                    h.ignore_links = True
-                    h.ignore_images = True
-                    text = h.handle(html)
-                else:
-                    # 基础方法
-                    html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
-                    html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
-                    text = re.sub(r'<[^>]+>', '', html)
-                
-                # 清理文本
-                text = re.sub(r'\s+', ' ', text)
-                text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)
-                text = text.strip()
-                
-                if len(text) > 100:
-                    logger.info(f"Playwright提取成功: {len(text)} 字符")
-                    return text
-                else:
-                    logger.warning(f"Playwright提取的内容过短: {len(text)} 字符")
-                    return None
+            
+            # 使用线程来运行同步的Playwright代码，避免在异步环境中出错
+            result = [None]
+            exception = [None]
+            
+            def run_playwright():
+                try:
+                    with sync_playwright() as p:
+                        # 启动浏览器（使用chromium）
+                        browser = p.chromium.launch(headless=True)
+                        context = browser.new_context(
+                            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                        )
+                        page = context.new_page()
+                        
+                        # 访问页面并等待内容加载
+                        page.goto(url, wait_until='networkidle', timeout=timeout * 1000)
+                        
+                        # 等待页面内容加载（额外等待2秒）
+                        page.wait_for_timeout(2000)
+                        
+                        # 获取页面HTML
+                        html = page.content()
+                        
+                        browser.close()
+                        
+                        # 使用BeautifulSoup或html2text提取文本
+                        if HAS_BS4:
+                            soup = BeautifulSoup(html, 'lxml')
+                            # 移除脚本和样式
+                            for script in soup(["script", "style", "noscript", "iframe"]):
+                                script.decompose()
+                            # 提取文本
+                            text = soup.get_text(separator='\n', strip=True)
+                        elif HAS_HTML2TEXT:
+                            h = html2text.HTML2Text()
+                            h.ignore_links = True
+                            h.ignore_images = True
+                            text = h.handle(html)
+                        else:
+                            # 基础方法
+                            html_clean = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
+                            html_clean = re.sub(r'<style[^>]*>.*?</style>', '', html_clean, flags=re.DOTALL | re.IGNORECASE)
+                            text = re.sub(r'<[^>]+>', '', html_clean)
+                        
+                        # 清理文本
+                        text = re.sub(r'\s+', ' ', text)
+                        text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)
+                        text = text.strip()
+                        
+                        if len(text) > 100:
+                            logger.info(f"Playwright提取成功: {len(text)} 字符")
+                            result[0] = text
+                        else:
+                            logger.warning(f"Playwright提取的内容过短: {len(text)} 字符")
+                            result[0] = None
+                except PlaywrightTimeoutError as e:
+                    logger.warning(f"Playwright超时: {url}")
+                    exception[0] = e
+                except Exception as e:
+                    logger.warning(f"Playwright提取失败: {str(e)}")
+                    exception[0] = e
+            
+            # 在线程中运行Playwright
+            thread = threading.Thread(target=run_playwright)
+            thread.daemon = True
+            thread.start()
+            thread.join(timeout=timeout + 10)  # 给线程额外的10秒缓冲时间
+            
+            if thread.is_alive():
+                logger.warning(f"Playwright线程超时: {url}")
+                return None
+            
+            if exception[0]:
+                return None
+            
+            return result[0]
                     
-        except PlaywrightTimeoutError:
-            logger.warning(f"Playwright超时: {url}")
-            return None
         except Exception as e:
             logger.warning(f"Playwright提取失败: {str(e)}")
             return None
@@ -220,8 +290,13 @@ class InputProcessor:
         try:
             logger.info(f"正在提取网页内容: {url}")
             
-            # 检测特殊网站（需要JavaScript渲染的网站）
+            # 检测是否是微信公众号文章URL，如果是则使用专门的方法
             url_lower = url.lower()
+            if 'mp.weixin.qq.com' in url_lower:
+                logger.info("检测到微信公众号文章URL，使用专门提取方法")
+                return self.extract_text_from_wechat_article(url, timeout)
+            
+            # 检测特殊网站（需要JavaScript渲染的网站）
             special_sites = {
                 'weibo.com': '微博网站需要JavaScript渲染',
                 'twitter.com': 'Twitter网站需要JavaScript渲染',
