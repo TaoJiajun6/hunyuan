@@ -27,7 +27,7 @@ export class PodcastConfig {
   // 5. 直连服务器IP（推荐，避免网关超时）：设置为服务器的公网/内网IP和端口
   //    例如：'http://9.165.4.87:8000' 或 'http://192.168.1.100:8000'
   //    注意：确保服务器防火墙允许8000端口访问
-  static readonly API_BASE_URL: string = 'http://119.91.72.165:8000/'; // 请替换为实际的服务器IP地址
+  static readonly API_BASE_URL: string = 'http://106.52.246.138:8000/'; // 请替换为实际的服务器IP地址
   static readonly API_TIMEOUT: number = 600000; // 10分钟超时（考虑大文件上传和播客生成时间）
 
   
@@ -423,6 +423,7 @@ export interface PodcastListItem {
   topic?: string;
   roles?: string[];
   content?: string; // 内容预览（script的前100字符）
+  cover_image_url?: string; // 封面图URL
 }
 
 /**
@@ -1555,6 +1556,73 @@ export class PodcastService {
       return null;
     }
   }
+
+  /**
+   * 获取音色文件列表
+   * @returns 音色文件列表
+   */
+  async getVoiceList(): Promise<VoiceInfo[]> {
+    return new Promise((resolve) => {
+      try {
+        const url = `${PodcastConfig.API_BASE_URL}api/v1/podcast/voices`;
+        Logger.info(TAG, `获取音色列表: ${url}`);
+        
+        const httpRequest = http.createHttp();
+        httpRequest.request(url, {
+          method: http.RequestMethod.GET,
+          header: {
+            'Content-Type': 'application/json'
+          },
+          connectTimeout: 30000,
+          readTimeout: 30000
+        }, (err: BusinessError, data: http.HttpResponse) => {
+          httpRequest.destroy();
+          
+          if (err) {
+            Logger.error(TAG, `获取音色列表失败: ${JSON.stringify(err)}`);
+            resolve([]);
+            return;
+          }
+
+          if (data.responseCode === 200) {
+            try {
+              const result = JSON.parse(data.result.toString()) as ApiResponse<{ voices: VoiceInfo[] }>;
+              if (result.success && result.data && result.data.voices) {
+                Logger.info(TAG, `获取到 ${result.data.voices.length} 个音色文件`);
+                resolve(result.data.voices);
+              } else {
+                Logger.warn(TAG, `获取音色列表返回空数据: ${JSON.stringify(result)}`);
+                resolve([]);
+              }
+            } catch (parseError) {
+              Logger.error(TAG, `解析音色列表响应失败: ${JSON.stringify(parseError)}`);
+              resolve([]);
+            }
+          } else {
+            Logger.error(TAG, `获取音色列表失败: HTTP ${data.responseCode}`);
+            resolve([]);
+          }
+        });
+      } catch (error) {
+        Logger.error(TAG, `获取音色列表异常: ${JSON.stringify(error)}`);
+        resolve([]);
+      }
+    });
+  }
+}
+
+/**
+ * 音色信息
+ */
+export interface VoiceInfo {
+  id: string; // 音色ID
+  name: string; // 显示名称
+  description: string; // 描述
+  file: string; // 文件名
+  url: string; // 云存储下载URL
+  cloud_path?: string; // 云存储路径
+  gender: 'male' | 'female' | 'neutral'; // 性别
+  style: string; // 风格
 }
 
 export const podcastService = PodcastService.getInstance();

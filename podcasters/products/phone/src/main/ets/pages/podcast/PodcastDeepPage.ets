@@ -13,6 +13,9 @@ interface SelectOption {
   value: string;
 }
 
+// 按钮颜色数组常量
+const BUTTON_COLORS = ['#ffb3e0', '#ffc78cfd', '#a0e5ff'];
+
 @Builder
 export function PodcastDeepPageBuilder() {
   PodcastDeepPage()
@@ -396,7 +399,7 @@ export struct PodcastDeepPage {
                 .height(36)
                 .borderRadius(18)
                 .backgroundColor(this.numCharacters === 1 ?
-                  $r('sys.color.icon_emphasize') :
+                  '#ffb3e0' :
                   $r('sys.color.comp_background_tertiary'))
                 .onClick(() => {
                   this.numCharacters = 1;
@@ -413,7 +416,7 @@ export struct PodcastDeepPage {
                 .height(36)
                 .borderRadius(18)
                 .backgroundColor(this.numCharacters === 2 ?
-                  $r('sys.color.icon_emphasize') :
+                  '#ffc78cfd' :
                   $r('sys.color.comp_background_tertiary'))
                 .onClick(() => {
                   this.numCharacters = 2;
@@ -430,7 +433,7 @@ export struct PodcastDeepPage {
                 .height(36)
                 .borderRadius(18)
                 .backgroundColor(this.numCharacters === 3 ?
-                  $r('sys.color.icon_emphasize') :
+                  '#a0e5ff' :
                   $r('sys.color.comp_background_tertiary'))
                 .onClick(() => {
                   this.numCharacters = 3;
@@ -465,7 +468,7 @@ export struct PodcastDeepPage {
                 .alignSelf(ItemAlign.Start)
 
               Row({ space: 8 }) {
-                ForEach(this.depthLevels, (level: string) => {
+                ForEach(this.depthLevels, (level: string, index: number) => {
                   Button() {
                     Text(level)
                       .fontSize($r('sys.float.Body_M'))
@@ -477,7 +480,7 @@ export struct PodcastDeepPage {
                   .height(36)
                   .borderRadius(18)
                   .backgroundColor(this.depthLevel === level ?
-                    $r('sys.color.icon_emphasize') :
+                    BUTTON_COLORS[index] :
                     $r('sys.color.comp_background_tertiary'))
                   .onClick(() => {
                     this.depthLevel = level;
@@ -496,7 +499,7 @@ export struct PodcastDeepPage {
                 .fontWeight(FontWeight.Bold)
                 .alignSelf(ItemAlign.Start)
 
-              ForEach(this.roleNames.slice(0, this.numCharacters), (roleName: string) => {
+              ForEach(this.roleNames.slice(0, this.numCharacters), (roleName: string, index: number) => {
                 Row({ space: 12 }) {
                   Text(roleName)
                     .fontSize($r('sys.float.Body_M'))
@@ -508,7 +511,7 @@ export struct PodcastDeepPage {
                     .type(ButtonType.Normal)
                     .borderRadius(10)
                     .backgroundColor(this.roleVoiceUrls[roleName] ?
-                      $r('sys.color.icon_emphasize') :
+                      BUTTON_COLORS[index % 3] :
                       $r('sys.color.comp_background_tertiary'))
                     .fontColor(this.roleVoiceUrls[roleName] ?
                       $r('sys.color.font_on_primary') :

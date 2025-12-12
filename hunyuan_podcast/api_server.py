@@ -1558,6 +1558,126 @@ def calculate_upload_timeout(file_path: str, base_timeout: int = 120) -> int:
     return base_timeout
 
 
+async def generate_and_upload_cover_image(
+    podcast_id: str,
+    podcast_title: str,
+    text_content: str,
+    topic: Optional[str],
+    category: Optional[str],
+    roles: Optional[List[str]],
+    background_tasks: BackgroundTasks,
+    request_job_id: Optional[str] = None
+) -> Optional[str]:
+    """
+    生成并上传播客封面图
+    
+    Args:
+        podcast_id: 播客ID
+        podcast_title: 播客标题
+        text_content: 播客文本内容
+        topic: 播客主题
+        category: 播客分类
+        roles: 角色列表
+        background_tasks: 后台任务管理器
+        request_job_id: 请求任务ID（用于更新进度）
+    
+    Returns:
+        封面图URL（如果生成成功）
+    """
+    try:
+        logger.info("开始生成播客封面图...")
+        if request_job_id:
+            _update_progress(request_job_id, "generating_cover", 98, "正在生成封面图")
+        
+        # 调用封面图生成API
+        cover_request = GenerateCoverRequest(
+            text=text_content[:500] if text_content else None,  # 只使用前500字
+            topic=topic,
+            podcast_name=podcast_title,
+            category=category,
+            characters=roles if roles else None
+        )
+        
+        cover_result = await generate_podcast_cover(cover_request)
+        
+        if cover_result.success and cover_result.data and cover_result.data.get('image_url'):
+            cover_image_url_raw = cover_result.data['image_url']
+            
+            # 如果返回的是base64，需要先保存为文件再上传
+            if cover_image_url_raw.startswith('data:image'):
+                # 提取base64数据
+                import base64
+                from io import BytesIO
+                from PIL import Image
+                
+                # 解析base64数据
+                header, encoded = cover_image_url_raw.split(',', 1)
+                image_data = base64.b64decode(encoded)
+                
+                # 保存为临时文件
+                cover_temp_path = os.path.join(OUTPUT_DIR, f"cover_{podcast_id}.png")
+                with open(cover_temp_path, 'wb') as f:
+                    f.write(image_data)
+                
+                # 上传封面图到云存储
+                try:
+                    agc_storage_url = os.getenv('AGC_STORAGE_URL')
+                    agc_bucket = os.getenv('AGC_BUCKET')
+                    agc_domain = os.getenv('AGC_STORAGE_DOMAIN') or os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
+                    agc_client_id = os.getenv('AGC_STORAGE_CLIENT_ID') or os.getenv('AGC_CLIENT_ID')
+                    agc_client_secret = os.getenv('AGC_STORAGE_CLIENT_SECRET') or os.getenv('AGC_CLIENT_SECRET')
+                    agc_product_id = os.getenv('AGC_PRODUCT_ID')
+                    
+                    if not agc_client_id or not agc_client_secret:
+                        cfg_path = _find_agc_client_json()
+                        if cfg_path:
+                            cid, csecret, proj = _load_agc_credentials_from_file(cfg_path)
+                            agc_client_id = agc_client_id or cid
+                            agc_client_secret = agc_client_secret or csecret
+                            agc_product_id = agc_product_id or proj
+                    
+                    if agc_storage_url and agc_bucket and agc_client_id and agc_client_secret:
+                        # 上传封面图
+                        cover_object_name = f"outputs/podcasts/covers/cover_{podcast_id}.png"
+                        
+                        # 使用后台上传，避免阻塞
+                        background_tasks.add_task(
+                            do_agc_upload,
+                            cover_temp_path,
+                            agc_storage_url,
+                            agc_bucket,
+                            agc_product_id,
+                            agc_domain,
+                            cover_object_name,
+                            agc_client_id,
+                            agc_client_secret
+                        )
+                        
+                        # 构建封面图URL（使用云存储URL格式）
+                        cover_image_url = f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{cover_object_name}"
+                        logger.info(f"封面图已加入上传队列: {cover_object_name}")
+                        return cover_image_url
+                    else:
+                        # 如果没有配置云存储，使用base64 URL
+                        logger.warning("未配置云存储，封面图使用base64格式")
+                        return cover_image_url_raw
+                except Exception as upload_error:
+                    logger.warning(f"上传封面图失败（不影响主流程）: {upload_error}")
+                    # 如果上传失败，使用base64 URL
+                    return cover_image_url_raw
+            else:
+                # 如果返回的是URL，直接使用
+                return cover_image_url_raw
+            
+            logger.info("封面图生成成功")
+        else:
+            logger.warning("封面图生成失败或返回数据为空")
+            return None
+    except Exception as e:
+        logger.warning(f"生成封面图失败（不影响主流程）: {e}", exc_info=True)
+        return None
+
+
 def do_agc_upload(output_path: str, storage_url: str, bucket: str, product_id: Optional[str] = None,
                   domain: str = 'connect-api.cloud.huawei.com', client_id: Optional[str] = None,
                   client_secret: Optional[str] = None, job_id: Optional[str] = None, object_name: Optional[str] = None):
@@ -2363,6 +2483,99 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
             # 尝试获取音频时长
             duration_seconds = get_audio_duration(output_path)
             
+            # 生成封面图
+            cover_image_url = None
+            try:
+                logger.info("开始生成播客封面图...")
+                _update_progress(request.job_id, "generating_cover", 98, "正在生成封面图")
+                
+                # 调用封面图生成API
+                cover_request = GenerateCoverRequest(
+                    text=text_content[:500] if text_content else None,  # 只使用前500字
+                    topic=request.topic,
+                    podcast_name=podcast_title,
+                    category=request.category,
+                    characters=list(roles) if roles else None
+                )
+                
+                cover_result = await generate_podcast_cover(cover_request)
+                
+                if cover_result.success and cover_result.data and cover_result.data.get('image_url'):
+                    cover_image_url_raw = cover_result.data['image_url']
+                    
+                    # 如果返回的是base64，需要先保存为文件再上传
+                    if cover_image_url_raw.startswith('data:image'):
+                        # 提取base64数据
+                        import base64
+                        from io import BytesIO
+                        from PIL import Image
+                        
+                        # 解析base64数据
+                        header, encoded = cover_image_url_raw.split(',', 1)
+                        image_data = base64.b64decode(encoded)
+                        
+                        # 保存为临时文件
+                        cover_temp_path = os.path.join(OUTPUT_DIR, f"cover_{podcast_id}.png")
+                        with open(cover_temp_path, 'wb') as f:
+                            f.write(image_data)
+                        
+                        # 上传封面图到云存储
+                        try:
+                            agc_storage_url = os.getenv('AGC_STORAGE_URL')
+                            agc_bucket = os.getenv('AGC_BUCKET')
+                            agc_domain = os.getenv('AGC_STORAGE_DOMAIN') or os.getenv('AGC_DOMAIN', 'connect-api.cloud.huawei.com')
+                            agc_client_id = os.getenv('AGC_STORAGE_CLIENT_ID') or os.getenv('AGC_CLIENT_ID')
+                            agc_client_secret = os.getenv('AGC_STORAGE_CLIENT_SECRET') or os.getenv('AGC_CLIENT_SECRET')
+                            agc_product_id = os.getenv('AGC_PRODUCT_ID')
+                            
+                            if not agc_client_id or not agc_client_secret:
+                                cfg_path = _find_agc_client_json()
+                                if cfg_path:
+                                    cid, csecret, proj = _load_agc_credentials_from_file(cfg_path)
+                                    agc_client_id = agc_client_id or cid
+                                    agc_client_secret = agc_client_secret or csecret
+                                    agc_product_id = agc_product_id or proj
+                            
+                            if agc_storage_url and agc_bucket and agc_client_id and agc_client_secret:
+                                # 上传封面图
+                                cover_object_name = f"outputs/podcasts/covers/cover_{podcast_id}.png"
+                                
+                                # 使用后台上传，避免阻塞
+                                background_tasks.add_task(
+                                    do_agc_upload,
+                                    cover_temp_path,
+                                    agc_storage_url,
+                                    agc_bucket,
+                                    agc_product_id,
+                                    agc_domain,
+                                    cover_object_name,
+                                    agc_client_id,
+                                    agc_client_secret
+                                )
+                                
+                                # 构建封面图URL（使用云存储URL格式）
+                                # 注意：这里假设上传成功后会返回URL，实际可能需要等待上传完成
+                                # 为了不阻塞，先使用预期的URL格式
+                                cover_image_url = f"{agc_storage_url.rstrip('/')}/{agc_bucket}/{cover_object_name}"
+                                logger.info(f"封面图已加入上传队列: {cover_object_name}")
+                            else:
+                                # 如果没有配置云存储，使用base64 URL
+                                cover_image_url = cover_image_url_raw
+                                logger.warning("未配置云存储，封面图使用base64格式")
+                        except Exception as upload_error:
+                            logger.warning(f"上传封面图失败（不影响主流程）: {upload_error}")
+                            # 如果上传失败，使用base64 URL
+                            cover_image_url = cover_image_url_raw
+                    else:
+                        # 如果返回的是URL，直接使用
+                        cover_image_url = cover_image_url_raw
+                    
+                    logger.info("封面图生成成功")
+                else:
+                    logger.warning("封面图生成失败或返回数据为空")
+            except Exception as e:
+                logger.warning(f"生成封面图失败（不影响主流程）: {e}", exc_info=True)
+            
             podcast_metadata = {
                 "id": podcast_id,  # 使用独立的podcast_id作为数据库id
                 "title": podcast_title,
@@ -2375,7 +2588,8 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 "script": text_content,
                 "file_size_mb": round(file_size, 2),
                 "topic": request.topic,
-                "roles": list(roles)
+                "roles": list(roles),
+                "cover_image_url": cover_image_url  # 添加封面图URL
             }
             
             # 保存到AGC云数据库（如果配置了）
@@ -2400,7 +2614,8 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 "script": text_content,
                     "roles": list(roles),
                     "title": podcast_title,
-                    "topic": request.topic
+                    "topic": request.topic,
+                    "cover_image_url": cover_image_url  # 添加封面图URL
                 }
             if agc_result:
                 data['agc_upload_status'] = agc_result
@@ -2780,6 +2995,18 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
             # 获取角色名称列表
             character_names = [char.name for char in request.characters]
             
+            # 生成封面图
+            cover_image_url = await generate_and_upload_cover_image(
+                podcast_id=podcast_id,
+                podcast_title=podcast_title,
+                text_content=cleaned_text,
+                topic=request.topic,
+                category=request.category,
+                roles=character_names,
+                background_tasks=background_tasks,
+                request_job_id=request.job_id
+            )
+            
             podcast_metadata = {
                 "id": podcast_id,  # 使用独立的podcast_id作为数据库id
                 "title": podcast_title,
@@ -2792,7 +3019,8 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
                 "script": cleaned_text,
                 "file_size_mb": round(file_size, 2),
                 "topic": request.topic,
-                "roles": character_names
+                "roles": character_names,
+                "cover_image_url": cover_image_url  # 添加封面图URL
             }
             
             # 保存到AGC云数据库（如果配置了）
@@ -2815,7 +3043,8 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
                 "audio_path": output_path,  # 默认使用本地路径
                     "file_size_mb": round(file_size, 2),
                     "script": cleaned_text,
-                    "characters": character_names
+                    "characters": character_names,
+                    "cover_image_url": cover_image_url  # 添加封面图URL
                 }
             if agc_result:
                 data['agc_upload_status'] = agc_result
@@ -3172,6 +3401,18 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
             # 获取角色名称列表（从解析的对话中提取）
             roles_list = list(unique_roles)
             
+            # 生成封面图
+            cover_image_url = await generate_and_upload_cover_image(
+                podcast_id=podcast_id,
+                podcast_title=podcast_title,
+                text_content=cleaned_text,
+                topic=request.topic,
+                category=request.category,
+                roles=roles_list,
+                background_tasks=background_tasks,
+                request_job_id=request.job_id
+            )
+            
             podcast_metadata = {
                 "id": podcast_id,  # 使用独立的podcast_id作为数据库id
                 "title": podcast_title,
@@ -3184,7 +3425,8 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
                 "script": cleaned_text,
                 "file_size_mb": round(file_size, 2),
                 "topic": request.topic,
-                "roles": roles_list
+                "roles": roles_list,
+                "cover_image_url": cover_image_url  # 添加封面图URL
             }
             
             # 保存到AGC云数据库（如果配置了）
@@ -3208,7 +3450,8 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
                     "file_size_mb": round(file_size, 2),
                     "script": cleaned_text,
                     "topic": request.topic,
-                    "depth_level": request.depth_level
+                    "depth_level": request.depth_level,
+                    "cover_image_url": cover_image_url  # 添加封面图URL
                 }
             if agc_result:
                 data['agc_upload_status'] = agc_result
@@ -3654,6 +3897,131 @@ async def upload_voice_file(request: UploadVoiceRequest):
             error=str(e),
             data={"traceback": error_detail}
         )
+
+
+@app.get("/api/v1/podcast/voices", response_model=ApiResponse)
+async def list_voice_files():
+    """
+    获取云存储中的音色文件列表
+    
+    返回云存储 voices/ 目录下的所有音频文件列表，包括文件名、下载URL等信息
+    
+    返回格式：
+    - **voices**: 音色文件列表，每个元素包含：
+      - **id**: 音色ID（文件名）
+      - **name**: 显示名称（从文件名推断）
+      - **description**: 描述（从文件名推断）
+      - **file**: 文件名
+      - **url**: 云存储下载URL
+      - **gender**: 性别（从文件名推断：male/female/neutral）
+      - **style**: 风格（从文件名推断）
+    """
+    try:
+        from .cloud_storage_music import CloudStorageMusicClient
+        
+        # 创建云存储客户端，指定voices目录
+        storage_url = os.getenv('AGC_STORAGE_URL')
+        bucket = os.getenv('AGC_BUCKET')
+        
+        if not storage_url or not bucket:
+            # 如果没有配置云存储，返回空列表
+            logger.warning("未配置云存储，返回空音色列表")
+            return ApiResponse(
+                success=True,
+                message="未配置云存储",
+                data={"voices": []}
+            )
+        
+        # 创建客户端，指定voices目录
+        voice_client = CloudStorageMusicClient(
+            storage_url=storage_url,
+            bucket=bucket,
+            music_path="voices/"  # 音色文件存放在voices目录
+        )
+        
+        # 获取文件列表
+        voice_files = voice_client.list_music_files()
+        
+        # 转换为前端需要的格式
+        voices = []
+        for voice_file in voice_files:
+            filename = voice_file.get('name', '')
+            cloud_path = voice_file.get('cloud_path', '')
+            url = voice_file.get('url', '')
+            
+            # 从文件名推断信息
+            filename_lower = filename.lower()
+            
+            # 推断性别
+            gender = 'neutral'
+            if 'male' in filename_lower or '男' in filename or '男声' in filename:
+                gender = 'male'
+            elif 'female' in filename_lower or '女' in filename or '女声' in filename:
+                gender = 'female'
+            
+            # 推断风格
+            style = '自然'
+            style_keywords = {
+                '沉稳': ['沉稳', 'steady', 'stable'],
+                '活泼': ['活泼', 'lively', 'energetic'],
+                '温柔': ['温柔', 'gentle', 'sweet'],
+                '知性': ['知性', 'intelligent', 'wise'],
+                '自然': ['自然', 'natural', 'normal']
+            }
+            for style_name, keywords in style_keywords.items():
+                if any(kw in filename_lower for kw in keywords):
+                    style = style_name
+                    break
+            
+            # 生成显示名称
+            display_name = filename
+            if gender == 'male':
+                display_name = f"男声-{style}"
+            elif gender == 'female':
+                display_name = f"女声-{style}"
+            else:
+                display_name = f"中性-{style}"
+            
+            # 生成描述
+            description = ""
+            if gender == 'male':
+                description = f"{style}大气的男声"
+            elif gender == 'female':
+                description = f"{style}甜美的女声"
+            else:
+                description = f"{style}流畅的中性声音"
+            
+            # 生成ID（使用文件名，去掉扩展名）
+            voice_id = os.path.splitext(filename)[0]
+            # 如果文件名包含路径，只取文件名部分
+            if '/' in voice_id:
+                voice_id = os.path.basename(voice_id)
+            
+            voices.append({
+                "id": f"voice_{voice_id}",
+                "name": display_name,
+                "description": description,
+                "file": filename,
+                "url": url,
+                "cloud_path": cloud_path,
+                "gender": gender,
+                "style": style
+            })
+        
+        # 按性别和风格排序
+        voices.sort(key=lambda x: (x['gender'], x['style'], x['name']))
+        
+        logger.info(f"获取到 {len(voices)} 个音色文件")
+        
+        return ApiResponse(
+            success=True,
+            message=f"获取到 {len(voices)} 个音色文件",
+            data={"voices": voices}
+        )
+        
+    except Exception as e:
+        logger.error(f"获取音色文件列表失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取音色文件列表失败: {str(e)}")
 
 
 @app.get("/api/v1/podcast/proxy_audio")

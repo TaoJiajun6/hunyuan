@@ -150,7 +150,7 @@ export struct PlayerLyrics {
       }
       .width('100%')
       .margin({
-        top: 48,
+        top: 100,
         bottom: 24
       })
 

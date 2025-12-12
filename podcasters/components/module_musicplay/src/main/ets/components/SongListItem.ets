@@ -90,7 +90,7 @@ export struct SongListItem {
           .fontSize(16)
           .margin({ bottom: 4 })
         Row({ space: 4 }) {
-          Image($r('app.media.zhibozhong'))
+          Image($r('app.media.ic_music_icon'))
             .width(16)
             .height(16)
             .fillColor(this.getColor())
@@ -110,7 +110,7 @@ export struct SongListItem {
       SymbolGlyph($r('sys.symbol.xmark'))
         .fontSize(23)
         .symbolEffect(new ReplaceSymbolEffect(EffectScope.WHOLE), true)
-        .fontColor([Color.Black])
+        .fontColor([$r('sys.color.ohos_id_color_text_primary')])
         .onClick(() => {
           MediaService.getInstance().removeSongById(this.item.id)
         })
@@ -122,6 +122,7 @@ export struct SongListItem {
       top: 12,
       bottom: 12
     })
+    .backgroundColor($r('sys.color.ohos_id_color_sub_background'))
     .onClick(() => {
       if (this.isCanPlay && !(this.item.id === this.musicModel.currentSong?.id)) {
         MediaService.getInstance().controlPlay(this.index);

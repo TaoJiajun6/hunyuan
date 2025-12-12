@@ -12,7 +12,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { promptAction } from '@kit.ArkUI';
+import { promptAction, window } from '@kit.ArkUI';
 import { MediaService } from '../utils/MediaService';
 import { getMusicModel } from '../viewmodel/MusicModel';
 
@@ -20,6 +20,31 @@ import { getMusicModel } from '../viewmodel/MusicModel';
 export struct PlayerTopArea {
   @Event changenShowPlay: (value: boolean) => void = (value: boolean) => {
   };
+  @Local statusBarHeight: number = 0;
+
+  aboutToAppear(): void {
+    // 优先从 AppStorage 获取，如果没有则从 window 直接获取
+    let storedHeight = AppStorage.get('statusBarHeight') as number;
+    if (storedHeight && storedHeight > 0) {
+      this.statusBarHeight = storedHeight;
+    } else {
+      // 如果 AppStorage 中没有，尝试从 window 直接获取
+      try {
+        let windowStage = AppStorage.get('windowStage') as window.WindowStage;
+        if (windowStage) {
+          let windowClass = windowStage.getMainWindowSync();
+          let avoidArea = windowClass.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
+          this.statusBarHeight = px2vp(avoidArea.topRect.height);
+        } else {
+          // 默认值
+          this.statusBarHeight = 40;
+        }
+      } catch (error) {
+        // 如果获取失败，使用默认值
+        this.statusBarHeight = 40;
+      }
+    }
+  }
 
   build() {
     Row() {
@@ -29,28 +54,14 @@ export struct PlayerTopArea {
         .onClick(() => {
           this.changenShowPlay(false);
         })
-
-      Image($r('app.media.ic_mv'))
-        .width(38)
-        .height(38)
-        .onClick(() => {
-          if (!getMusicModel().currentSong?.mvUrl) {
-            promptAction.showToast({ message: '无MV文件' });
-            return
-          }
-          MediaService.getInstance().pause()
-          this.changenShowPlay(false);
-          if (getMusicModel().currentSong && getMusicModel().currentSong?.mvUrl) {
-            MediaService.getInstance().playMv(getMusicModel().currentSong?.mvUrl ?? '')
-          }
-        })
     }
     .height(48)
     .width('100%')
     .justifyContent(FlexAlign.SpaceBetween)
     .padding({
-      left: 24,
-      right: 24
+      left: 20,
+      right: 20,
+      top: this.statusBarHeight + 10
     })
   }
 }

@@ -74,6 +74,11 @@
       "name": "PodcastDeepPage",
       "pageSourceFile": "src/main/ets/pages/podcast/PodcastDeepPage.ets",
       "buildFunction": "PodcastDeepPageBuilder"
+    },
+    {
+      "name": "VoiceClonePage",
+      "pageSourceFile": "src/main/ets/pages/podcast/VoiceClonePage.ets",
+      "buildFunction": "VoiceClonePageBuilder"
     }
   ]
 }

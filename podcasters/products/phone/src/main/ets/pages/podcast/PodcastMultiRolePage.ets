@@ -1,6 +1,6 @@
 import { WindowModel } from 'lib_common';
 import { NavHeaderBar } from 'lib_widget';
-import { podcastService, MultiRoleRequest, PodcastResult, ProgressStatus } from 'lib_api';
+import { podcastService, MultiRoleRequest, PodcastResult, ProgressStatus, VoiceInfo } from 'lib_api';
 import { FileUtils, TextFileInfo } from '../../utils/FileUtils';
 import { promptAction, AppStorageV2 } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
@@ -12,6 +12,9 @@ import { Logger } from 'lib_common';
 interface SelectOption {
   value: string;
 }
+
+// 按钮颜色数组常量
+const BUTTON_COLORS = ['#ffb3e0', '#ffc78cfd', '#a0e5ff'];
 
 @Builder
 export function PodcastMultiRolePageBuilder() {
@@ -30,9 +33,13 @@ export struct PodcastMultiRolePage {
   @Local roleVoiceUrls: Record<string, string> = {}; // 角色名 -> 云存储URL（必需）
   @Local roleNames: string[] = ['角色A', '角色B'];
   @Local isLoading: boolean = false;
+  @Local voiceList: VoiceInfo[] = []; // 从API获取的音色列表
+  @Local showVoiceSelector: boolean = false; // 是否显示音色选择器
+  @Local currentSelectingRole: string = ''; // 当前正在选择音色的角色
   @Local jobId: string = '';
   @Local progressPercent: number = 0;
   @Local progressMessage: string = '';
+  @Local isRefreshing: boolean = false; // 是否正在刷新
   private progressTimer: number = 0; // 保留用于fallback轮询
   @Local windowModel: WindowModel = AppStorageV2.connect(WindowModel, () => new WindowModel())!;
   // 输入类型选项列表
@@ -72,7 +79,60 @@ export struct PodcastMultiRolePage {
   ];
 
   /**
-   * 选择角色音色文件
+   * 加载音色列表
+   */
+  async loadVoiceList(): Promise<void> {
+    try {
+      this.voiceList = await podcastService.getVoiceList();
+      if (this.voiceList.length === 0) {
+        Logger.warn('PodcastMultiRolePage', '未获取到音色列表，将使用文件上传方式');
+      } else {
+        Logger.info('PodcastMultiRolePage', `成功加载 ${this.voiceList.length} 个音色`);
+      }
+    } catch (error) {
+      Logger.error('PodcastMultiRolePage', `加载音色列表失败: ${error}`);
+      this.voiceList = [];
+    }
+  }
+
+  /**
+   * 显示音色选择器
+   */
+  showVoiceSelectorDialog(roleName: string): void {
+    this.currentSelectingRole = roleName;
+    this.showVoiceSelector = true;
+  }
+
+  /**
+   * 从列表中选择音色
+   */
+  selectVoiceFromList(voice: VoiceInfo): void {
+    if (!this.currentSelectingRole) {
+      return;
+    }
+    
+    // 保存云存储URL
+    const keys = Object.keys(this.roleVoiceUrls);
+    const updatedRoleVoiceUrls: Record<string, string> = {};
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      const value = this.roleVoiceUrls[key];
+      updatedRoleVoiceUrls[key] = value;
+    }
+    updatedRoleVoiceUrls[this.currentSelectingRole] = voice.url;
+    this.roleVoiceUrls = updatedRoleVoiceUrls;
+    
+    this.showVoiceSelector = false;
+    this.currentSelectingRole = '';
+    
+    promptAction.showToast({
+      message: `${this.currentSelectingRole}音色已选择: ${voice.name}`,
+      duration: 2000
+    });
+  }
+
+  /**
+   * 选择角色音色文件（上传新文件）
    */
   async selectVoiceFile(roleName: string): Promise<void> {
     try {
@@ -515,6 +575,39 @@ export struct PodcastMultiRolePage {
     }
   }
 
+  /**
+   * 下拉刷新处理
+   */
+  async onRefresh(): Promise<void> {
+    if (this.isRefreshing || this.isLoading) {
+      return;
+    }
+
+    try {
+      this.isRefreshing = true;
+      
+      // 可以在这里执行刷新操作，比如重新加载配置、清空某些状态等
+      // 这里我们简单地延迟一下，模拟刷新过程
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // 如果需要，可以在这里添加实际的刷新逻辑
+      // 例如：重新加载角色列表、重新验证配置等
+      
+      promptAction.showToast({
+        message: '刷新完成',
+        duration: 1500
+      });
+    } catch (error) {
+      Logger.error('PodcastMultiRolePage', `刷新失败: ${error}`);
+      promptAction.showToast({
+        message: `刷新失败: ${error}`,
+        duration: 2000
+      });
+    } finally {
+      this.isRefreshing = false;
+    }
+  }
+
 
   build() {
     NavDestination() {
@@ -523,8 +616,9 @@ export struct PodcastMultiRolePage {
           title: '多角色互动播客'
         })
 
-        Scroll() {
-          Column({ space: 16 }) {
+        Refresh({ refreshing: $$this.isRefreshing, offset: 16, friction: 100 }) {
+          Scroll() {
+            Column({ space: 16 }) {
             // 输入类型选择
             Column({ space: 12 }) {
               Text('输入类型')
@@ -689,7 +783,7 @@ export struct PodcastMultiRolePage {
                   .width('100%')
                   .height(40)
                   .backgroundColor(this.textFileNames.length > 0 ?
-                    $r('sys.color.icon_emphasize') :
+                    '#ffc78cfd' :
                     $r('sys.color.comp_background_tertiary'))
                   .fontColor(this.textFileNames.length > 0 ?
                     $r('sys.color.font_on_primary') :
@@ -710,7 +804,7 @@ export struct PodcastMultiRolePage {
                 .fontWeight(FontWeight.Bold)
                 .alignSelf(ItemAlign.Start)
 
-              ForEach(this.roleNames, (roleName: string) => {
+              ForEach(this.roleNames, (roleName: string, index: number) => {
                 Row({ space: 12 }) {
                   Text(roleName)
                     .fontSize($r('sys.float.Body_M'))
@@ -722,13 +816,18 @@ export struct PodcastMultiRolePage {
                     .type(ButtonType.Normal)
                     .borderRadius(10)
                     .backgroundColor(this.roleVoiceUrls[roleName] ?
-                      $r('sys.color.icon_emphasize') :
+                      BUTTON_COLORS[index % 3] :
                       $r('sys.color.comp_background_tertiary'))
                     .fontColor(this.roleVoiceUrls[roleName] ?
                       $r('sys.color.font_on_primary') :
                       $r('sys.color.font_primary'))
                     .onClick(() => {
-                      this.selectVoiceFile(roleName);
+                      // 如果有音色列表，显示选择对话框；否则直接上传
+                      if (this.voiceList.length > 0) {
+                        this.showVoiceSelectorDialog(roleName);
+                      } else {
+                        this.selectVoiceFile(roleName);
+                      }
                     })
                 }
                 .width('100%')
@@ -749,6 +848,10 @@ export struct PodcastMultiRolePage {
           })
         }
         .layoutWeight(1)
+        }
+        .onRefreshing(() => {
+          this.onRefresh();
+        })
 
         // 生成按钮
         Column() {
@@ -784,5 +887,143 @@ export struct PodcastMultiRolePage {
       .height('100%')
       .backgroundColor($r('sys.color.background_primary'))
     }.hideTitleBar(true)
+    .onReady(() => {
+      // 页面加载时获取音色列表
+      this.loadVoiceList();
+    })
+
+    // 音色选择对话框
+    if (this.showVoiceSelector) {
+      CustomDialog({
+        builder: VoiceSelectorDialog({
+          voiceList: this.voiceList,
+          onSelect: (voice: VoiceInfo) => {
+            this.selectVoiceFromList(voice);
+          },
+          onUpload: () => {
+            this.showVoiceSelector = false;
+            if (this.currentSelectingRole) {
+              this.selectVoiceFile(this.currentSelectingRole);
+            }
+          },
+          onCancel: () => {
+            this.showVoiceSelector = false;
+            this.currentSelectingRole = '';
+          }
+        }),
+        alignment: DialogAlignment.Bottom,
+        offset: { x: 0, y: 0 },
+        customStyle: true,
+        autoCancel: true
+      })
+    }
+  }
+}
+
+// 音色选择对话框组件
+@Component
+struct VoiceSelectorDialog {
+  voiceList: VoiceInfo[];
+  onSelect: (voice: VoiceInfo) => void;
+  onUpload: () => void;
+  onCancel: () => void;
+
+  build() {
+    Column() {
+      // 标题栏
+      Row() {
+        Text('选择音色')
+          .fontSize($r('sys.float.Title_M'))
+          .fontWeight(FontWeight.Bold)
+          .layoutWeight(1)
+        
+        Button() {
+          Image($r('sys.media.ohos_ic_public_close'))
+            .width(20)
+            .height(20)
+        }
+        .type(ButtonType.Circle)
+        .backgroundColor(Color.Transparent)
+        .onClick(() => {
+          this.onCancel();
+        })
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 16, bottom: 12 })
+
+      Divider()
+
+      // 音色列表
+      if (this.voiceList.length > 0) {
+        Scroll() {
+          Column({ space: 8 }) {
+            ForEach(this.voiceList, (voice: VoiceInfo) => {
+              Row() {
+                Column({ space: 4 }) {
+                  Text(voice.name)
+                    .fontSize($r('sys.float.Body_M'))
+                    .fontColor($r('sys.color.font_primary'))
+                    .fontWeight(FontWeight.Medium)
+                  
+                  if (voice.description) {
+                    Text(voice.description)
+                      .fontSize($r('sys.float.Body_S'))
+                      .fontColor($r('sys.color.font_secondary'))
+                  }
+                }
+                .layoutWeight(1)
+                .alignItems(HorizontalAlign.Start)
+              }
+              .width('100%')
+              .padding(12)
+              .borderRadius(8)
+              .backgroundColor($r('sys.color.comp_background_tertiary'))
+              .onClick(() => {
+                this.onSelect(voice);
+              })
+            }, (voice: VoiceInfo) => voice.id)
+          }
+          .width('100%')
+          .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+        }
+        .layoutWeight(1)
+        .maxHeight('60%')
+      } else {
+        Column() {
+          Text('暂无可用音色')
+            .fontSize($r('sys.float.Body_M'))
+            .fontColor($r('sys.color.font_secondary'))
+        }
+        .width('100%')
+        .padding(32)
+        .layoutWeight(1)
+      }
+
+      Divider()
+
+      // 底部按钮
+      Row({ space: 12 }) {
+        Button('上传新音色')
+          .layoutWeight(1)
+          .type(ButtonType.Normal)
+          .onClick(() => {
+            this.onUpload();
+          })
+        
+        Button('取消')
+          .layoutWeight(1)
+          .type(ButtonType.Normal)
+          .backgroundColor($r('sys.color.comp_background_tertiary'))
+          .onClick(() => {
+            this.onCancel();
+          })
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 12, bottom: 16 })
+    }
+    .width('100%')
+    .backgroundColor($r('sys.color.background_primary'))
+    .borderRadius({ topLeft: 20, topRight: 20 })
+    .height('70%')
   }
 }

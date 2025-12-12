@@ -9,6 +9,9 @@ import { MediaService, SongItem } from 'module_musicplay';
 import { CloudStorageMusicUtils, CloudAudioFile } from '../../common/CloudStorageMusicUtils';
 import { Logger } from 'lib_common';
 
+// 按钮颜色数组常量
+const BUTTON_COLORS_4 = ['#ffb3e0', '#ffc78cfd', '#a0e5ff', '#ffb3e0'];
+
 @Builder
 export function PodcastCharacterPageBuilder() {
   PodcastCharacterPage()
@@ -629,7 +632,7 @@ export struct PodcastCharacterPage {
                   .fontSize($r('sys.float.Body_S'))
                   .type(ButtonType.Normal)
                   .borderRadius(10)
-                  .backgroundColor($r('sys.color.icon_emphasize'))
+                  .backgroundColor('#ffc78cfd')
                   .fontColor($r('sys.color.font_on_primary'))
                   .enabled(this.characters.length < 4)
                   .onClick(() => {
@@ -744,7 +747,7 @@ export struct PodcastCharacterPage {
                       .type(ButtonType.Normal)
                       .borderRadius(10)
                       .backgroundColor(character.voice_url ?
-                        $r('sys.color.icon_emphasize') :
+                        BUTTON_COLORS_4[index % 4] :
                         $r('sys.color.comp_background_tertiary'))
                       .fontColor(character.voice_url ?
                         $r('sys.color.font_on_primary') :

@@ -13,9 +13,9 @@ import { AppStorageV2 } from '@kit.ArkUI';
 import { cloudStorage } from '@kit.CloudFoundationKit';
 
 /**
- * 多角色播客页面路由参数
+ * 播客创建页面路由参数
  */
-interface PodcastMultiRolePageParams {
+interface PodcastCreatePageParams {
   initialInputType?: string;
 }
 
@@ -36,6 +36,9 @@ export struct PodcastPage {
   @Local isGenerating: boolean = false; // 是否正在生成播客
   @Local showDeleteMenu: boolean = false; // 是否显示删除菜单
   @Local selectedPodcastId: string = ''; // 选中的播客ID
+  @Local searchKeyword: string = ''; // 搜索关键词
+  @Local isSearchMode: boolean = false; // 是否处于搜索模式
+  @Local filteredPodcasts: SongItem[] = []; // 过滤后的播客列表
   // 存储播客ID到创建时间的映射（用于从云数据库获取的播客）
   private podcastCreatedAtMap: Map<string, number> = new Map();
   @Param headerBarHeight: Length = $r('app.float.nav_header_height');
@@ -225,18 +228,18 @@ export struct PodcastPage {
   async loadRecentPodcasts(): Promise<void> {
     try {
       this.isRefreshing = true;
-      
+
       // 清空之前的映射
       this.podcastCreatedAtMap.clear();
       const allSongItems: SongItem[] = [];
       const urlSet = new Set<string>(); // 用于去重，根据URL去重
       const cloudDbFilePaths = new Set<string>(); // 记录云数据库中已有的文件路径
       let podcastList: PodcastListItem[] = [];
-      
+
       // 1. 从云数据库获取播客数据（优先显示）
       try {
         podcastList = await podcastService.getPodcastList(); // 获取全部播客
-        
+
         if (podcastList && podcastList.length > 0) {
           for (const podcast of podcastList) {
             // 只处理有 audio_url 的播客
@@ -245,7 +248,7 @@ export struct PodcastPage {
               if (podcast.created_at) {
                 this.podcastCreatedAtMap.set(podcast.id, podcast.created_at);
               }
-              
+
               // 提取云存储路径，用于后续匹配
               const cloudPath = CloudStorageMusicUtils.extractCloudPath(podcast.audio_url);
               if (cloudPath) {
@@ -256,16 +259,16 @@ export struct PodcastPage {
                   cloudDbFilePaths.add(fileName);
                 }
               }
-              
+
               // 转换为SongItem
               const songItem = this.convertPodcastToSongItem(podcast);
-              
+
               // 根据URL去重
               if (songItem.src && !urlSet.has(songItem.src)) {
                 urlSet.add(songItem.src);
                 allSongItems.push(songItem);
               }
-          }
+            }
           }
           Logger.info('PodcastPage', `从云数据库加载了 ${allSongItems.length} 个播客`);
         }
@@ -277,23 +280,23 @@ export struct PodcastPage {
       try {
         const audioFiles = await CloudStorageMusicUtils.getAudioFileList('outputs/podcasts/');
         Logger.info('PodcastPage', `从云存储找到 ${audioFiles.length} 个音频文件`);
-        
+
         if (audioFiles.length > 0) {
           let addedCount = 0;
-          
+
           // 逐个处理音频文件
           for (const audioFile of audioFiles) {
             // 检查这个文件是否已经在云数据库中
             const filePath = audioFile.filePath;
             const fileName = audioFile.fileName;
             const isInCloudDb = cloudDbFilePaths.has(filePath) || cloudDbFilePaths.has(fileName);
-            
+
             // 如果不在云数据库中，才添加（使用云存储的元数据）
             if (!isInCloudDb) {
               try {
                 // 转换为SongItem
                 const songItem = await CloudStorageMusicUtils.convertToSongItem(audioFile);
-                
+
                 // 只添加成功转换的项（src不为空）且未重复的
                 if (songItem.src && songItem.src !== '' && !urlSet.has(songItem.src)) {
                   urlSet.add(songItem.src);
@@ -320,22 +323,32 @@ export struct PodcastPage {
         // 从映射表获取创建时间（数据库中的created_at字段）
         const timestampA = this.podcastCreatedAtMap.get(a.id) || 0;
         const timestampB = this.podcastCreatedAtMap.get(b.id) || 0;
-        
+
         // 如果都有created_at，按时间倒序
         if (timestampA > 0 && timestampB > 0) {
           return timestampB - timestampA;
         }
-        
+
         // 如果只有一个有created_at，有created_at的排在前面
-        if (timestampA > 0) return -1;
-        if (timestampB > 0) return 1;
-        
+        if (timestampA > 0) {
+          return -1;
+        }
+        if (timestampB > 0) {
+          return 1;
+        }
+
         // 如果都没有created_at，按ID倒序
         return b.id.localeCompare(a.id);
       });
 
       // 显示全部播客
       this.recentPodcasts = sortedList;
+      // 如果正在搜索，更新过滤列表
+      if (this.isSearchMode && this.searchKeyword.trim() !== '') {
+        this.filterPodcasts();
+      } else {
+        this.filteredPodcasts = sortedList;
+      }
       Logger.info('PodcastPage', `合并后共显示 ${this.recentPodcasts.length} 个播客`);
     } catch (error) {
       Logger.error('PodcastPage', `加载最近播客失败: ${error}`);
@@ -350,11 +363,11 @@ export struct PodcastPage {
    */
   convertPodcastToSongItem(podcast: PodcastListItem): SongItem {
     const songItem = new SongItem();
-    
+
     // 基本信息
     songItem.id = podcast.id || '';
     songItem.title = podcast.title || '未知播客';
-    
+
     // 设置singer为分类或"云存储音频"
     if (podcast.category) {
       songItem.singer = podcast.category;
@@ -363,7 +376,7 @@ export struct PodcastPage {
     } else {
       songItem.singer = '云存储音频';
     }
-    
+
     // 音频URL（优先使用audio_url）
     if (podcast.audio_url) {
       songItem.src = podcast.audio_url;
@@ -375,20 +388,24 @@ export struct PodcastPage {
       songItem.src = '';
       songItem.isLocal = false;
     }
-    
+
     // 设置脚本内容
     songItem.script = podcast.script || '';
-    
-    // 设置封面图标（使用默认图标）
-    songItem.label = $r('app.media.zhibozhong');
-    
+
+    // 设置封面图标（优先使用封面图URL，否则使用默认图标）
+    if (podcast.cover_image_url && podcast.cover_image_url.trim() !== '') {
+      songItem.label = podcast.cover_image_url;
+    } else {
+      songItem.label = $r('app.media.zhibozhong');
+    }
+
     // 其他属性
     songItem.isCollected = false;
     songItem.isVip = false;
     songItem.mark = '1';
     songItem.lyric = '';
     songItem.mvUrl = '';
-    
+
     return songItem;
   }
 
@@ -410,7 +427,7 @@ export struct PodcastPage {
     if (!song.id) {
       return Date.now();
     }
-    
+
     // 直接从映射表中获取创建时间（数据库中的created_at字段）
     const createdAt = this.podcastCreatedAtMap.get(song.id);
     if (createdAt !== undefined && createdAt > 0) {
@@ -420,7 +437,7 @@ export struct PodcastPage {
       }
       return createdAt;
     }
-    
+
     // 如果映射表中没有（可能是本地播客），返回当前时间
     return Date.now();
   }
@@ -506,7 +523,14 @@ export struct PodcastPage {
       // 4. 从最近播客列表删除
       this.recentPodcasts = this.recentPodcasts.filter(song => song.id !== this.selectedPodcastId);
 
-      // 5. 尝试从云存储删除音频文件（如果存在）
+      // 5. 更新过滤列表（如果正在搜索）
+      if (this.isSearchMode) {
+        this.filterPodcasts();
+      } else {
+        this.filteredPodcasts = this.recentPodcasts;
+      }
+
+      // 6. 尝试从云存储删除音频文件（如果存在）
       if (audioUrl) {
         try {
           const cloudPath = this.extractCloudPathFromUrl(audioUrl);
@@ -586,7 +610,6 @@ export struct PodcastPage {
     // 跳转到整合的播客创建页面
     RouterUtils.pushPathByName(RouterMap.PODCAST_CREATE_PAGE);
   }
-
 
   /**
    * 从文字生成播客
@@ -695,6 +718,56 @@ export struct PodcastPage {
   }
 
   /**
+   * 过滤播客列表
+   */
+  filterPodcasts(): void {
+    if (!this.searchKeyword || this.searchKeyword.trim() === '') {
+      this.filteredPodcasts = this.recentPodcasts;
+      return;
+    }
+
+    const keyword = this.searchKeyword.trim().toLowerCase();
+    this.filteredPodcasts = this.recentPodcasts.filter((song: SongItem) => {
+      // 搜索标题
+      if (song.title && song.title.toLowerCase().includes(keyword)) {
+        return true;
+      }
+      // 搜索歌手/分类
+      if (song.singer && song.singer.toLowerCase().includes(keyword)) {
+        return true;
+      }
+      // 搜索脚本内容
+      if (song.script && song.script.toLowerCase().includes(keyword)) {
+        return true;
+      }
+      return false;
+    });
+  }
+
+  /**
+   * 切换搜索模式
+   */
+  toggleSearchMode(): void {
+    this.isSearchMode = !this.isSearchMode;
+    if (!this.isSearchMode) {
+      // 退出搜索模式，清空搜索关键词
+      this.searchKeyword = '';
+      this.filteredPodcasts = this.recentPodcasts;
+    } else {
+      // 进入搜索模式，初始化过滤列表
+      this.filteredPodcasts = this.recentPodcasts;
+    }
+  }
+
+  /**
+   * 清除搜索
+   */
+  clearSearch(): void {
+    this.searchKeyword = '';
+    this.filteredPodcasts = this.recentPodcasts;
+  }
+
+  /**
    * 从链接生成播客
    */
   async generatePodcastFromLink(url: string): Promise<void> {
@@ -757,44 +830,98 @@ export struct PodcastPage {
     NavDestination() {
       Column() {
         // 顶部标题栏，带右侧操作按钮
-        Row({ space: 12 }) {
-          Text('真AI播客')
-            .fontSize($r('sys.float.Title_M'))
-            .fontColor($r('sys.color.font_primary'))
-            .fontWeight(FontWeight.Bold)
+        Row({ space: 14 }) {
+          if (!this.isSearchMode) {
+            Text('真AI播客')
+              .fontSize($r('sys.float.Title_M'))
+              .fontColor($r('sys.color.font_primary'))
+              .fontWeight(FontWeight.Bold)
+              .margin({ left: CommonConstants.SPACE_S })
+          } else {
+            // 搜索输入框
+            Row({ space: 8 }) {
+              TextInput({ placeholder: '搜索播客标题、分类或内容...', text: this.searchKeyword })
+                .layoutWeight(1)
+                .height(36)
+                .fontSize(14)
+                .backgroundColor('#ffe5e5e5')
+                .borderRadius(18)
+                .padding({ left: 12, right: 12 })
+                .onChange((value: string) => {
+                  this.searchKeyword = value;
+                  this.filterPodcasts();
+                })
+
+              // 清除按钮
+              if (this.searchKeyword.trim() !== '') {
+                Button() {
+                  SymbolGlyph($r('sys.symbol.xmark_circle_fill'))
+                    .fontSize(16)
+                    .fontColor([$r('sys.color.font_secondary')])
+                }
+                .type(ButtonType.Normal)
+                .backgroundColor(Color.Transparent)
+                .width(32)
+                .height(32)
+                .onClick(() => {
+                  this.clearSearch();
+                })
+              }
+            }
+            .layoutWeight(1)
             .margin({ left: CommonConstants.SPACE_S })
+          }
+
           Blank()
-          // 加号按钮（上传内容）
-          Button() {
-            Image($r('app.media.plus'))
-              .width(24)
-              .aspectRatio(1)
-              .fillColor(Color.White)
+
+          if (!this.isSearchMode) {
+            // 加号按钮（上传内容）
+            Button() {
+              Image($r('app.media.plus'))
+                .width(24)
+                .aspectRatio(1)
+                .fillColor(Color.White)
+            }
+            .type(ButtonType.Normal)
+            //.backgroundColor('#ffc78cfd')
+            .linearGradient({
+              angle: 140,
+              colors: [
+                ['#ffb3e0', 0.0],
+                ['#ffc78cfd', 0.2],
+                ['#a0e5ff', 1.0]
+              ]
+            })
+            .borderRadius(20)
+            .width(40)
+            .height(40)
+            .bindMenu(this.MyMenu)
+
+
+            // 搜索按钮
+            Button() {
+              SymbolGlyph($r('sys.symbol.magnifyingglass'))
+                .fontSize(18)
+                .fontColor([$r('sys.color.font_normal')])
+            }
+            .type(ButtonType.Normal)
+            .backgroundColor($r('app.color.button_background'))
+            .borderRadius(20)
+            .width(40)
+            .height(40)
+            .onClick(() => {
+              this.toggleSearchMode();
+            })
+          } else {
+            // 取消搜索
+            Text('取消')
+              .fontSize(14)
+              .fontColor($r('sys.color.font_primary'))
+
+              .onClick(() => {
+                this.toggleSearchMode();
+              })
           }
-          .type(ButtonType.Normal)
-          .backgroundColor($r('sys.color.icon_emphasize'))
-          .borderRadius(20)
-          .width(40)
-          .height(40)
-          .bindMenu(this.MyMenu)
-
-          // 搜索按钮
-          Button() {
-            SymbolGlyph($r('sys.symbol.magnifyingglass'))
-              .fontSize(18)
-              .fontColor([$r('sys.color.font_primary')])
-          }
-          .type(ButtonType.Normal)
-          .backgroundColor('#ffe5e5e5')
-          .borderRadius(20)
-          .width(40)
-          .height(40)
-          .onClick(() => {
-            // 搜索功能
-            promptAction.showToast({ message: '搜索功能开发中', duration: 2000 });
-          })
-
-
         }.height(this.headerBarHeight)
         .justifyContent(FlexAlign.SpaceBetween)
         .width(CommonConstants.FULL_PERCENT)
@@ -809,27 +936,12 @@ export struct PodcastPage {
                   .fontSize(20)
                   .fontColor($r('sys.color.font_primary'))
                   .fontWeight(FontWeight.Bold)
-                Blank()
-                Text('更多>')
-                  .fontSize(14)
-                  .fontColor($r('sys.color.font_secondary'))
-                  .onClick(() => {
-                    // 可以跳转到功能详情页
-                  })
               }
               .width('100%')
               .padding({ left: 16, right: 16 })
 
               Scroll() {
                 Row({ space: 12 }) {
-                  // AI播客创建卡片（整合三个模块）
-                  this.podcastFunctionCard(
-                    'AI播客',
-                    '多角色互动、自定义角色、主题深度播客一键生成',
-                    () => {
-                      RouterUtils.pushPathByName(RouterMap.PODCAST_CREATE_PAGE)
-                    }
-                  )
 
                   // 上传背景音乐卡片
                   this.podcastFunctionCard(
@@ -841,14 +953,14 @@ export struct PodcastPage {
                     this.isUploadingMusic
                   )
 
-                  // 导入音频卡片
+
+                  // 音色克隆卡片
                   this.podcastFunctionCard(
-                    '导入音频',
-                    '从云存储中导入已生成的播客音频',
+                    '音色克隆',
+                    '在几秒钟内克隆你的声音',
                     () => {
-                      this.importAudioFromCloud();
-                    },
-                    this.isLoading
+                      RouterUtils.pushPathByName(RouterMap.VOICE_CLONE_PAGE);
+                    }
                   )
                 }
                 .padding({ left: 16, right: 16 })
@@ -857,36 +969,42 @@ export struct PodcastPage {
               .scrollBar(BarState.Off)
             }
             .width('100%')
-            .padding({ top: 16, bottom: 8 })
+            .padding({ top: 16, bottom: 10 })
 
             // 最近播客列表区域
             Column({ space: 12 }) {
               Row() {
-                Text('最近播客')
+                Text(this.isSearchMode ? '搜索结果' : '最近播客')
                   .fontSize(20)
                   .fontColor($r('sys.color.font_primary'))
                   .fontWeight(FontWeight.Bold)
                 Blank()
+                if (this.isSearchMode && this.searchKeyword.trim() !== '') {
+                  Text(`共找到 ${this.filteredPodcasts.length} 个结果`)
+                    .fontSize(12)
+                    .fontColor($r('sys.color.font_secondary'))
+                }
               }
               .width('100%')
               .padding({ left: 16, right: 16 })
 
-              if (this.recentPodcasts.length === 0) {
+              if ((this.isSearchMode ? this.filteredPodcasts : this.recentPodcasts).length === 0) {
                 Column() {
-                  Text('暂无播客内容')
+                  Text(this.isSearchMode && this.searchKeyword.trim() !== '' ? '未找到匹配的播客' : '暂无播客内容')
                     .fontSize(14)
                     .fontColor($r('sys.color.font_secondary'))
                     .margin({ top: 40, bottom: 40 })
                 }
                 .width('100%')
               } else {
-                Column({ space: 0 }) {
-                  ForEach(this.recentPodcasts, (song: SongItem, index: number) => {
-                    this.podcastListItem(song, index)
-                  }, (song: SongItem) => song.id)
+                Column() {
+                  ForEach(this.isSearchMode ? this.filteredPodcasts : this.recentPodcasts,
+                    (song: SongItem, index: number) => {
+                      this.podcastListItem(song, index)
+                    }, (song: SongItem) => song.id)
                 }
                 .width('100%')
-                .padding({ left: 16, right: 16 })
+                .padding({ left: 10, right: 10 })
               }
             }
             .width('100%')
@@ -899,7 +1017,7 @@ export struct PodcastPage {
 
         // 播放器组件 - 放在底部导航栏上方
         MusicPlayController()
-          .margin({bottom:10})
+          .margin({ bottom: 10 })
       }
       .padding({
         left: this.customPadding.left ?? this.breakPointModel.pagePadding,
@@ -909,7 +1027,7 @@ export struct PodcastPage {
         bottom: this.customPadding.bottom ?? 0,
       })
       .width(CommonConstants.FULL_PERCENT)
-      .backgroundColor('#fff8f8f8')
+      .backgroundColor($r('app.color.start_window_background'))
     }
     .hideTitleBar(true)
   }
@@ -925,7 +1043,15 @@ export struct PodcastPage {
         content: "文字"
       })
         .onChange(() => {
-          this.uploadText();
+          this.navigateToCreatePage('文字');
+        })
+
+      MenuItem({
+        startIcon: $r("sys.symbol.doc_text"),
+        content: "文字+指令"
+      })
+        .onChange(() => {
+          this.navigateToCreatePage('文字+指令');
         })
 
       MenuItem({
@@ -933,7 +1059,15 @@ export struct PodcastPage {
         content: "文件"
       })
         .onChange(() => {
-          this.uploadFile();
+          this.navigateToCreatePage('文件');
+        })
+
+      MenuItem({
+        startIcon: $r("sys.symbol.folder"),
+        content: "文件+指令"
+      })
+        .onChange(() => {
+          this.navigateToCreatePage('文件+指令');
         })
 
       MenuItem({
@@ -941,9 +1075,33 @@ export struct PodcastPage {
         content: "链接"
       })
         .onChange(() => {
-          this.uploadLink();
+          this.navigateToCreatePage('链接');
+        })
+
+      MenuItem({
+        startIcon: $r("sys.symbol.link"),
+        content: "链接+指令"
+      })
+        .onChange(() => {
+          this.navigateToCreatePage('链接+指令');
+        })
+
+      MenuItem({
+        startIcon: $r("sys.symbol.camera"),
+        content: "图片和视频"
+      })
+        .onChange(() => {
+          this.navigateToCreatePage('图片和视频');
         })
     }
+  }
+
+  /**
+   * 导航到播客创建页面，并设置初始输入类型
+   */
+  navigateToCreatePage(inputType: string): void {
+    const params: PodcastCreatePageParams = { initialInputType: inputType };
+    RouterUtils.pushPathByName(RouterMap.PODCAST_CREATE_PAGE, params);
   }
 
   /**
@@ -954,10 +1112,10 @@ export struct PodcastPage {
     Column({ space: 8 }) {
       // 图标区域
       Column() {
-        Image($r('app.media.zhibozhong'))
+        Image($r('app.media.music'))
           .width(40)
           .height(40)
-          .fillColor($r('sys.color.icon_emphasize'))
+          .fillColor('#ffc78cfd')
       }
       .width(60)
       .height(60)
@@ -987,6 +1145,11 @@ export struct PodcastPage {
     .width(140)
     .padding(12)
     .borderRadius(16)
+    .border({
+      width: 1,
+      color: '#fff1f1f1',
+      style: BorderStyle.Solid
+    })
     .backgroundColor($r('sys.color.comp_background_primary'))
     .opacity(disabled ? 0.6 : 1)
     .enabled(!disabled)
@@ -1003,18 +1166,37 @@ export struct PodcastPage {
   @Builder
   podcastListItem(song: SongItem, index: number) {
     Row({ space: 12 }) {
-      // 左侧图标
+      // 左侧封面图
       Column() {
-        Image(song.label)
-          .width(48)
-          .height(48)
-          .borderRadius(8)
+        // 判断label是URL字符串还是Resource
+        if (typeof song.label === 'string' && (song.label.startsWith('http') || song.label.startsWith('data:image'))) {
+          // 网络图片或base64图片
+          Image(song.label)
+            .width(48)
+            .height(48)
+            .borderRadius(8)
+            .objectFit(ImageFit.Cover)
+            .alt($r('app.media.zhibozhong'))
+            .onError(() => {
+              // 如果加载失败，使用默认图标
+              song.label = $r('app.media.zhibozhong');
+            })
+        } else {
+          // 本地资源
+          Image(song.label)
+            .width(48)
+            .height(48)
+            .borderRadius(8)
+            .objectFit(ImageFit.Cover)
+        }
       }
       .width(48)
       .height(48)
+      .margin({ left: 5 })
       .borderRadius(8)
       .backgroundColor($r('sys.color.comp_background_tertiary'))
       .justifyContent(FlexAlign.Center)
+      .clip(true)
 
       // 中间内容
       Column({ space: 4 }) {
@@ -1047,6 +1229,11 @@ export struct PodcastPage {
             })
             .borderRadius(4)
             .backgroundColor($r('sys.color.comp_background_tertiary'))
+
+          // 日期放在播客标签右边
+          Text(this.formatDate(this.extractTimestamp(song)))
+            .fontSize(11)
+            .fontColor($r('sys.color.font_secondary'))
         }
         .margin({ top: 4 })
       }
@@ -1054,18 +1241,44 @@ export struct PodcastPage {
       .alignItems(HorizontalAlign.Start)
       .justifyContent(FlexAlign.Center)
 
-      // 右侧日期
-      Column() {
-        Text(this.formatDate(this.extractTimestamp(song)))
-          .fontSize(12)
-          .fontColor($r('sys.color.font_secondary'))
+      // 右侧播放按钮
+      Button() {
+        SymbolGlyph(
+          (this.musicModel.currentSong?.id === song.id && this.musicModel.isPlay)
+            ? $r('sys.symbol.pause_fill')
+            : $r('sys.symbol.play_fill')
+        )
+          .fontSize(20)
+          .fontColor([$r('sys.color.font_primary')])
       }
-      .alignItems(HorizontalAlign.End)
-      .justifyContent(FlexAlign.Center)
+      .type(ButtonType.Circle)
+      .backgroundColor(Color.Transparent)
+      .width(40)
+      .height(40)
+      .onClick(() => {
+        // 如果当前播放的是这个播客，则切换播放/暂停
+        if (this.musicModel.currentSong?.id === song.id) {
+          MediaService.getInstance().playAndPause();
+        } else {
+          // 否则播放这个播客
+          this.playPodcast(song);
+        }
+      })
     }
     .width('100%')
     .padding(12)
     .borderRadius(12)
+    .border({
+      width: 1,
+      color: '#fff1f1f1',
+      style: BorderStyle.Solid
+    })
+    .shadow({
+      radius: 14,
+      color: '#1F000000',
+      offsetX: 0,
+      offsetY: 20
+    })
     .backgroundColor($r('sys.color.comp_background_primary'))
     .margin({ bottom: index < this.recentPodcasts.length - 1 ? 8 : 0 })
     .onClick(() => {
@@ -1077,7 +1290,6 @@ export struct PodcastPage {
       })
     )
   }
-
 }
 
 

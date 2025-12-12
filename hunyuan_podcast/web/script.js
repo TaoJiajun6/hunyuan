@@ -120,9 +120,16 @@ function updateDynamicConfig() {
   }
 }
 
-// 更新音色选择器
-function updateVoiceSelectors() {
+// 更新音色选择器（异步加载音色列表）
+async function updateVoiceSelectors() {
   const voiceSelectors = document.getElementById('voice-selectors');
+  if (!voiceSelectors) return;
+  
+  // 如果音色列表未加载，先加载
+  if (!VOICES_LOADED) {
+    await loadVoicesFromAPI();
+  }
+  
   let numVoices = 2;
   
   if (currentPodcastType === 'multi') {
@@ -178,7 +185,12 @@ function handleFileUpload(event) {
 }
 
 // 添加角色
-function addCharacter() {
+async function addCharacter() {
+  // 如果音色列表未加载，先加载
+  if (!VOICES_LOADED) {
+    await loadVoicesFromAPI();
+  }
+  
   charCount++;
   const list = document.getElementById('characters-list');
   const div = document.createElement('div');
@@ -224,7 +236,12 @@ function removeCharacter(id) {
   document.getElementById(id).remove();
 }
 
-function updateDeepVoices() {
+async function updateDeepVoices() {
+  // 如果音色列表未加载，先加载
+  if (!VOICES_LOADED) {
+    await loadVoicesFromAPI();
+  }
+  
   const num = parseInt(document.getElementById('deep-num-chars').value);
   const container = document.getElementById('deep-voices');
   container.innerHTML = '';
@@ -243,7 +260,7 @@ function updateDeepVoices() {
     `;
     container.appendChild(div);
   }
-  updateVoiceSelectors();
+  await updateVoiceSelectors();
 }
 
 // 将文件转换为 base64
@@ -1419,9 +1436,12 @@ function goBack() {
 }
 
 // 初始化
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
+  // 先加载音色列表
+  await loadVoicesFromAPI();
+  
   updateDynamicConfig();
-  updateVoiceSelectors();
+  await updateVoiceSelectors();
   
   // 如果当前在探索页面，加载数据
   if (currentPage === 'explore') {

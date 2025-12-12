@@ -209,6 +209,7 @@ class AGCDatabaseClient:
                 {"d": file_size_mb},  # file_size_mb (浮点数或None)
                 {"s": str(podcast_data.get('topic') or '')},  # topic
                 {"s": str(roles_str)},  # roles (JSON字符串)
+                {"s": str(podcast_data.get('cover_image_url') or '')},  # cover_image_url (封面图URL)
                 {"l": None},  # naturalbase_version
                 {"bl": False}  # naturalbase_deleted
             ]
@@ -275,7 +276,8 @@ class AGCDatabaseClient:
             'script': fs[8].get('s', '') if len(fs) > 8 else '',
             'file_size_mb': fs[9].get('d') if len(fs) > 9 else None,
             'topic': fs[10].get('s', '') if len(fs) > 10 else '',
-            'roles': roles
+            'roles': roles,
+            'cover_image_url': fs[12].get('s', '') if len(fs) > 12 else ''  # cover_image_url (索引12)
         }
         
         logger.debug(f"转换后的播客数据: {json.dumps(podcast, ensure_ascii=False, default=str)}")

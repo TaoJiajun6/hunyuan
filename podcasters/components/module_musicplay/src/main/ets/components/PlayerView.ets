@@ -27,7 +27,7 @@ export struct PlayerView {
   // 播放器页面
   @Local naviIndicatorHeight: number = 0;
   // 状态栏高度
-  @Local statusBarHeight: number = 0;
+  @Local statusBarHeight: number = 150;
   // 音乐模型
   @Local musicModel: MusicModel = getMusicModel();
   // 背景颜色
@@ -68,12 +68,6 @@ export struct PlayerView {
 
   build() {
     Stack() {
-      Image(this.imageLabel)
-        .size({ height: '120%' })
-        .aspectRatio(1)
-        .objectFit(1) // ImageFit.Cover = 1
-        .opacity(0.5)
-
       Row() {
         Stack({ alignContent: Alignment.TopStart }) {
           // 只显示脚本/歌词页面
@@ -91,11 +85,10 @@ export struct PlayerView {
         .height('100%')
         .width('100%')
       }
-      .padding({
-        bottom: this.naviIndicatorHeight,
-        top: this.statusBarHeight
-      })
-    }
+
+    }.padding({
+      bottom: this.naviIndicatorHeight
+    })
     .onAppear(() => {
       // 设置状态栏颜色
       this.setStatusbarContentColor('#FFFFFF');
