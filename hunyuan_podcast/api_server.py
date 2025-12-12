@@ -3959,19 +3959,45 @@ async def list_voice_files():
             elif 'female' in filename_lower or '女' in filename or '女声' in filename:
                 gender = 'female'
             
-            # 推断风格
-            style = '自然'
+            # 推断风格（扩展更多风格类型，按优先级排序）
+            style = '自然'  # 默认风格
             style_keywords = {
-                '沉稳': ['沉稳', 'steady', 'stable'],
-                '活泼': ['活泼', 'lively', 'energetic'],
-                '温柔': ['温柔', 'gentle', 'sweet'],
-                '知性': ['知性', 'intelligent', 'wise'],
-                '自然': ['自然', 'natural', 'normal']
+                # 注意：顺序很重要，先匹配更具体的风格
+                '沉稳': ['沉稳', 'steady', 'stable', 'calm', 'serious'],
+                '活泼': ['活泼', 'lively', 'energetic', 'cheerful', 'vibrant'],
+                '温柔': ['温柔', 'gentle', 'sweet', 'tender', 'soft'],
+                '知性': ['知性', 'intelligent', 'wise', 'sophisticated'],
+                '自然': ['自然', 'natural', 'normal', 'casual', 'relaxed'],
+                '成熟': ['成熟', 'mature', 'adult'],
+                '年轻': ['年轻', 'young', 'youthful', 'fresh'],
+                '磁性': ['磁性', 'magnetic', 'charming', 'attractive', 'sexy'],
+                '阳光': ['阳光', 'sunny', 'bright', 'positive', 'optimistic'],
+                '优雅': ['优雅', 'elegant', 'graceful', 'refined'],
+                '亲切': ['亲切', 'friendly', 'warm', 'kind', 'amiable'],
+                '专业': ['专业', 'professional', 'expert', 'authoritative'],
+                '幽默': ['幽默', 'humorous', 'funny', 'witty', 'amusing'],
+                '严肃': ['严肃', 'serious', 'solemn', 'formal'],
+                '轻松': ['轻松', 'relaxed', 'easy', 'light'],
+                '激情': ['激情', 'passionate', 'enthusiastic', 'fiery'],
+                '安静': ['安静', 'quiet', 'peaceful', 'calm', 'tranquil'],
+                '自信': ['自信', 'confident', 'assured', 'bold'],
+                '温暖': ['温暖', 'warm', 'cozy', 'comforting'],
+                '清新': ['清新', 'fresh', 'clean', 'crisp', 'clear']
             }
+            
+            # 匹配风格关键词（按顺序匹配，找到第一个匹配的就停止）
+            matched_style = None
             for style_name, keywords in style_keywords.items():
                 if any(kw in filename_lower for kw in keywords):
-                    style = style_name
+                    matched_style = style_name
+                    logger.info(f"音色文件 {filename} 匹配到风格: {style_name} (关键词: {[kw for kw in keywords if kw in filename_lower]})")
                     break
+            
+            if matched_style:
+                style = matched_style
+            else:
+                # 如果没有匹配到任何风格，记录日志
+                logger.warning(f"音色文件 {filename} 未匹配到任何风格关键词，使用默认风格: 自然")
             
             # 生成显示名称
             display_name = filename
@@ -3982,14 +4008,43 @@ async def list_voice_files():
             else:
                 display_name = f"中性-{style}"
             
-            # 生成描述
+            # 生成描述（根据风格和性别生成更贴切的描述）
             description = ""
-            if gender == 'male':
-                description = f"{style}大气的男声"
-            elif gender == 'female':
-                description = f"{style}甜美的女声"
+            # 定义不同风格的描述模板
+            style_descriptions = {
+                '沉稳': {'male': '沉稳大气的男声', 'female': '沉稳优雅的女声', 'neutral': '沉稳专业的中性声音'},
+                '活泼': {'male': '活泼开朗的男声', 'female': '活泼甜美的女声', 'neutral': '活泼生动的中性声音'},
+                '温柔': {'male': '温柔细腻的男声', 'female': '温柔甜美的女声', 'neutral': '温柔亲切的中性声音'},
+                '知性': {'male': '知性专业的男声', 'female': '知性优雅的女声', 'neutral': '知性睿智的中性声音'},
+                '自然': {'male': '自然大气的男声', 'female': '自然甜美的女声', 'neutral': '自然流畅的中性声音'},
+                '成熟': {'male': '成熟稳重的男声', 'female': '成熟优雅的女声', 'neutral': '成熟专业的中性声音'},
+                '年轻': {'male': '年轻活力的男声', 'female': '年轻清新的女声', 'neutral': '年轻活泼的中性声音'},
+                '磁性': {'male': '磁性迷人的男声', 'female': '磁性魅力的女声', 'neutral': '磁性吸引的中性声音'},
+                '阳光': {'male': '阳光开朗的男声', 'female': '阳光甜美的女声', 'neutral': '阳光积极的中性声音'},
+                '优雅': {'male': '优雅绅士的男声', 'female': '优雅高贵的女声', 'neutral': '优雅精致的中性声音'},
+                '亲切': {'male': '亲切和蔼的男声', 'female': '亲切温暖的女声', 'neutral': '亲切友好的中性声音'},
+                '专业': {'male': '专业权威的男声', 'female': '专业干练的女声', 'neutral': '专业可靠的中性声音'},
+                '幽默': {'male': '幽默风趣的男声', 'female': '幽默可爱的女声', 'neutral': '幽默有趣的中性声音'},
+                '严肃': {'male': '严肃认真的男声', 'female': '严肃庄重的女声', 'neutral': '严肃正式的中性声音'},
+                '轻松': {'male': '轻松随意的男声', 'female': '轻松自然的女声', 'neutral': '轻松舒适的中性声音'},
+                '激情': {'male': '激情澎湃的男声', 'female': '激情活力的女声', 'neutral': '激情四射的中性声音'},
+                '安静': {'male': '安静沉稳的男声', 'female': '安静温柔的女声', 'neutral': '安静平和的中性声音'},
+                '自信': {'male': '自信有力的男声', 'female': '自信优雅的女声', 'neutral': '自信坚定的中性声音'},
+                '温暖': {'male': '温暖和煦的男声', 'female': '温暖甜美的女声', 'neutral': '温暖舒适的中性声音'},
+                '清新': {'male': '清新自然的男声', 'female': '清新甜美的女声', 'neutral': '清新明亮的中性声音'}
+            }
+            
+            # 获取对应风格的描述，如果没有则使用默认模板
+            if style in style_descriptions:
+                description = style_descriptions[style].get(gender, f"{style}流畅的中性声音")
             else:
-                description = f"{style}流畅的中性声音"
+                # 默认描述模板
+                if gender == 'male':
+                    description = f"{style}大气的男声"
+                elif gender == 'female':
+                    description = f"{style}甜美的女声"
+                else:
+                    description = f"{style}流畅的中性声音"
             
             # 生成ID（使用文件名，去掉扩展名）
             voice_id = os.path.splitext(filename)[0]
