@@ -13,6 +13,28 @@ from io import BytesIO
 
 logger = logging.getLogger(__name__)
 
+# 尝试导入可选的依赖库
+try:
+    from bs4 import BeautifulSoup
+    HAS_BS4 = True
+except ImportError:
+    HAS_BS4 = False
+    logger.warning("BeautifulSoup4未安装，将使用基础HTML解析")
+
+try:
+    import html2text
+    HAS_HTML2TEXT = True
+except ImportError:
+    HAS_HTML2TEXT = False
+    logger.warning("html2text未安装，将使用基础文本提取")
+
+try:
+    from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+    HAS_PLAYWRIGHT = True
+except ImportError:
+    HAS_PLAYWRIGHT = False
+    logger.warning("Playwright未安装，无法处理需要JavaScript渲染的网页")
+
 
 class InputProcessor:
     """输入格式处理器"""
@@ -108,9 +130,85 @@ class InputProcessor:
             logger.error(f"提取微信公众号文章内容失败: {str(e)}")
             raise Exception(f"提取微信公众号文章内容失败: {str(e)}")
     
+    def _extract_with_playwright(self, url: str, timeout: int = 30) -> Optional[str]:
+        """
+        使用Playwright提取需要JavaScript渲染的网页内容
+        
+        Args:
+            url: 网页URL
+            timeout: 超时时间（秒）
+        
+        Returns:
+            提取的文本内容，如果失败返回None
+        """
+        if not HAS_PLAYWRIGHT:
+            return None
+        
+        try:
+            logger.info(f"尝试使用Playwright提取网页内容: {url}")
+            with sync_playwright() as p:
+                # 启动浏览器（使用chromium）
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context(
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                )
+                page = context.new_page()
+                
+                # 访问页面并等待内容加载
+                page.goto(url, wait_until='networkidle', timeout=timeout * 1000)
+                
+                # 等待页面内容加载（额外等待2秒）
+                page.wait_for_timeout(2000)
+                
+                # 获取页面HTML
+                html = page.content()
+                
+                browser.close()
+                
+                # 使用BeautifulSoup或html2text提取文本
+                if HAS_BS4:
+                    soup = BeautifulSoup(html, 'lxml')
+                    # 移除脚本和样式
+                    for script in soup(["script", "style", "noscript", "iframe"]):
+                        script.decompose()
+                    # 提取文本
+                    text = soup.get_text(separator='\n', strip=True)
+                elif HAS_HTML2TEXT:
+                    h = html2text.HTML2Text()
+                    h.ignore_links = True
+                    h.ignore_images = True
+                    text = h.handle(html)
+                else:
+                    # 基础方法
+                    html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
+                    html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
+                    text = re.sub(r'<[^>]+>', '', html)
+                
+                # 清理文本
+                text = re.sub(r'\s+', ' ', text)
+                text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)
+                text = text.strip()
+                
+                if len(text) > 100:
+                    logger.info(f"Playwright提取成功: {len(text)} 字符")
+                    return text
+                else:
+                    logger.warning(f"Playwright提取的内容过短: {len(text)} 字符")
+                    return None
+                    
+        except PlaywrightTimeoutError:
+            logger.warning(f"Playwright超时: {url}")
+            return None
+        except Exception as e:
+            logger.warning(f"Playwright提取失败: {str(e)}")
+            return None
+    
     def extract_text_from_webpage(self, url: str, timeout: int = 30) -> str:
         """
         从网页URL提取文本内容
+        支持多种提取策略：
+        1. 使用requests + BeautifulSoup（标准网页）
+        2. 使用Playwright（需要JavaScript渲染的网页）
         
         Args:
             url: 网页URL
@@ -125,95 +223,160 @@ class InputProcessor:
             # 检测特殊网站（需要JavaScript渲染的网站）
             url_lower = url.lower()
             special_sites = {
-                'weibo.com': '微博网站需要JavaScript渲染，无法直接提取内容。建议：1) 复制微博文本内容直接输入；2) 使用"文字+指令"类型；3) 或提供微博文章的完整URL（而非用户主页）',
-                'twitter.com': 'Twitter网站需要JavaScript渲染，无法直接提取内容。建议复制推文内容直接输入',
-                'facebook.com': 'Facebook网站需要JavaScript渲染，无法直接提取内容。建议复制内容直接输入',
-                'instagram.com': 'Instagram网站需要JavaScript渲染，无法直接提取内容。建议复制内容直接输入',
-                'mbd.baidu.com': '百度移动端网页需要JavaScript渲染，无法直接提取内容。建议：1) 复制网页文本内容直接输入；2) 使用"文字+指令"类型；3) 或访问PC版网页',
+                'weibo.com': '微博网站需要JavaScript渲染',
+                'twitter.com': 'Twitter网站需要JavaScript渲染',
+                'facebook.com': 'Facebook网站需要JavaScript渲染',
+                'instagram.com': 'Instagram网站需要JavaScript渲染',
+                'mbd.baidu.com': '百度移动端网页需要JavaScript渲染',
             }
             
-            site_warning = None
-            for site_key, warning_msg in special_sites.items():
-                if site_key in url_lower:
-                    site_warning = warning_msg
-                    logger.warning(f"检测到特殊网站: {site_key}, 警告: {warning_msg}")
-                    break
+            needs_js = any(site_key in url_lower for site_key in special_sites.keys())
             
-            # 设置请求头，模拟浏览器访问
+            # 如果检测到需要JavaScript的网站，优先使用Playwright
+            if needs_js and HAS_PLAYWRIGHT:
+                logger.info(f"检测到需要JavaScript渲染的网站，使用Playwright提取")
+                text = self._extract_with_playwright(url, timeout)
+                if text and len(text) > 100:
+                    return text
+            
+            # 方法1: 使用requests获取HTML
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
                 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-                'Referer': 'https://www.google.com/'  # 添加Referer，某些网站需要
+                'Referer': 'https://www.google.com/'
             }
             
-            # 获取网页内容
             response = requests.get(url, headers=headers, timeout=timeout)
             response.raise_for_status()
             
-            # 处理编码问题：先尝试从响应头获取编码，如果没有则尝试检测
+            # 处理编码问题
             html = None
-            encoding_used = None
-            
-            # 方法1: 尝试从响应头获取编码
             if response.encoding:
                 try:
                     html = response.text
-                    encoding_used = response.encoding
                 except (UnicodeDecodeError, UnicodeError):
-                    logger.warning(f"使用响应头编码 {response.encoding} 失败，尝试其他编码")
                     html = None
             
-            # 方法2: 如果没有成功，尝试检测编码
             if html is None:
                 try:
                     import chardet
                     detected = chardet.detect(response.content)
                     if detected and detected.get('encoding'):
-                        detected_encoding = detected['encoding']
-                        response.encoding = detected_encoding
+                        response.encoding = detected['encoding']
                         html = response.text
-                        encoding_used = detected_encoding
-                        logger.info(f"使用chardet检测到编码: {detected_encoding}")
+                        logger.info(f"使用chardet检测到编码: {detected['encoding']}")
                 except ImportError:
-                    logger.warning("chardet库未安装，跳过自动编码检测")
-                except Exception as e:
-                    logger.warning(f"编码检测失败: {str(e)}")
+                    pass
+                except Exception:
+                    pass
             
-            # 方法3: 如果还是失败，尝试常见的中文编码
             if html is None:
                 for encoding in ['utf-8', 'gbk', 'gb2312', 'gb18030', 'big5']:
                     try:
                         response.encoding = encoding
                         html = response.text
-                        encoding_used = encoding
                         logger.info(f"使用编码 {encoding} 成功")
                         break
                     except (UnicodeDecodeError, UnicodeError):
                         continue
             
-            # 如果所有方法都失败，抛出异常
             if html is None:
                 raise Exception("无法确定网页编码，请检查网页是否可访问")
             
-            # 记录实际使用的编码
             logger.info(f"网页编码: {response.encoding}, HTML长度: {len(html)} 字符")
             
-            # 检查是否是空页面或仅包含脚本
+            # 检查是否是空页面
             if len(html) < 500:
-                if site_warning:
-                    raise Exception(f"{site_warning}")
-                else:
-                    raise Exception(f'网页内容为空或过短，可能是需要JavaScript渲染的动态网站。建议：1) 复制网页文本内容直接输入；2) 使用"文字+指令"类型')
+                # 如果内容过短且需要JavaScript，尝试使用Playwright
+                if needs_js and HAS_PLAYWRIGHT:
+                    logger.info("HTML内容过短，尝试使用Playwright")
+                    text = self._extract_with_playwright(url, timeout)
+                    if text and len(text) > 100:
+                        return text
+                raise Exception(f'网页内容为空或过短，可能是需要JavaScript渲染的动态网站。建议：1) 复制网页文本内容直接输入；2) 使用"文字+指令"类型；3) 或提供PC版网页URL')
             
-            # 移除脚本和样式
-            html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
-            html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
-            html = re.sub(r'<iframe[^>]*>.*?</iframe>', '', html, flags=re.DOTALL | re.IGNORECASE)
-            html = re.sub(r'<noscript[^>]*>.*?</noscript>', '', html, flags=re.DOTALL | re.IGNORECASE)
+            # 使用BeautifulSoup提取文本（如果可用）
+            if HAS_BS4:
+                try:
+                    soup = BeautifulSoup(html, 'lxml')
+                    
+                    # 移除脚本、样式等
+                    for element in soup(["script", "style", "noscript", "iframe", "nav", "header", "footer", "aside"]):
+                        element.decompose()
+                    
+                    # 尝试找到主要内容区域
+                    content_selectors = [
+                        'main',
+                        'article',
+                        '[class*="content"]',
+                        '[class*="article"]',
+                        '[class*="post"]',
+                        '[class*="entry"]',
+                        '[id*="content"]',
+                        '[id*="article"]',
+                    ]
+                    
+                    content_element = None
+                    for selector in content_selectors:
+                        try:
+                            elements = soup.select(selector)
+                            for elem in elements:
+                                text_len = len(elem.get_text(strip=True))
+                                if text_len > 200:
+                                    content_element = elem
+                                    break
+                            if content_element:
+                                break
+                        except Exception:
+                            continue
+                    
+                    # 如果找到内容区域，使用它；否则使用body
+                    if content_element:
+                        text = content_element.get_text(separator='\n', strip=True)
+                    else:
+                        body = soup.find('body')
+                        if body:
+                            text = body.get_text(separator='\n', strip=True)
+                        else:
+                            text = soup.get_text(separator='\n', strip=True)
+                    
+                    # 清理文本
+                    text = re.sub(r'\s+', ' ', text)
+                    text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)
+                    text = text.strip()
+                    
+                    if len(text) > 100:
+                        logger.info(f"BeautifulSoup提取成功: {len(text)} 字符")
+                        return text
+                except Exception as e:
+                    logger.warning(f"BeautifulSoup提取失败: {str(e)}，尝试其他方法")
+            
+            # 使用html2text提取（如果可用）
+            if HAS_HTML2TEXT:
+                try:
+                    h = html2text.HTML2Text()
+                    h.ignore_links = True
+                    h.ignore_images = True
+                    h.body_width = 0  # 不限制行宽
+                    text = h.handle(html)
+                    text = re.sub(r'\s+', ' ', text)
+                    text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)
+                    text = text.strip()
+                    
+                    if len(text) > 100:
+                        logger.info(f"html2text提取成功: {len(text)} 字符")
+                        return text
+                except Exception as e:
+                    logger.warning(f"html2text提取失败: {str(e)}，尝试基础方法")
+            
+            # 基础方法：使用正则表达式
+            html_clean = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
+            html_clean = re.sub(r'<style[^>]*>.*?</style>', '', html_clean, flags=re.DOTALL | re.IGNORECASE)
+            html_clean = re.sub(r'<iframe[^>]*>.*?</iframe>', '', html_clean, flags=re.DOTALL | re.IGNORECASE)
+            html_clean = re.sub(r'<noscript[^>]*>.*?</noscript>', '', html_clean, flags=re.DOTALL | re.IGNORECASE)
             
             # 尝试提取主要内容区域
-            # 常见的内容容器标签和class
             content_patterns = [
                 r'<main[^>]*>(.*?)</main>',
                 r'<article[^>]*>(.*?)</article>',
@@ -225,21 +388,20 @@ class InputProcessor:
             
             content_html = None
             for pattern in content_patterns:
-                match = re.search(pattern, html, re.DOTALL | re.IGNORECASE)
+                match = re.search(pattern, html_clean, re.DOTALL | re.IGNORECASE)
                 if match:
                     content_html = match.group(1)
-                    if len(content_html) > 200:  # 确保内容足够长
+                    if len(content_html) > 200:
                         break
             
-            # 如果没找到内容区域，使用body标签内的内容
             if not content_html:
-                body_match = re.search(r'<body[^>]*>(.*?)</body>', html, re.DOTALL | re.IGNORECASE)
+                body_match = re.search(r'<body[^>]*>(.*?)</body>', html_clean, re.DOTALL | re.IGNORECASE)
                 if body_match:
                     content_html = body_match.group(1)
                 else:
-                    content_html = html
+                    content_html = html_clean
             
-            # 将常见的HTML标签转换为换行
+            # 转换HTML标签为文本
             content_html = re.sub(r'<br[^>]*>', '\n', content_html, flags=re.IGNORECASE)
             content_html = re.sub(r'</p>', '\n\n', content_html, flags=re.IGNORECASE)
             content_html = re.sub(r'<p[^>]*>', '', content_html, flags=re.IGNORECASE)
@@ -262,17 +424,16 @@ class InputProcessor:
             text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)
             text = text.strip()
             
-            # 如果提取的文本为空或过短，提供更友好的错误信息
-            # 提高阈值到100字符，因为太短的内容通常不是有效的文章内容
+            # 如果提取的文本过短，尝试使用Playwright
             if len(text) < 100:
-                # 记录提取到的内容预览，用于调试
-                preview = text[:200] if len(text) > 200 else text
-                logger.warning(f"提取的文本过短（{len(text)}字符），预览: {preview}")
+                logger.warning(f"基础方法提取的文本过短（{len(text)}字符），尝试使用Playwright")
+                if HAS_PLAYWRIGHT:
+                    playwright_text = self._extract_with_playwright(url, timeout)
+                    if playwright_text and len(playwright_text) > 100:
+                        return playwright_text
                 
-                if site_warning:
-                    raise Exception(f"{site_warning}")
-                else:
-                    raise Exception(f'无法从该网页提取有效文本内容（仅提取到{len(text)}字符，内容: "{text[:50]}..."）。可能原因：1) 网页需要JavaScript渲染（如百度移动端、微博等）；2) 网页有反爬虫保护；3) 网页结构特殊。建议：1) 复制网页文本内容直接输入；2) 使用"文字+指令"类型；3) 或提供PC版网页URL')
+                preview = text[:200] if len(text) > 200 else text
+                raise Exception(f'无法从该网页提取有效文本内容（仅提取到{len(text)}字符，内容: "{preview[:50]}..."）。可能原因：1) 网页需要JavaScript渲染（如百度移动端、微博等）；2) 网页有反爬虫保护；3) 网页结构特殊。建议：1) 复制网页文本内容直接输入；2) 使用"文字+指令"类型；3) 或提供PC版网页URL；4) 安装Playwright以支持JavaScript渲染: pip install playwright && playwright install chromium')
             
             logger.info(f"网页内容提取成功: {len(text)} 字符")
             return text
