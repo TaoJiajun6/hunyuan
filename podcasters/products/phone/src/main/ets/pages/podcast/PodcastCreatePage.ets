@@ -137,6 +137,7 @@ export struct PodcastCreatePage {
   @Local playingVoiceId: string = ''; // 正在播放预览的音色ID
   @Local voiceList: VoiceInfo[] = []; // 从API获取的音色列表
   @Local voicePlayer: media.AVPlayer | null = null; // 音色播放器
+  @Local expandedVoiceRoles: Record<string, boolean> = {}; // 记录每个角色的音色列表是否展开
   // ========== 分类选择相关 ==========
   @Local showCategoryPicker: boolean = false; // 是否显示分类选择器
   // 播客分类选项列表
@@ -2023,9 +2024,16 @@ export struct PodcastCreatePage {
                         duration: 2000
                       });
                     })
-                  }, (voice: VoiceInfo) => voice.id)
+                      }, (voice: VoiceInfo) => voice.id)
+                    }
+                    .width('100%')
+                    .padding({ top: 8, left: 16, right: 16, bottom: 16 })
+                    .backgroundColor('#FAFAFA')
+                    .borderRadius({ bottomLeft: 12, bottomRight: 12 })
+                  }
                 }
                 .width('100%')
+                .margin({ top: 8 })
               } else {
                 // 如果没有音色列表，显示提示
                 Text('暂无可用音色，请上传自定义音色')
@@ -2678,9 +2686,16 @@ export struct PodcastCreatePage {
                         duration: 2000
                       });
                     })
-                  }, (voice: VoiceInfo) => voice.id)
+                      }, (voice: VoiceInfo) => voice.id)
+                    }
+                    .width('100%')
+                    .padding({ top: 8, left: 16, right: 16, bottom: 16 })
+                    .backgroundColor('#FAFAFA')
+                    .borderRadius({ bottomLeft: 12, bottomRight: 12 })
+                  }
                 }
                 .width('100%')
+                .margin({ top: 8 })
               } else {
                 // 如果没有音色列表，显示提示
                 Text('暂无可用音色，请上传自定义音色')
