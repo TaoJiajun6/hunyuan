@@ -3679,88 +3679,188 @@ async def generate_podcast_cover(request: GenerateCoverRequest):
                 }
             )
         
-        # 调用SiliconFlow的图像生成API（使用Qwen-Image-Edit-2509模型）
-        try:
-            headers = {
-                "Authorization": f"Bearer {siliconflow_api_key}",
-                "Content-Type": "application/json"
-            }
-            
-            # 使用Qwen-Image-Edit-2509模型
-            # 该模型支持中文提示词，生成质量高
-            payload = {
-                "model": "Qwen/Qwen-Image-Edit-2509",
-                "prompt": image_prompt,  # 使用中文提示词
-                "negative_prompt": "模糊, 低质量, 扭曲, 丑陋, 不良解剖结构",
-                "width": 1024,  # Qwen-Image-Edit-2509支持更高分辨率
+        # 调用SiliconFlow的图像生成API（尝试多个模型，支持自动回退）
+        # 模型列表：按优先级排序，如果第一个失败则尝试下一个
+        # 注意：Qwen-Image-Edit-2509可能不在硅基流动平台上，使用Stable Diffusion作为主要选项
+        models_to_try = [
+            {
+                "name": "stabilityai/stable-diffusion-xl-base-1.0",  # Stable Diffusion XL，高质量
+                "width": 1024,
                 "height": 1024,
-                "num_inference_steps": 30,  # 增加步数以获得更好质量
-                "guidance_scale": 7.5
+                "num_inference_steps": 30,
+                "use_chinese": False  # Stable Diffusion使用英文提示词
+            },
+            {
+                "name": "runwayml/stable-diffusion-v1-5",  # Stable Diffusion v1.5，备用选项
+                "width": 512,
+                "height": 512,
+                "num_inference_steps": 20,
+                "use_chinese": False
             }
-            
-            logger.info(f"调用SiliconFlow Qwen-Image-Edit-2509 API: {image_prompt[:50]}...")
-            
-            response = requests.post(
-                f"{siliconflow_api_base}/images/generations",
-                headers=headers,
-                json=payload,
-                timeout=120  # Qwen-Image-Edit-2509可能需要更长时间
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                if "data" in result and len(result["data"]) > 0:
-                    # 获取生成的图像URL或base64
-                    image_data = result["data"][0]
-                    image_url = image_data.get("url") or image_data.get("b64_json")
-                    
-                    if image_url and image_url.startswith("data:"):
-                        # 已经是base64格式
-                        final_image_url = image_url
-                    elif image_url:
-                        # 是URL，需要下载并转换为base64（或直接返回URL）
-                        final_image_url = image_url
-                    else:
-                        # 如果返回的是b64_json字段
-                        b64_data = image_data.get("b64_json")
-                        if b64_data:
-                            final_image_url = f"data:image/png;base64,{b64_data}"
-                        else:
-                            raise Exception("API返回的数据格式不正确")
-                    
-                    logger.info("封面图生成成功")
-                    return ApiResponse(
-                        success=True,
-                        message="封面图生成成功",
-                        data={
-                            "image_url": final_image_url,
-                            "prompt": image_prompt
-                        }
-                    )
-                else:
-                    raise Exception("API返回的数据为空")
-            else:
-                error_msg = response.text
-                logger.error(f"SiliconFlow API调用失败: HTTP {response.status_code}, {error_msg}")
-                raise Exception(f"图像生成API调用失败: {error_msg}")
-                
-        except Exception as e:
-            logger.error(f"调用图像生成API失败: {e}")
-            # 如果API调用失败，返回提示词和占位图
-            img = Image.new('RGB', (512, 512), color=(73, 109, 137))
-            buffered = BytesIO()
-            img.save(buffered, format="PNG")
-            img_base64 = base64.b64encode(buffered.getvalue()).decode()
-            
-            return ApiResponse(
-                success=True,
-                message="封面图提示词已生成（图像生成API调用失败，返回占位图）",
-                data={
-                    "image_url": f"data:image/png;base64,{img_base64}",
-                    "prompt": image_prompt,
-                    "error": str(e)
+        ]
+        
+        last_error = None
+        for model_config in models_to_try:
+            try:
+                headers = {
+                    "Authorization": f"Bearer {siliconflow_api_key}",
+                    "Content-Type": "application/json"
                 }
-            )
+                
+                # 根据模型选择提示词语言
+                if model_config.get("use_chinese", False):
+                    # 支持中文的模型使用中文提示词
+                    prompt_to_use = image_prompt
+                    negative_prompt = "模糊, 低质量, 扭曲, 丑陋, 不良解剖结构"
+                else:
+                    # Stable Diffusion使用英文提示词
+                    # 将中文提示词转换为英文（使用混元大模型进行翻译）
+                    try:
+                        translation_prompt = f"""将以下中文提示词翻译成简洁的英文图像生成提示词（不超过50个单词），用于生成播客封面图：
+
+中文提示词：{image_prompt}
+
+要求：
+1. 翻译要准确，保留原意
+2. 适合作为图像生成提示词
+3. 只返回英文翻译，不要其他解释
+
+英文提示词："""
+                        prompt_to_use = api_client.generate_text(
+                            prompt=translation_prompt,
+                            temperature=0.5,
+                            max_tokens=100
+                        ).strip().strip('"').strip("'").strip()
+                        logger.info(f"中文提示词已翻译为英文: {prompt_to_use}")
+                    except Exception as e:
+                        logger.warning(f"翻译提示词失败，使用默认英文提示词: {e}")
+                        # 如果翻译失败，使用基于主题的英文提示词
+                        if request.topic:
+                            prompt_to_use = f"Podcast cover art, {request.topic}, modern, professional, minimalist design, vibrant colors"
+                        elif request.podcast_name:
+                            prompt_to_use = f"Podcast cover art, {request.podcast_name}, modern, professional, minimalist design"
+                        else:
+                            prompt_to_use = "Podcast cover art, modern, professional, minimalist design, vibrant colors"
+                    negative_prompt = "blurry, low quality, distorted, ugly, bad anatomy"
+                
+                payload = {
+                    "model": model_config["name"],
+                    "prompt": prompt_to_use,
+                    "negative_prompt": negative_prompt,
+                    "width": model_config["width"],
+                    "height": model_config["height"],
+                    "num_inference_steps": model_config["num_inference_steps"],
+                    "guidance_scale": 7.5
+                }
+                
+                logger.info(f"尝试使用模型 {model_config['name']}: {prompt_to_use[:50]}...")
+                
+                response = requests.post(
+                    f"{siliconflow_api_base}/images/generations",
+                    headers=headers,
+                    json=payload,
+                    timeout=120
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if "data" in result and len(result["data"]) > 0:
+                        # 获取生成的图像URL或base64
+                        image_data = result["data"][0]
+                        image_url = image_data.get("url") or image_data.get("b64_json")
+                        
+                        if image_url and image_url.startswith("data:"):
+                            # 已经是base64格式
+                            final_image_url = image_url
+                        elif image_url:
+                            # 是URL，需要下载并转换为base64（或直接返回URL）
+                            final_image_url = image_url
+                        else:
+                            # 如果返回的是b64_json字段
+                            b64_data = image_data.get("b64_json")
+                            if b64_data:
+                                final_image_url = f"data:image/png;base64,{b64_data}"
+                            else:
+                                raise Exception("API返回的数据格式不正确")
+                        
+                        logger.info(f"封面图生成成功（使用模型: {model_config['name']}）")
+                        return ApiResponse(
+                            success=True,
+                            message="封面图生成成功",
+                            data={
+                                "image_url": final_image_url,
+                                "prompt": image_prompt,
+                                "model_used": model_config["name"]
+                            }
+                        )
+                    else:
+                        raise Exception("API返回的数据为空")
+                else:
+                    error_msg = response.text
+                    error_data = response.json() if response.text else {}
+                    error_code = error_data.get("code", response.status_code)
+                    
+                    # 如果是模型不存在的错误，尝试下一个模型
+                    if error_code == 20012 or "Model does not exist" in error_msg:
+                        logger.warning(f"模型 {model_config['name']} 不存在，尝试下一个模型")
+                        last_error = f"模型不存在: {model_config['name']}"
+                        continue
+                    else:
+                        # 其他错误，直接抛出
+                        raise Exception(f"图像生成API调用失败: {error_msg}")
+                        
+            except Exception as e:
+                error_msg = str(e)
+                # 如果是模型不存在错误，继续尝试下一个
+                if "Model does not exist" in error_msg or "20012" in error_msg:
+                    logger.warning(f"模型 {model_config['name']} 调用失败: {error_msg}，尝试下一个模型")
+                    last_error = error_msg
+                    continue
+                else:
+                    # 其他错误，记录并继续尝试
+                    logger.warning(f"模型 {model_config['name']} 调用失败: {error_msg}，尝试下一个模型")
+                    last_error = error_msg
+                    continue
+        
+        # 所有模型都失败了
+        logger.error(f"所有图像生成模型都调用失败，最后一个错误: {last_error}")
+        # 返回占位图
+        img = Image.new('RGB', (512, 512), color=(73, 109, 137))
+        buffered = BytesIO()
+        img.save(buffered, format="PNG")
+        img_base64 = base64.b64encode(buffered.getvalue()).decode()
+        
+        return ApiResponse(
+            success=True,
+            message="封面图提示词已生成（所有图像生成模型都调用失败，返回占位图）",
+            data={
+                "image_url": f"data:image/png;base64,{img_base64}",
+                "prompt": image_prompt,
+                "error": last_error or "所有模型都调用失败",
+                "note": "请检查SILICONFLOW_API_KEY和可用模型列表"
+            }
+        )
+                
+    except Exception as e:
+        logger.error(f"调用图像生成API失败: {e}")
+        import traceback
+        logger.error(f"错误详情: {traceback.format_exc()}")
+        # 如果所有模型都失败，返回提示词和占位图
+        img = Image.new('RGB', (512, 512), color=(73, 109, 137))
+        buffered = BytesIO()
+        img.save(buffered, format="PNG")
+        img_base64 = base64.b64encode(buffered.getvalue()).decode()
+        
+        return ApiResponse(
+            success=True,
+            message="封面图提示词已生成（图像生成API调用失败，返回占位图）",
+            data={
+                "image_url": f"data:image/png;base64,{img_base64}",
+                "prompt": image_prompt,
+                "error": str(e),
+                "note": "请检查SILICONFLOW_API_KEY和可用模型列表"
+            }
+        )
             
     except Exception as e:
         import traceback

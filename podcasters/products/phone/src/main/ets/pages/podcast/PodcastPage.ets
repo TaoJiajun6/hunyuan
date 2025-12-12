@@ -1087,6 +1087,22 @@ export struct PodcastPage {
         })
 
       MenuItem({
+        startIcon: $r("sys.symbol.message"),
+        content: "微信公众号"
+      })
+        .onChange(() => {
+          this.navigateToCreatePage('微信公众号');
+        })
+
+      MenuItem({
+        startIcon: $r("sys.symbol.message"),
+        content: "微信公众号+指令"
+      })
+        .onChange(() => {
+          this.navigateToCreatePage('微信公众号+指令');
+        })
+
+      MenuItem({
         startIcon: $r("sys.symbol.camera"),
         content: "图片和视频"
       })

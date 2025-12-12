@@ -53,6 +53,8 @@ enum InputType {
   FILE_INSTRUCTION = '文件+指令',
   LINK = '链接',
   LINK_INSTRUCTION = '链接+指令',
+  WECHAT = '微信公众号',
+  WECHAT_INSTRUCTION = '微信公众号+指令',
   IMAGE_VIDEO = '图片和视频'
 }
 
@@ -206,6 +208,10 @@ export struct PodcastCreatePage {
         this.currentInputType = InputType.LINK;
       } else if (inputTypeStr === '链接+指令') {
         this.currentInputType = InputType.LINK_INSTRUCTION;
+      } else if (inputTypeStr === '公众号' || inputTypeStr === '微信公众号') {
+        this.currentInputType = InputType.WECHAT;
+      } else if (inputTypeStr === '公众号+指令' || inputTypeStr === '微信公众号+指令') {
+        this.currentInputType = InputType.WECHAT_INSTRUCTION;
       } else if (inputTypeStr === '图片和视频') {
         this.currentInputType = InputType.IMAGE_VIDEO;
       }
@@ -353,6 +359,10 @@ export struct PodcastCreatePage {
       this.text = '';
       this.inputUrl = '';
     } else if (type === InputType.LINK || type === InputType.LINK_INSTRUCTION) {
+      this.text = '';
+      this.textFileUrls = [];
+      this.textFileNames = [];
+    } else if (type === InputType.WECHAT || type === InputType.WECHAT_INSTRUCTION) {
       this.text = '';
       this.textFileUrls = [];
       this.textFileNames = [];
@@ -1159,7 +1169,7 @@ export struct PodcastCreatePage {
       const hasInputUrl = this.inputUrl.trim().length > 0;
 
       const needsInputUrl =
-        this.currentInputType !== null && [InputType.LINK, InputType.LINK_INSTRUCTION].includes(this.currentInputType);
+        this.currentInputType !== null && [InputType.LINK, InputType.LINK_INSTRUCTION, InputType.WECHAT, InputType.WECHAT_INSTRUCTION].includes(this.currentInputType);
       const needsFile =
         this.currentInputType !== null && [InputType.FILE, InputType.FILE_INSTRUCTION].includes(this.currentInputType);
       const needsText =
@@ -1284,6 +1294,10 @@ export struct PodcastCreatePage {
       inputTypeStr = '网页';
     } else if (this.currentInputType === InputType.LINK_INSTRUCTION) {
       inputTypeStr = '网页+指令';
+    } else if (this.currentInputType === InputType.WECHAT) {
+      inputTypeStr = '公众号';
+    } else if (this.currentInputType === InputType.WECHAT_INSTRUCTION) {
+      inputTypeStr = '公众号+指令';
     }
 
     const request: MultiRoleRequest = {
@@ -1814,6 +1828,60 @@ export struct PodcastCreatePage {
 
         // 如果是链接+指令，显示指令输入框
         if (this.currentInputType === InputType.LINK_INSTRUCTION) {
+          TextArea({
+            placeholder: '请输入指令内容（可选）',
+            text: $$this.instruction
+          })
+            .width('100%')
+            .height(100)
+            .backgroundColor('#FFFFFF')
+            .borderRadius(16)
+            .border({
+              width: 1,
+              color: '#E0E0E0',
+              style: BorderStyle.Solid
+            })
+            .shadow({
+              radius: 14,
+              color: '#1F000000',
+              offsetX: 0,
+              offsetY: 20
+            })
+            .onChange((value: string) => {
+              this.instruction = value;
+            })
+        }
+      } else if (this.currentInputType === InputType.WECHAT || this.currentInputType === InputType.WECHAT_INSTRUCTION) {
+        // 微信公众号文章URL输入
+        Row({ space: 10 }) {
+          TextInput({
+            placeholder: '请输入微信公众号文章链接',
+            text: this.inputUrl
+          })
+            .layoutWeight(1)
+            .height(48)
+            .backgroundColor('#FFFFFF')
+            .borderRadius(16)
+            .border({
+              width: 1,
+              color: '#E0E0E0',
+              style: BorderStyle.Solid
+            })
+            .shadow({
+              radius: 14,
+              color: '#1F000000',
+              offsetX: 0,
+              offsetY: 20
+            })
+            .onChange((value: string) => {
+              this.inputUrl = value;
+            })
+
+        }
+        .width('100%')
+
+        // 如果是微信公众号+指令，显示指令输入框
+        if (this.currentInputType === InputType.WECHAT_INSTRUCTION) {
           TextArea({
             placeholder: '请输入指令内容（可选）',
             text: $$this.instruction
@@ -2981,7 +3049,14 @@ export struct PodcastCreatePage {
             }
             .width('100%')
 
-            // 第三行：图片和视频
+            // 第三行：微信公众号、微信公众号+指令
+            Row({ space: 14 }) {
+              this.materialTypeButton('微信公众号', InputType.WECHAT, $r("sys.symbol.message"))
+              this.materialTypeButton('微信公众号+指令', InputType.WECHAT_INSTRUCTION, $r("sys.symbol.message"))
+            }
+            .width('100%')
+
+            // 第四行：图片和视频
             Row({ space: 14 }) {
               this.materialTypeButton('图片和视频', InputType.IMAGE_VIDEO, $r("sys.symbol.camera"))
             }
@@ -3012,6 +3087,9 @@ export struct PodcastCreatePage {
       case InputType.LINK:
       case InputType.LINK_INSTRUCTION:
         return $r("sys.symbol.link");
+      case InputType.WECHAT:
+      case InputType.WECHAT_INSTRUCTION:
+        return $r("sys.symbol.message");
       case InputType.IMAGE_VIDEO:
         return $r("sys.symbol.camera");
       default:
@@ -3514,6 +3592,156 @@ export struct PodcastCreatePage {
           })
 
           if (this.currentInputType === InputType.LINK_INSTRUCTION) {
+            Column({ space: 12 }) {
+              Row() {
+                Image($r("sys.symbol.gearshape_fill"))
+                  .width(20)
+                  .height(20)
+                  .fillColor('#a0e5ff')
+                Text('指令内容（可选）')
+                  .fontSize(16)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor('#1A1A1A')
+                Blank()
+              }
+              .width('100%')
+
+              TextArea({
+                placeholder: '请输入指令内容，用于指导AI生成播客...',
+                text: $$this.instruction
+              })
+                .width('100%')
+                .height(120)
+                .backgroundColor('#FFFFFF')
+                .borderRadius(16)
+                .border({
+                  width: 1,
+                  color: '#E0E0E0',
+                  style: BorderStyle.Solid
+                })
+                .shadow({
+                  radius: 14,
+                  color: '#1F000000',
+                  offsetX: 0,
+                  offsetY: 20
+                })
+                .fontSize(15)
+                .padding({
+                  left: 16,
+                  right: 16,
+                  top: 16,
+                  bottom: 16
+                })
+                .onChange((value: string) => {
+                  this.instruction = value;
+                })
+            }
+            .width('100%')
+            .padding({
+              top: 20,
+              bottom: 20,
+              left: 20,
+              right: 20
+            })
+            .backgroundColor('#FFFFFF')
+            .borderRadius(20)
+            .shadow({
+              radius: 14,
+              color: '#1F000000',
+              offsetX: 0,
+              offsetY: 20
+            })
+          }
+        }
+        .width('100%')
+      } else if (this.currentInputType === InputType.WECHAT || this.currentInputType === InputType.WECHAT_INSTRUCTION) {
+        Column({ space: 20 }) {
+          // 微信公众号文章链接输入卡片
+          Column({ space: 16 }) {
+            Row() {
+              Image($r("sys.symbol.message"))
+                .width(20)
+                .height(20)
+                .fillColor('#ffb3e0')
+              Text('微信公众号文章链接')
+                .fontSize(16)
+                .fontWeight(FontWeight.Bold)
+                .fontColor('#1A1A1A')
+              Blank()
+            }
+            .width('100%')
+
+            Row({ space: 12 }) {
+              TextInput({
+                placeholder: '请输入或粘贴微信公众号文章链接...',
+                text: this.inputUrl
+              })
+                .layoutWeight(1)
+                .height(52)
+                .backgroundColor('#FAFAFA')
+                .borderRadius(16)
+                .border({
+                  width: 1,
+                  color: '#E0E0E0',
+                  style: BorderStyle.Solid
+                })
+                .fontSize(15)
+                .padding({ left: 16, right: 16 })
+                .onChange((value: string) => {
+                  this.inputUrl = value;
+                })
+
+              Button() {
+                Row({ space: 6 }) {
+                  Image($r("sys.symbol.doc_text"))
+                    .width(18)
+                    .height(18)
+                    .fillColor('#FFFFFF')
+                  Text('粘贴')
+                    .fontSize(15)
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor('#FFFFFF')
+                }
+              }
+              .type(ButtonType.Normal)
+              .height(52)
+              .linearGradient({
+                angle: 90,
+                colors: [
+                  ['#ffb3e0', 0.0],
+                  ['#ffc78cfd', 0.6],
+                  ['#a0e5ff', 1.0]
+                ]
+              })
+              .borderRadius(16)
+              .padding({ left: 20, right: 20 })
+              .shadow({
+                radius: 14,
+                color: '#1F000000',
+                offsetX: 0,
+                offsetY: 20
+              })
+              .onClick(() => this.pasteLink())
+            }
+            .width('100%')
+          }
+          .width('100%')
+          .padding({
+            top: 20,
+            bottom: 20,
+            left: 20,
+            right: 20
+          })
+          .backgroundColor('#FFFFFF')
+          .borderRadius(20)
+          .shadow({
+            radius: 14,
+            color: '#1F000000',
+            offsetX: 0,
+            offsetY: 20
+          })
+
+          if (this.currentInputType === InputType.WECHAT_INSTRUCTION) {
             Column({ space: 12 }) {
               Row() {
                 Image($r("sys.symbol.gearshape_fill"))
