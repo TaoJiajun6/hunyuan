@@ -3,6 +3,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { Logger } from 'lib_common';
 import { cloudDatabaseService, PodcastQueryResult } from './CloudDatabaseService';
 import { PodcastInfo } from '../database/PodcastInfo';
+import { cloudStorage } from '@kit.CloudFoundationKit';
 
 const TAG = '[PodcastService]';
 
@@ -27,7 +28,7 @@ export class PodcastConfig {
   // 5. 直连服务器IP（推荐，避免网关超时）：设置为服务器的公网/内网IP和端口
   //    例如：'http://9.165.4.87:8000' 或 'http://192.168.1.100:8000'
   //    注意：确保服务器防火墙允许8000端口访问
-  static readonly API_BASE_URL: string = 'http://106.52.246.138:8000/'; // 请替换为实际的服务器IP地址
+  static readonly API_BASE_URL: string = 'http://106.55.226.108:8000/'; // 请替换为实际的服务器IP地址
   static readonly API_TIMEOUT: number = 600000; // 10分钟超时（考虑大文件上传和播客生成时间）
 
   
@@ -432,6 +433,25 @@ export interface PodcastListItem {
 interface PodcastListResponseData {
   podcasts: PodcastListItem[];
   total?: number;
+}
+
+/**
+ * 音色信息推断结果
+ */
+interface VoiceInfoInference {
+  gender: 'male' | 'female' | 'neutral';
+  style: string;
+  displayName: string;
+  description: string;
+}
+
+/**
+ * 性别排序顺序
+ */
+interface GenderOrder {
+  male: number;
+  female: number;
+  neutral: number;
 }
 
 /**
@@ -1562,71 +1582,240 @@ export class PodcastService {
    * @returns 音色文件列表
    */
   async getVoiceList(): Promise<VoiceInfo[]> {
-    return new Promise((resolve) => {
+    return new Promise(async (resolve) => {
       try {
-        const url = `${PodcastConfig.API_BASE_URL}api/v1/podcast/voices`;
-        Logger.info(TAG, `获取音色列表: ${url}`);
+        Logger.info(TAG, `从云存储获取音色列表: voices/`);
         
-        const httpRequest = http.createHttp();
-        httpRequest.request(url, {
-          method: http.RequestMethod.GET,
-          header: {
-            'Content-Type': 'application/json'
-          },
-          connectTimeout: 30000,
-          readTimeout: 30000
-        }, (err: BusinessError, data: http.HttpResponse) => {
-          httpRequest.destroy();
-          
-          if (err) {
-            Logger.error(TAG, `获取音色列表失败: ${JSON.stringify(err)}`);
-            resolve([]);
-            return;
-          }
-
-          if (data.responseCode === 200) {
-            try {
-              // 定义响应数据接口
-              interface VoiceListResponseData {
-                voices: VoiceInfo[];
-              }
-              const result = JSON.parse(data.result.toString()) as ApiResponse<VoiceListResponseData>;
-              if (result.success && result.data && result.data.voices) {
-                Logger.info(TAG, `获取到 ${result.data.voices.length} 个音色文件`);
-                // 统计各性别的数量
-                const maleCount = result.data.voices.filter(v => v.gender === 'male').length;
-                const femaleCount = result.data.voices.filter(v => v.gender === 'female').length;
-                const neutralCount = result.data.voices.filter(v => v.gender === 'neutral').length;
-                Logger.info(TAG, `音色性别统计: 男声=${maleCount}, 女声=${femaleCount}, 中性=${neutralCount}`);
-                // 添加调试日志，打印前几个音色的详细信息
-                if (result.data.voices.length > 0) {
-                  Logger.info(TAG, `音色列表示例（前10个）:`);
-                  for (let i = 0; i < Math.min(10, result.data.voices.length); i++) {
-                    const voice = result.data.voices[i];
-                    Logger.info(TAG, `  [${i}] id=${voice.id}, name=${voice.name}, gender=${voice.gender}, style=${voice.style}, file=${voice.file}`);
-                  }
-                }
-                resolve(result.data.voices);
-              } else {
-                Logger.warn(TAG, `获取音色列表返回空数据: ${JSON.stringify(result)}`);
-                // 添加详细日志
-                Logger.warn(TAG, `result.success=${result.success}, result.data=${JSON.stringify(result.data)}`);
-                resolve([]);
-              }
-            } catch (parseError) {
-              Logger.error(TAG, `解析音色列表响应失败: ${JSON.stringify(parseError)}`);
-              resolve([]);
+        // 初始化云存储实例
+        const bucket = cloudStorage.bucket();
+        
+        // 获取 voices/ 目录下的文件列表
+        const result: cloudStorage.ListResults = await bucket.list('voices/');
+        
+        Logger.info(TAG, `获取文件列表成功，结果: ${JSON.stringify(result)}`);
+        
+        const voices: VoiceInfo[] = [];
+        
+        // 处理文件列表
+        if (result.files && result.files.length > 0) {
+          for (let i = 0; i < result.files.length; i++) {
+            const fileName: string = result.files[i];
+            // 处理文件名和完整路径
+            const isFullPath: boolean = fileName.includes('/');
+            const fullPath: string = isFullPath ? fileName : `voices/${fileName}`;
+            const splitResult: string[] = fullPath.split('/');
+            const displayFileName: string = splitResult.length > 0 ? splitResult[splitResult.length - 1] : fileName;
+            
+            // 只处理音频文件
+            if (!this.isAudioFile(displayFileName)) {
+              continue;
             }
-          } else {
-            Logger.error(TAG, `获取音色列表失败: HTTP ${data.responseCode}`);
-            resolve([]);
+            
+            try {
+              // 获取下载URL
+              const downloadUrl: string = await bucket.getDownloadURL(fullPath);
+              
+              // 从文件名推断性别和风格
+              const voiceInfo: VoiceInfoInference = this.inferVoiceInfo(displayFileName);
+              const gender: 'male' | 'female' | 'neutral' = voiceInfo.gender;
+              const style: string = voiceInfo.style;
+              const displayName: string = voiceInfo.displayName;
+              const description: string = voiceInfo.description;
+              
+              // 生成ID
+              const voiceId: string = displayFileName.replace(/\.[^/.]+$/, ''); // 去掉扩展名
+              
+              voices.push({
+                id: `voice_${voiceId}`,
+                name: displayName,
+                description: description,
+                file: displayFileName,
+                url: downloadUrl,
+                cloud_path: fullPath,
+                gender: gender,
+                style: style
+              });
+            } catch (error) {
+              const err = error as BusinessError;
+              Logger.error(TAG, `处理音色文件 ${displayFileName} 失败: ${err.message}`);
+              // 继续处理其他文件
+            }
           }
+        }
+        
+        // 按性别和风格排序
+        voices.sort((a: VoiceInfo, b: VoiceInfo) => {
+          const genderOrder: GenderOrder = { 'male': 0, 'female': 1, 'neutral': 2 };
+          let aOrder: number = 3;
+          if (a.gender === 'male') {
+            aOrder = genderOrder.male;
+          } else if (a.gender === 'female') {
+            aOrder = genderOrder.female;
+          } else if (a.gender === 'neutral') {
+            aOrder = genderOrder.neutral;
+          }
+          let bOrder: number = 3;
+          if (b.gender === 'male') {
+            bOrder = genderOrder.male;
+          } else if (b.gender === 'female') {
+            bOrder = genderOrder.female;
+          } else if (b.gender === 'neutral') {
+            bOrder = genderOrder.neutral;
+          }
+          const genderCompare: number = aOrder - bOrder;
+          if (genderCompare !== 0) return genderCompare;
+          return a.style.localeCompare(b.style) || a.name.localeCompare(b.name);
         });
+        
+        Logger.info(TAG, `获取到 ${voices.length} 个音色文件`);
+        // 统计各性别的数量
+        const maleCount = voices.filter((v: VoiceInfo) => v.gender === 'male').length;
+        const femaleCount = voices.filter((v: VoiceInfo) => v.gender === 'female').length;
+        const neutralCount = voices.filter((v: VoiceInfo) => v.gender === 'neutral').length;
+        Logger.info(TAG, `音色性别统计: 男声=${maleCount}, 女声=${femaleCount}, 中性=${neutralCount}`);
+        // 添加调试日志，打印前几个音色的详细信息
+        if (voices.length > 0) {
+          Logger.info(TAG, `音色列表示例（前10个）:`);
+          for (let i = 0; i < Math.min(10, voices.length); i++) {
+            const voice = voices[i];
+            Logger.info(TAG, `  [${i}] id=${voice.id}, name=${voice.name}, gender=${voice.gender}, style=${voice.style}, file=${voice.file}`);
+          }
+        }
+        
+        resolve(voices);
       } catch (error) {
-        Logger.error(TAG, `获取音色列表异常: ${JSON.stringify(error)}`);
+        const err = error as BusinessError;
+        Logger.error(TAG, `获取音色列表失败: ${err.message}`);
         resolve([]);
       }
     });
+  }
+  
+  /**
+   * 检查文件是否为音频文件
+   */
+  private isAudioFile(fileName: string): boolean {
+    const audioExtensions: string[] = ['.wav', '.mp3', '.m4a', '.aac', '.flac', '.ogg', '.wma'];
+    const lowerFileName: string = fileName.toLowerCase();
+    return audioExtensions.some((ext: string) => lowerFileName.endsWith(ext));
+  }
+  
+  /**
+   * 从文件名推断音色信息（性别、风格、显示名称、描述）
+   */
+  private inferVoiceInfo(filename: string): VoiceInfoInference {
+    const filenameLower: string = filename.toLowerCase();
+    
+    // 推断性别（优先检查 female，因为 female 包含 male 子串）
+    let gender: 'male' | 'female' | 'neutral' = 'neutral';
+    if (filenameLower.includes('female') || filename.includes('女') || filename.includes('女声')) {
+      gender = 'female';
+    } else if (filenameLower.includes('male') || filename.includes('男') || filename.includes('男声')) {
+      gender = 'male';
+    }
+    
+    // 推断风格
+    let style: string = '自然'; // 默认风格
+    const styleKeywords: Record<string, string[]> = {
+      '沉稳': ['沉稳', 'steady', 'stable', 'calm', 'serious'],
+      '活泼': ['活泼', 'lively', 'energetic', 'cheerful', 'vibrant'],
+      '温柔': ['温柔', 'gentle', 'sweet', 'tender', 'soft'],
+      '知性': ['知性', 'intelligent', 'wise', 'sophisticated'],
+      '自然': ['自然', 'natural', 'normal', 'casual', 'relaxed', 'mandarin', '普通话'],
+      '成熟': ['成熟', 'mature', 'adult'],
+      '年轻': ['年轻', 'young', 'youthful', 'fresh'],
+      '磁性': ['磁性', 'magnetic', 'charming', 'attractive', 'sexy'],
+      '阳光': ['阳光', 'sunny', 'bright', 'positive', 'optimistic'],
+      '优雅': ['优雅', 'elegant', 'graceful', 'refined'],
+      '亲切': ['亲切', 'friendly', 'warm', 'kind', 'amiable'],
+      '专业': ['专业', 'professional', 'expert', 'authoritative'],
+      '幽默': ['幽默', 'humorous', 'funny', 'witty', 'amusing'],
+      '严肃': ['严肃', 'serious', 'solemn', 'formal'],
+      '轻松': ['轻松', 'relaxed', 'easy', 'light'],
+      '激情': ['激情', 'passionate', 'enthusiastic', 'fiery'],
+      '安静': ['安静', 'quiet', 'peaceful', 'calm', 'tranquil'],
+      '自信': ['自信', 'confident', 'assured', 'bold'],
+      '温暖': ['温暖', 'warm', 'cozy', 'comforting'],
+      '清新': ['清新', 'fresh', 'clean', 'crisp', 'clear']
+    };
+    
+    // 匹配风格关键词（按顺序匹配，找到第一个匹配的就停止）
+    const styleKeywordEntries: string[] = Object.keys(styleKeywords);
+    for (let i = 0; i < styleKeywordEntries.length; i++) {
+      const styleName: string = styleKeywordEntries[i];
+      const keywords: string[] = styleKeywords[styleName];
+      if (keywords.some((kw: string) => filenameLower.includes(kw))) {
+        style = styleName;
+        break;
+      }
+    }
+    
+    // 生成显示名称
+    let displayName: string = filename;
+    if (gender === 'male') {
+      displayName = `男声-${style}`;
+    } else if (gender === 'female') {
+      displayName = `女声-${style}`;
+    } else {
+      displayName = `中性-${style}`;
+    }
+    
+    // 生成描述
+    const styleDescriptions: Record<string, Record<string, string>> = {
+      '沉稳': { 'male': '沉稳大气的男声', 'female': '沉稳优雅的女声', 'neutral': '沉稳专业的中性声音' },
+      '活泼': { 'male': '活泼开朗的男声', 'female': '活泼甜美的女声', 'neutral': '活泼生动的中性声音' },
+      '温柔': { 'male': '温柔细腻的男声', 'female': '温柔甜美的女声', 'neutral': '温柔亲切的中性声音' },
+      '知性': { 'male': '知性专业的男声', 'female': '知性优雅的女声', 'neutral': '知性睿智的中性声音' },
+      '自然': { 'male': '自然大气的男声', 'female': '自然甜美的女声', 'neutral': '自然流畅的中性声音' },
+      '成熟': { 'male': '成熟稳重的男声', 'female': '成熟优雅的女声', 'neutral': '成熟专业的中性声音' },
+      '年轻': { 'male': '年轻活力的男声', 'female': '年轻清新的女声', 'neutral': '年轻活泼的中性声音' },
+      '磁性': { 'male': '磁性迷人的男声', 'female': '磁性魅力的女声', 'neutral': '磁性吸引的中性声音' },
+      '阳光': { 'male': '阳光开朗的男声', 'female': '阳光甜美的女声', 'neutral': '阳光积极的中性声音' },
+      '优雅': { 'male': '优雅绅士的男声', 'female': '优雅高贵的女声', 'neutral': '优雅精致的中性声音' },
+      '亲切': { 'male': '亲切和蔼的男声', 'female': '亲切温暖的女声', 'neutral': '亲切友好的中性声音' },
+      '专业': { 'male': '专业权威的男声', 'female': '专业干练的女声', 'neutral': '专业可靠的中性声音' },
+      '幽默': { 'male': '幽默风趣的男声', 'female': '幽默可爱的女声', 'neutral': '幽默有趣的中性声音' },
+      '严肃': { 'male': '严肃认真的男声', 'female': '严肃庄重的女声', 'neutral': '严肃正式的中性声音' },
+      '轻松': { 'male': '轻松随意的男声', 'female': '轻松自然的女声', 'neutral': '轻松舒适的中性声音' },
+      '激情': { 'male': '激情澎湃的男声', 'female': '激情活力的女声', 'neutral': '激情四射的中性声音' },
+      '安静': { 'male': '安静沉稳的男声', 'female': '安静温柔的女声', 'neutral': '安静平和的中性声音' },
+      '自信': { 'male': '自信有力的男声', 'female': '自信优雅的女声', 'neutral': '自信坚定的中性声音' },
+      '温暖': { 'male': '温暖和煦的男声', 'female': '温暖甜美的女声', 'neutral': '温暖舒适的中性声音' },
+      '清新': { 'male': '清新自然的男声', 'female': '清新甜美的女声', 'neutral': '清新明亮的中性声音' }
+    };
+    
+    let description: string = '';
+    const styleDesc: Record<string, string> | undefined = styleDescriptions[style];
+    if (styleDesc) {
+      const genderDesc: string | undefined = styleDesc[gender];
+      if (genderDesc) {
+        description = genderDesc;
+      } else {
+        if (gender === 'male') {
+          description = `${style}大气的男声`;
+        } else if (gender === 'female') {
+          description = `${style}甜美的女声`;
+        } else {
+          description = `${style}流畅的中性声音`;
+        }
+      }
+    } else {
+      if (gender === 'male') {
+        description = `${style}大气的男声`;
+      } else if (gender === 'female') {
+        description = `${style}甜美的女声`;
+      } else {
+        description = `${style}流畅的中性声音`;
+      }
+    }
+    
+    const result: VoiceInfoInference = {
+      gender: gender,
+      style: style,
+      displayName: displayName,
+      description: description
+    };
+    return result;
   }
 }
 

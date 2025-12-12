@@ -3521,59 +3521,24 @@ export struct PodcastCreatePage {
             }
             .width('100%')
 
-            Row({ space: 12 }) {
-              TextInput({
-                placeholder: '请输入或粘贴链接地址...',
-                text: this.inputUrl
-              })
-                .layoutWeight(1)
-                .height(52)
-                .backgroundColor('#FAFAFA')
-                .borderRadius(16)
-                .border({
-                  width: 1,
-                  color: '#E0E0E0',
-                  style: BorderStyle.Solid
-                })
-                .fontSize(15)
-                .padding({ left: 16, right: 16 })
-                .onChange((value: string) => {
-                  this.inputUrl = value;
-                })
-
-              Button() {
-                Row({ space: 6 }) {
-                  Image($r("sys.symbol.doc_text"))
-                    .width(18)
-                    .height(18)
-                    .fillColor('#FFFFFF')
-                  Text('粘贴')
-                    .fontSize(15)
-                    .fontWeight(FontWeight.Medium)
-                    .fontColor('#FFFFFF')
-                }
-              }
-              .type(ButtonType.Normal)
+            TextInput({
+              placeholder: '请输入链接地址...',
+              text: this.inputUrl
+            })
+              .width('100%')
               .height(52)
-              .linearGradient({
-                angle: 90,
-                colors: [
-                  ['#ffb3e0', 0.0],
-                  ['#ffc78cfd', 0.6],
-                  ['#a0e5ff', 1.0]
-                ]
-              })
+              .backgroundColor('#FAFAFA')
               .borderRadius(16)
-              .padding({ left: 20, right: 20 })
-              .shadow({
-                radius: 14,
-                color: '#1F000000',
-                offsetX: 0,
-                offsetY: 20
+              .border({
+                width: 1,
+                color: '#E0E0E0',
+                style: BorderStyle.Solid
               })
-              .onClick(() => this.pasteLink())
-            }
-            .width('100%')
+              .fontSize(15)
+              .padding({ left: 16, right: 16 })
+              .onChange((value: string) => {
+                this.inputUrl = value;
+              })
           }
           .width('100%')
           .padding({
@@ -3671,59 +3636,24 @@ export struct PodcastCreatePage {
             }
             .width('100%')
 
-            Row({ space: 12 }) {
-              TextInput({
-                placeholder: '请输入或粘贴微信公众号文章链接...',
-                text: this.inputUrl
-              })
-                .layoutWeight(1)
-                .height(52)
-                .backgroundColor('#FAFAFA')
-                .borderRadius(16)
-                .border({
-                  width: 1,
-                  color: '#E0E0E0',
-                  style: BorderStyle.Solid
-                })
-                .fontSize(15)
-                .padding({ left: 16, right: 16 })
-                .onChange((value: string) => {
-                  this.inputUrl = value;
-                })
-
-              Button() {
-                Row({ space: 6 }) {
-                  Image($r("sys.symbol.doc_text"))
-                    .width(18)
-                    .height(18)
-                    .fillColor('#FFFFFF')
-                  Text('粘贴')
-                    .fontSize(15)
-                    .fontWeight(FontWeight.Medium)
-                    .fontColor('#FFFFFF')
-                }
-              }
-              .type(ButtonType.Normal)
+            TextInput({
+              placeholder: '请输入微信公众号文章链接...',
+              text: this.inputUrl
+            })
+              .width('100%')
               .height(52)
-              .linearGradient({
-                angle: 90,
-                colors: [
-                  ['#ffb3e0', 0.0],
-                  ['#ffc78cfd', 0.6],
-                  ['#a0e5ff', 1.0]
-                ]
-              })
+              .backgroundColor('#FAFAFA')
               .borderRadius(16)
-              .padding({ left: 20, right: 20 })
-              .shadow({
-                radius: 14,
-                color: '#1F000000',
-                offsetX: 0,
-                offsetY: 20
+              .border({
+                width: 1,
+                color: '#E0E0E0',
+                style: BorderStyle.Solid
               })
-              .onClick(() => this.pasteLink())
-            }
-            .width('100%')
+              .fontSize(15)
+              .padding({ left: 16, right: 16 })
+              .onChange((value: string) => {
+                this.inputUrl = value;
+              })
           }
           .width('100%')
           .padding({

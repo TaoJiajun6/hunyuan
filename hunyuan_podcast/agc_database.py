@@ -29,7 +29,8 @@ class AGCDatabaseClient:
         product_id: Optional[str] = None,
         domain: Optional[str] = None,
         cloud_db_zone: str = "cloudDBZone",
-        api_key: Optional[str] = None
+        api_key: Optional[str] = None,
+        app_ver: Optional[int] = None
     ):
         """
         初始化AGC云数据库客户端
@@ -41,12 +42,21 @@ class AGCDatabaseClient:
             domain: AGC API域名，默认 connect-drcn.dbankcloud.cn
             cloud_db_zone: CloudDB存储区名称，默认 cloudDBZone
             api_key: 服务端 API Key（用于CloudDB REST API，优先级高于OAuth client_id）
+            app_ver: 对象类型版本号（从AGC控制台导出对象类型时获取），默认从环境变量AGC_APP_VER读取，如果都没有则使用1
         
         注意：CloudDB REST API 需要使用服务端 API Key，而不是 OAuth client_id。
         请在 AGC 控制台 > 我的项目 > API管理 > 凭据 中创建服务端 API Key。
         """
         # 优先使用 API Key（服务端认证）
         self.api_key = api_key or os.getenv('AGC_API_KEY')
+        
+        # 对象类型版本号（从AGC控制台导出对象类型时获取）
+        # 如果未提供，尝试从环境变量读取，否则使用默认值1
+        if app_ver is not None:
+            self.app_ver = app_ver
+        else:
+            env_app_ver = os.getenv('AGC_APP_VER')
+            self.app_ver = int(env_app_ver) if env_app_ver and env_app_ver.isdigit() else 1
         
         # OAuth 凭证（用于获取 token，如果未提供 API Key）
         # 云数据库优先使用专用的client_id和client_secret，如果没有则使用通用的
@@ -344,7 +354,7 @@ class AGCDatabaseClient:
                     }
                 },
                 "clientInfo": {
-                    "appVer": 1
+                    "appVer": self.app_ver
                 },
                 "schemas": [self._get_schema()],
                 "opData": [
@@ -389,6 +399,22 @@ class AGCDatabaseClient:
                 logger.error(f"  resInfo.resCode: {res_code}")
                 logger.error(f"  updateResMsg.successRecCount: {success_count}")
                 logger.error(f"  错误信息: {error_msg}")
+                
+                # 如果是 Schema 不匹配错误（1006003），输出详细的 Schema 信息
+                if res_code == 1006003:
+                    logger.error(f"  ⚠️ Schema 不匹配错误 (1006003)")
+                    logger.error(f"  当前使用的 Schema:")
+                    logger.error(f"    appVer: {self.app_ver}")
+                    logger.error(f"    Schema 定义: {json.dumps(self._get_schema(), ensure_ascii=False, indent=4)}")
+                    logger.error(f"  请检查:")
+                    logger.error(f"    1. appVer 版本号是否正确（从AGC控制台导出对象类型时获取）")
+                    logger.error(f"    2. Schema 字段顺序是否与云端一致")
+                    logger.error(f"    3. Schema 字段类型是否匹配")
+                    logger.error(f"    4. 是否缺少必需字段")
+                    logger.error(f"  解决方案:")
+                    logger.error(f"    - 在AGC控制台 > 云数据库 > 对象类型 > 导出，查看版本号")
+                    logger.error(f"    - 设置环境变量 AGC_APP_VER=版本号，或通过代码传入 app_ver 参数")
+                
                 logger.error(f"  完整响应: {json.dumps(result, ensure_ascii=False, indent=2)}")
                 logger.error(f"  播客数据ID: {podcast_data.get('id')}")
                 logger.error(f"  播客数据标题: {podcast_data.get('title')}")
@@ -477,7 +503,7 @@ class AGCDatabaseClient:
                     }
                 },
                 "clientInfo": {
-                    "appVer": 1
+                    "appVer": self.app_ver
                 },
                 "queryReqMsg": {
                     "queryType": 0,
@@ -608,7 +634,7 @@ class AGCDatabaseClient:
                     }
                 },
                 "clientInfo": {
-                    "appVer": 1
+                    "appVer": self.app_ver
                 },
                 "queryReqMsg": {
                     "queryType": 0,
@@ -757,7 +783,7 @@ class AGCDatabaseClient:
                     }
                 },
                 "clientInfo": {
-                    "appVer": 1
+                    "appVer": self.app_ver
                 },
                 "schemas": [delete_schema],
                 "opData": [
