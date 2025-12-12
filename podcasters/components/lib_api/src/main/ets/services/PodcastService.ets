@@ -1593,9 +1593,24 @@ export class PodcastService {
               const result = JSON.parse(data.result.toString()) as ApiResponse<VoiceListResponseData>;
               if (result.success && result.data && result.data.voices) {
                 Logger.info(TAG, `获取到 ${result.data.voices.length} 个音色文件`);
+                // 统计各性别的数量
+                const maleCount = result.data.voices.filter(v => v.gender === 'male').length;
+                const femaleCount = result.data.voices.filter(v => v.gender === 'female').length;
+                const neutralCount = result.data.voices.filter(v => v.gender === 'neutral').length;
+                Logger.info(TAG, `音色性别统计: 男声=${maleCount}, 女声=${femaleCount}, 中性=${neutralCount}`);
+                // 添加调试日志，打印前几个音色的详细信息
+                if (result.data.voices.length > 0) {
+                  Logger.info(TAG, `音色列表示例（前10个）:`);
+                  for (let i = 0; i < Math.min(10, result.data.voices.length); i++) {
+                    const voice = result.data.voices[i];
+                    Logger.info(TAG, `  [${i}] id=${voice.id}, name=${voice.name}, gender=${voice.gender}, style=${voice.style}, file=${voice.file}`);
+                  }
+                }
                 resolve(result.data.voices);
               } else {
                 Logger.warn(TAG, `获取音色列表返回空数据: ${JSON.stringify(result)}`);
+                // 添加详细日志
+                Logger.warn(TAG, `result.success=${result.success}, result.data=${JSON.stringify(result.data)}`);
                 resolve([]);
               }
             } catch (parseError) {

@@ -3952,12 +3952,17 @@ async def list_voice_files():
             # 从文件名推断信息
             filename_lower = filename.lower()
             
-            # 推断性别
+            # 推断性别（优先检查 female，因为 female 包含 male 子串）
             gender = 'neutral'
-            if 'male' in filename_lower or '男' in filename or '男声' in filename:
-                gender = 'male'
-            elif 'female' in filename_lower or '女' in filename or '女声' in filename:
+            # 先检查 female（更具体），避免误匹配
+            if 'female' in filename_lower or '女' in filename or '女声' in filename:
                 gender = 'female'
+                logger.info(f"音色文件 {filename} 识别为女声")
+            elif 'male' in filename_lower or '男' in filename or '男声' in filename:
+                gender = 'male'
+                logger.info(f"音色文件 {filename} 识别为男声")
+            else:
+                logger.info(f"音色文件 {filename} 未识别到性别，使用默认: 中性")
             
             # 推断风格（扩展更多风格类型，按优先级排序）
             style = '自然'  # 默认风格
@@ -3967,7 +3972,7 @@ async def list_voice_files():
                 '活泼': ['活泼', 'lively', 'energetic', 'cheerful', 'vibrant'],
                 '温柔': ['温柔', 'gentle', 'sweet', 'tender', 'soft'],
                 '知性': ['知性', 'intelligent', 'wise', 'sophisticated'],
-                '自然': ['自然', 'natural', 'normal', 'casual', 'relaxed'],
+                '自然': ['自然', 'natural', 'normal', 'casual', 'relaxed', 'mandarin', '普通话'],  # 添加 mandarin 和 普通话
                 '成熟': ['成熟', 'mature', 'adult'],
                 '年轻': ['年轻', 'young', 'youthful', 'fresh'],
                 '磁性': ['磁性', 'magnetic', 'charming', 'attractive', 'sexy'],
@@ -4067,6 +4072,16 @@ async def list_voice_files():
         voices.sort(key=lambda x: (x['gender'], x['style'], x['name']))
         
         logger.info(f"获取到 {len(voices)} 个音色文件")
+        # 统计各性别的数量
+        male_count = sum(1 for v in voices if v['gender'] == 'male')
+        female_count = sum(1 for v in voices if v['gender'] == 'female')
+        neutral_count = sum(1 for v in voices if v['gender'] == 'neutral')
+        logger.info(f"音色性别统计: 男声={male_count}, 女声={female_count}, 中性={neutral_count}")
+        # 添加调试日志，打印前几个音色的详细信息
+        if len(voices) > 0:
+            logger.info(f"音色列表示例（前10个）:")
+            for i, voice in enumerate(voices[:10]):
+                logger.info(f"  [{i}] id={voice['id']}, name={voice['name']}, gender={voice['gender']}, style={voice['style']}, file={voice['file']}")
         
         return ApiResponse(
             success=True,

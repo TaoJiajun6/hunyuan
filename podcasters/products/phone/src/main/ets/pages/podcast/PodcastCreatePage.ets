@@ -227,6 +227,19 @@ export struct PodcastCreatePage {
         Logger.warn('PodcastCreatePage', '未获取到音色列表，将使用预设音色');
       } else {
         Logger.info('PodcastCreatePage', `成功加载 ${this.voiceList.length} 个音色`);
+        // 统计各性别的数量
+        const maleCount = this.voiceList.filter(v => v.gender === 'male').length;
+        const femaleCount = this.voiceList.filter(v => v.gender === 'female').length;
+        const neutralCount = this.voiceList.filter(v => v.gender === 'neutral').length;
+        Logger.info('PodcastCreatePage', `音色性别统计: 男声=${maleCount}, 女声=${femaleCount}, 中性=${neutralCount}`);
+        // 添加调试日志，打印前几个音色的详细信息
+        if (this.voiceList.length > 0) {
+          Logger.info('PodcastCreatePage', `音色列表示例（前10个）:`);
+          for (let i = 0; i < Math.min(10, this.voiceList.length); i++) {
+            const voice = this.voiceList[i];
+            Logger.info('PodcastCreatePage', `  [${i}] id=${voice.id}, name=${voice.name}, gender=${voice.gender}, style=${voice.style}, file=${voice.file}`);
+          }
+        }
       }
     } catch (error) {
       Logger.error('PodcastCreatePage', `加载音色列表失败: ${error}`);
@@ -770,6 +783,9 @@ export struct PodcastCreatePage {
           message: `${roleName}自定义音色已上传`,
           duration: 2000
         });
+        
+        // 上传成功后，刷新音色列表
+        await this.loadVoiceList();
       }
     } catch (error) {
       promptAction.showToast({
@@ -814,6 +830,9 @@ export struct PodcastCreatePage {
           message: `${this.characters[index].name || '角色'}音色已选择`,
           duration: 2000
         });
+        
+        // 上传成功后，刷新音色列表
+        await this.loadVoiceList();
       }
     } catch (error) {
       promptAction.showToast({
@@ -932,6 +951,9 @@ export struct PodcastCreatePage {
             message: '录制完成并已上传到云存储',
             duration: 2000
           });
+          
+          // 上传成功后，刷新音色列表
+          await this.loadVoiceList();
         } else {
           promptAction.showToast({
             message: '录制完成，但上传失败',
@@ -1897,22 +1919,40 @@ export struct PodcastCreatePage {
                 .alignItems(HorizontalAlign.Start)
                 .justifyContent(FlexAlign.Center)
 
-                Button('上传自定义音色')
-                  .type(ButtonType.Normal)
-                  .fontSize(13)
-                  .backgroundColor('#FFFFFF')
-                  .fontColor('#666666')
-                  .borderRadius(20)
-                  .border({
-                    width: 1,
-                    color: '#E0E0E0',
-                    style: BorderStyle.Solid
-                  })
-                  .padding({ left: 16, right: 16 })
-                  .height(36)
-                  .onClick(() => {
-                    this.selectVoiceFile(roleName);
-                  })
+                Row({ space: 8 }) {
+                  Button('刷新')
+                    .type(ButtonType.Normal)
+                    .fontSize(12)
+                    .backgroundColor('#F5F5F5')
+                    .fontColor('#666666')
+                    .borderRadius(16)
+                    .padding({ left: 12, right: 12 })
+                    .height(32)
+                    .onClick(async () => {
+                      await this.loadVoiceList();
+                      promptAction.showToast({
+                        message: '音色列表已刷新',
+                        duration: 1500
+                      });
+                    })
+                  
+                  Button('上传自定义音色')
+                    .type(ButtonType.Normal)
+                    .fontSize(13)
+                    .backgroundColor('#FFFFFF')
+                    .fontColor('#666666')
+                    .borderRadius(20)
+                    .border({
+                      width: 1,
+                      color: '#E0E0E0',
+                      style: BorderStyle.Solid
+                    })
+                    .padding({ left: 16, right: 16 })
+                    .height(36)
+                    .onClick(() => {
+                      this.selectVoiceFile(roleName);
+                    })
+                }
               }
               .width('100%')
 
@@ -2534,22 +2574,40 @@ export struct PodcastCreatePage {
                 .alignItems(HorizontalAlign.Start)
                 .justifyContent(FlexAlign.Center)
 
-                Button('上传自定义音色')
-                  .type(ButtonType.Normal)
-                  .fontSize(13)
-                  .backgroundColor('#FFFFFF')
-                  .fontColor('#666666')
-                  .borderRadius(20)
-                  .border({
-                    width: 1,
-                    color: '#E0E0E0',
-                    style: BorderStyle.Solid
-                  })
-                  .padding({ left: 16, right: 16 })
-                  .height(36)
-                  .onClick(() => {
-                    this.selectVoiceFile(roleName);
-                  })
+                Row({ space: 8 }) {
+                  Button('刷新')
+                    .type(ButtonType.Normal)
+                    .fontSize(12)
+                    .backgroundColor('#F5F5F5')
+                    .fontColor('#666666')
+                    .borderRadius(16)
+                    .padding({ left: 12, right: 12 })
+                    .height(32)
+                    .onClick(async () => {
+                      await this.loadVoiceList();
+                      promptAction.showToast({
+                        message: '音色列表已刷新',
+                        duration: 1500
+                      });
+                    })
+                  
+                  Button('上传自定义音色')
+                    .type(ButtonType.Normal)
+                    .fontSize(13)
+                    .backgroundColor('#FFFFFF')
+                    .fontColor('#666666')
+                    .borderRadius(20)
+                    .border({
+                      width: 1,
+                      color: '#E0E0E0',
+                      style: BorderStyle.Solid
+                    })
+                    .padding({ left: 16, right: 16 })
+                    .height(36)
+                    .onClick(() => {
+                      this.selectVoiceFile(roleName);
+                    })
+                }
               }
               .width('100%')
 
