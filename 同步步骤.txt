@@ -1,0 +1,30 @@
+=== 将本地代码同步到目标仓库 ===
+
+目标仓库：https://openatom.tech/tencent-hunyuan-ai-podcast/edd7c1ae12ad8aaee84c9f1e4bf473a0.git
+
+请在 PowerShell 中按顺序执行以下命令：
+
+1. 克隆目标仓库到临时目录
+cd ..
+git clone https://openatom.tech/tencent-hunyuan-ai-podcast/edd7c1ae12ad8aaee84c9f1e4bf473a0.git temp-target-repo
+cd temp-target-repo
+
+2. 切换到 master 分支
+git checkout master
+
+3. 删除旧的 hunyuan 文件夹（如果存在）
+Remove-Item -Recurse -Force hunyuan -ErrorAction SilentlyContinue
+
+4. 复制本地所有文件到目标仓库
+robocopy ..\hunyuan\hunyuan hunyuan /E /XD .git __pycache__ .cursor .idea node_modules /XF .gitignore
+
+5. 添加、提交并推送
+git add .
+git commit -m "优化鸿蒙端UI，更新文档"
+git push origin master
+
+6. 清理临时目录（可选）
+cd ..
+Remove-Item -Recurse -Force temp-target-repo
+cd hunyuan
+
