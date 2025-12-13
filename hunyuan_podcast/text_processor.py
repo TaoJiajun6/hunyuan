@@ -34,6 +34,40 @@ class TextProcessor:
         """初始化文本处理器"""
         pass
     
+    def _is_serious_topic(self, topic: Optional[str], text: Optional[str] = None) -> bool:
+        """
+        检测话题是否属于严肃/沉重的话题
+        
+        Args:
+            topic: 话题文本
+            text: 文本素材（可选，用于辅助判断）
+        
+        Returns:
+            True表示严肃话题，False表示轻松话题
+        """
+        if not topic and not text:
+            return False
+        
+        # 严肃话题关键词
+        serious_keywords = [
+            '大屠杀', '屠杀', '战争', '灾难', '死亡', '悲剧', '惨案', '遇难', '牺牲',
+            '地震', '海啸', '洪水', '火灾', '疫情', '瘟疫', '疾病', '癌症',
+            '恐怖', '暴力', '犯罪', '谋杀', '自杀', '虐待',
+            '历史', '纪念', '哀悼', '缅怀', '沉重', '严肃', '悲痛', '悲伤'
+        ]
+        
+        # 检查话题
+        content_to_check = (topic or "").lower()
+        if text:
+            content_to_check += " " + (text[:500] or "").lower()  # 只检查文本前500字符
+        
+        # 如果包含严肃关键词，判断为严肃话题
+        for keyword in serious_keywords:
+            if keyword in content_to_check:
+                return True
+        
+        return False
+    
     def number_to_chinese(self, num_str: str) -> str:
         """
         将数字字符串转换为中文读音，确保数字读完整、正确
@@ -324,13 +358,19 @@ class TextProcessor:
                      lambda m: f"{''.join([self.DIGIT_TO_CHINESE.get(d, d) for d in m.group(1)])}年{self.number_to_chinese(m.group(2))}月{self.number_to_chinese(m.group(3))}日", 
                      text)
         
-        # 1.5 处理仅包含年份的场景（如 "2024年"）
+        # 1.5 处理仅包含年份的场景（如 "2024年"、"2015年"）
+        # 年份必须按位读取，如2015年读作"二零一五年"，不能读作"两千零一十五年"
+        # 注意：这个处理必须在带单位的数字处理之前，确保年份不会被当作普通数字处理
         def replace_year_only(match):
             year = match.group(1)
+            # 年份按位转换为中文，确保正确读取
             year_chinese = ''.join([self.DIGIT_TO_CHINESE.get(d, d) for d in year])
             return f"{year_chinese}年"
         
-        text = re.sub(r'(\d{3,4})\s*年(?!\d)', replace_year_only, text)
+        # 匹配年份：3-4位数字后跟"年"字，且"年"后不是数字
+        # 使用更精确的匹配，确保年份不会被当作普通数字处理
+        # 使用负向后顾确保前面不是数字，避免匹配到日期中的年份
+        text = re.sub(r'(?<!\d)(\d{3,4})\s*年(?!\d)', replace_year_only, text)
         
         # 1.6 处理简单分数（如 1/6 -> 六分之一）
         def replace_fraction(match):
@@ -451,11 +491,12 @@ class TextProcessor:
         # 匹配：数字 + 中文单位（长度、重量、时间、面积、体积等）
         # 长度单位：英寸、厘米、毫米、米、千米、公里、分米、公分、尺、寸
         # 重量单位：千克、公斤、克、吨、斤、两
-        # 时间单位：小时、分钟、秒、天、年、月、周
+        # 时间单位：小时、分钟、秒、天、月、周（注意：年份已在前面单独处理，这里不包含"年"）
         # 面积单位：平方米、平方厘米、平方千米、平方公里、亩
         # 体积单位：立方米、升、毫升
         # 其他单位：瓦、千瓦、赫兹、MHz、GHz、像素、DPI等
-        unit_pattern = r'(英寸|厘米|毫米|米|千米|公里|分米|公分|尺|寸|千克|公斤|克|吨|斤|两|小时|分钟|秒|天|年|月|周|平方米|平方厘米|平方千米|平方公里|亩|立方米|升|毫升|瓦|千瓦|赫兹|MHz|GHz|像素|DPI|dpi)'
+        # 注意：年份（如"2015年"）已在前面单独处理，这里不包含"年"字，避免重复处理
+        unit_pattern = r'(英寸|厘米|毫米|米|千米|公里|分米|公分|尺|寸|千克|公斤|克|吨|斤|两|小时|分钟|秒|天|月|周|平方米|平方厘米|平方千米|平方公里|亩|立方米|升|毫升|瓦|千瓦|赫兹|MHz|GHz|像素|DPI|dpi)'
         text = re.sub(r'(\d+\.?\d*)' + unit_pattern, replace_number_with_unit, text)
         
         # 3. 处理百分比：如 50% -> 百分之五十，87% -> 百分之八十七
@@ -1291,6 +1332,9 @@ class TextProcessor:
         
         role_list = "、".join(role_names)
         
+        # 检测话题严肃性，用于调整开场模板
+        is_serious = self._is_serious_topic(topic, text)
+        
         # 构建播客基本信息部分
         podcast_info = ""
         if podcast_name:
@@ -1473,10 +1517,10 @@ class TextProcessor:
 **重要**：在开场自我介绍时，必须使用角色的虚拟名字（不是角色标记名）。每个角色的虚拟名字如下：
 {chr(10).join([f"- {role_names[i]}的虚拟名字：{role_virtual_names[i]}" for i in range(num_characters)])}
 
-开场示例：
+开场示例（仅供参考，请根据话题特点自然开场）：
 [{role_names[0]}]大家好，欢迎收听《{podcast_name if podcast_name else "本期播客"}》！我是{role_virtual_names[0]}。
-{chr(10) + f"[{role_names[1]}]我是{role_virtual_names[1]}。今天我们要聊一个很有意思的话题：{topic if topic else '[本期主题]'}。" if num_characters >= 2 else ""}
-[{role_names[0]}]没错！说到这个话题，我最近发现...[自然引入主题]
+{chr(10) + f"[{role_names[1]}]我是{role_virtual_names[1]}。今天我们要聊的是{topic if topic else '[本期主题]'}。" if num_characters >= 2 else ""}
+[{role_names[0]}][根据话题特点自然引入，可以是：分享观点、提出问题、讲述背景、表达感受等，要符合话题的严肃性或轻松性]
 
 [讨论主体 - 必须严格按照文本素材的内容展开，包含文本素材中提到的具体事实、数据、事件、观点等，不能偏离文本素材的主题。如果文本素材是书籍，选择最核心的情节、角色或主题进行讨论。时长根据用户指令确定：如果指令要求"1分钟"或"一分钟以内"，则只讨论最核心的内容，对话总字数控制在400-600字；如果指令要求"5分钟"或更长，则可以更详细地展开讨论；**如果没有指定时长，默认生成5-8分钟的对话内容，对话总字数约3000-4500字，每个角色发言12-15次，总共约{num_characters * 14}段对话**。]
 
@@ -1488,6 +1532,7 @@ class TextProcessor:
 - 在开场自我介绍时，必须使用上述虚拟名字（{role_virtual_names[0]}{f"、{role_virtual_names[1]}" if num_characters >= 2 else ""}{f"、{role_virtual_names[2]}" if num_characters >= 3 else ""}）
 - 不能使用占位符如"[角色A名字]"或"[角色B名字]"，必须直接使用实际的虚拟名字
 - 对话标记必须使用 {role_list}，自我介绍内容里要说出对应的虚拟名字
+- **开场要自然灵活**：不要使用固定的模板化表述（如"很有意思的话题"、"很重要的话题"等），要根据话题特点自然开场。对于严肃话题（如历史事件、社会问题），开场要庄重、尊重；对于轻松话题，可以更活泼、有趣。开场方式可以多样化：直接介绍话题、提出问题、分享背景、表达感受等，让对话更真实自然
 
 二、对话质量要求
 
