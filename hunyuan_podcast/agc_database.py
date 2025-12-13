@@ -167,7 +167,6 @@ class AGCDatabaseClient:
                 {"n": "file_size_mb", "t": "TYPE_DOUBLE"},
                 {"n": "topic", "t": "TYPE_STRING"},
                 {"n": "roles", "t": "TYPE_STRING"},  # JSON字符串
-                {"n": "cover_image_url", "t": "TYPE_STRING"},  # 封面图URL
                 {"n": "naturalbase_version", "t": "TYPE_LONG"},
                 {"n": "naturalbase_deleted", "t": "TYPE_BOOLEAN"}
             ]
@@ -220,7 +219,6 @@ class AGCDatabaseClient:
                 {"d": file_size_mb},  # file_size_mb (浮点数或None)
                 {"s": str(podcast_data.get('topic') or '')},  # topic
                 {"s": str(roles_str)},  # roles (JSON字符串)
-                {"s": str(podcast_data.get('cover_image_url') or '')},  # cover_image_url (封面图URL)
                 {"l": None},  # naturalbase_version
                 {"bl": False}  # naturalbase_deleted
             ]
@@ -239,10 +237,10 @@ class AGCDatabaseClient:
         fs = clouddb_data.get('fs', [])
         logger.debug(f"转换CloudDB数据，字段数量: {len(fs)}")
         
-        # 字段数量应该至少是13个（不包括naturalbase_version和naturalbase_deleted）
+        # 字段数量应该至少是12个（不包括naturalbase_version和naturalbase_deleted）
         # 但为了兼容性，我们允许更少的字段（兼容旧数据）
-        if len(fs) < 12:
-            logger.warning(f"字段数量不足: {len(fs)} < 12，原始数据: {json.dumps(clouddb_data, ensure_ascii=False)}")
+        if len(fs) < 11:
+            logger.warning(f"字段数量不足: {len(fs)} < 11，原始数据: {json.dumps(clouddb_data, ensure_ascii=False)}")
             return {}
         
         # 解析roles字段（索引11）
@@ -287,8 +285,7 @@ class AGCDatabaseClient:
             'script': fs[8].get('s', '') if len(fs) > 8 else '',
             'file_size_mb': fs[9].get('d') if len(fs) > 9 else None,
             'topic': fs[10].get('s', '') if len(fs) > 10 else '',
-            'roles': roles,
-            'cover_image_url': fs[12].get('s', '') if len(fs) > 12 else ''  # cover_image_url (索引12)
+            'roles': roles
         }
         
         logger.debug(f"转换后的播客数据: {json.dumps(podcast, ensure_ascii=False, default=str)}")
@@ -673,20 +670,21 @@ class AGCDatabaseClient:
                         podcast = self._convert_from_clouddb_format(obj)
                         if podcast:
                             # 在内存中过滤：只保留未删除的记录
-                            # 检查 naturalbase_deleted 字段（索引13）
+                            # 检查 naturalbase_deleted 字段
                             fs = obj.get('fs', [])
                             is_deleted = False
-                            # 字段顺序：0-12为业务字段，13为naturalbase_version，14为naturalbase_deleted
-                            # 新结构（14个字段）：0-12业务字段 + 13 naturalbase_version + 14 naturalbase_deleted
-                            # 旧结构（13个字段）：0-11业务字段 + 12 naturalbase_version + 13 naturalbase_deleted（已废弃）
-                            if len(fs) > 14:
-                                is_deleted = fs[14].get('bl', False)  # 新结构：naturalbase_deleted在索引14
-                            elif len(fs) == 14:
-                                is_deleted = fs[13].get('bl', False)  # 如果只有14个字段，检查索引13（应该是naturalbase_version，但兼容处理）
-                            elif len(fs) > 13:
-                                is_deleted = fs[13].get('bl', False)  # 旧结构兼容：naturalbase_deleted在索引13
+                            # 字段顺序：0-11为业务字段，12为naturalbase_version，13为naturalbase_deleted
+                            # 新结构（13个字段）：0-11业务字段 + 12 naturalbase_version + 13 naturalbase_deleted
+                            # 旧结构（14个字段）：0-12业务字段 + 13 naturalbase_version + 14 naturalbase_deleted（包含cover_image_url，已废弃）
+                            # 旧结构（12个字段）：0-10业务字段 + 11 naturalbase_version + 12 naturalbase_deleted（更旧的版本）
+                            if len(fs) > 13:
+                                is_deleted = fs[13].get('bl', False)  # 新结构：naturalbase_deleted在索引13
                             elif len(fs) == 13:
-                                is_deleted = fs[12].get('bl', False)  # 旧结构兼容：如果只有13个字段，naturalbase_deleted在索引12
+                                is_deleted = fs[12].get('bl', False)  # 如果只有13个字段，检查索引12（应该是naturalbase_version，但兼容处理）
+                            elif len(fs) > 12:
+                                is_deleted = fs[12].get('bl', False)  # 旧结构兼容：naturalbase_deleted在索引12
+                            elif len(fs) == 12:
+                                is_deleted = fs[11].get('bl', False)  # 旧结构兼容：如果只有12个字段，naturalbase_deleted在索引11
                             
                             if not is_deleted:
                                 logger.debug(f"  转换后的播客数据: {json.dumps(podcast, ensure_ascii=False, indent=2)}")

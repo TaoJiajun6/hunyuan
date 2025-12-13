@@ -2596,17 +2596,18 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
             # 尝试获取音频时长
             duration_seconds = get_audio_duration(output_path)
             
-            # 生成封面图
-            cover_image_url = await generate_and_upload_cover_image(
-                podcast_id=podcast_id,
-                podcast_title=podcast_title,
-                text_content=text_content,
-                topic=request.topic,
-                category=request.category,
-                roles=list(roles) if roles else None,
-                background_tasks=background_tasks,
-                request_job_id=request.job_id
-            )
+            # 生成封面图（暂时禁用）
+            # cover_image_url = await generate_and_upload_cover_image(
+            #     podcast_id=podcast_id,
+            #     podcast_title=podcast_title,
+            #     text_content=text_content,
+            #     topic=request.topic,
+            #     category=request.category,
+            #     roles=list(roles) if roles else None,
+            #     background_tasks=background_tasks,
+            #     request_job_id=request.job_id
+            # )
+            cover_image_url = None  # 暂时不生成封面图
             
             podcast_metadata = {
                 "id": podcast_id,  # 使用独立的podcast_id作为数据库id
@@ -2620,8 +2621,8 @@ async def generate_multi_role_podcast(request: MultiRoleRequest, background_task
                 "script": text_content,
                 "file_size_mb": round(file_size, 2),
                 "topic": request.topic,
-                "roles": list(roles),
-                "cover_image_url": cover_image_url  # 添加封面图URL
+                "roles": list(roles)
+                # "cover_image_url": cover_image_url  # 已移除：数据库不再包含此字段
             }
             
             # 保存到AGC云数据库（如果配置了）
@@ -3027,17 +3028,18 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
             # 获取角色名称列表
             character_names = [char.name for char in request.characters]
             
-            # 生成封面图
-            cover_image_url = await generate_and_upload_cover_image(
-                podcast_id=podcast_id,
-                podcast_title=podcast_title,
-                text_content=cleaned_text,
-                topic=request.topic,
-                category=request.category,
-                roles=character_names,
-                background_tasks=background_tasks,
-                request_job_id=request.job_id
-            )
+            # 生成封面图（暂时禁用）
+            # cover_image_url = await generate_and_upload_cover_image(
+            #     podcast_id=podcast_id,
+            #     podcast_title=podcast_title,
+            #     text_content=cleaned_text,
+            #     topic=request.topic,
+            #     category=request.category,
+            #     roles=character_names,
+            #     background_tasks=background_tasks,
+            #     request_job_id=request.job_id
+            # )
+            cover_image_url = None  # 暂时不生成封面图
             
             podcast_metadata = {
                 "id": podcast_id,  # 使用独立的podcast_id作为数据库id
@@ -3051,8 +3053,8 @@ async def generate_character_podcast(request: CharacterRequest, background_tasks
                 "script": cleaned_text,
                 "file_size_mb": round(file_size, 2),
                 "topic": request.topic,
-                "roles": character_names,
-                "cover_image_url": cover_image_url  # 添加封面图URL
+                "roles": character_names
+                # "cover_image_url": cover_image_url  # 已移除：数据库不再包含此字段
             }
             
             # 保存到AGC云数据库（如果配置了）
@@ -3433,17 +3435,18 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
             # 获取角色名称列表（从解析的对话中提取）
             roles_list = list(unique_roles)
             
-            # 生成封面图
-            cover_image_url = await generate_and_upload_cover_image(
-                podcast_id=podcast_id,
-                podcast_title=podcast_title,
-                text_content=cleaned_text,
-                topic=request.topic,
-                category=request.category,
-                roles=roles_list,
-                background_tasks=background_tasks,
-                request_job_id=request.job_id
-            )
+            # 生成封面图（暂时禁用）
+            # cover_image_url = await generate_and_upload_cover_image(
+            #     podcast_id=podcast_id,
+            #     podcast_title=podcast_title,
+            #     text_content=cleaned_text,
+            #     topic=request.topic,
+            #     category=request.category,
+            #     roles=roles_list,
+            #     background_tasks=background_tasks,
+            #     request_job_id=request.job_id
+            # )
+            cover_image_url = None  # 暂时不生成封面图
             
             podcast_metadata = {
                 "id": podcast_id,  # 使用独立的podcast_id作为数据库id
@@ -3457,8 +3460,8 @@ async def generate_deep_podcast(request: DeepPodcastRequest, background_tasks: B
                 "script": cleaned_text,
                 "file_size_mb": round(file_size, 2),
                 "topic": request.topic,
-                "roles": roles_list,
-                "cover_image_url": cover_image_url  # 添加封面图URL
+                "roles": roles_list
+                # "cover_image_url": cover_image_url  # 已移除：数据库不再包含此字段
             }
             
             # 保存到AGC云数据库（如果配置了）
