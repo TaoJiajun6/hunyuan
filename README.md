@@ -66,22 +66,20 @@ cd hunyuan
 
 #### 2. 安装Python依赖
 
-**方式一: 使用pip(推荐)**
+**使用conda环境(推荐)**
 
 ```bash
+# 创建conda环境
+conda create -n hunyuan python=3.10
+
+# 激活环境
+conda activate hunyuan
+
+# 安装依赖
 pip install -r requirements_podcast.txt
 ```
 
-**方式二: 使用uv(如果需要使用SoulX-Podcast的uv环境)**
-
-```bash
-# 安装uv
-pip install -U uv
-
-# 进入SoulX-Podcast目录
-cd SoulX-Podcast
-uv sync --all-extras
-```
+**注意**: 以后每次使用系统前，都需要先激活conda环境: `conda activate hunyuan`
 
 #### 3. 下载模型文件
 
@@ -223,15 +221,29 @@ VITE_API_BASE_URL=http://localhost:8000
 #### 启动API服务
 
 ```bash
-# 启动API服务(自动检测GPU并优化)
+# 基本启动(自动检测GPU并启用优化)
 python run_api_server.py --host 0.0.0.0 --port 8000
 
-# 使用GPU加速(自动启用FP16和CUDA内核)
-python run_api_server.py --host 0.0.0.0 --port 8000 --fp16 --cuda_kernel
-
-# 多进程模式(支持并发处理)
+# 启用多进程模式(支持并发处理进度查询)
 python run_api_server.py --host 0.0.0.0 --port 8000 --workers 2
+
+# 禁用FP16(如果GPU不支持)
+python run_api_server.py --host 0.0.0.0 --port 8000 --no-fp16
+
+# 禁用CUDA内核加速
+python run_api_server.py --host 0.0.0.0 --port 8000 --no-cuda-kernel
 ```
+
+**启动参数说明**:
+- `--host`: 服务主机地址，默认0.0.0.0(允许外部访问)
+- `--port`: 服务端口，默认8000
+- `--fp16`: 启用FP16精度（GPU加速，检测到GPU时默认启用）
+- `--no-fp16`: 禁用FP16精度
+- `--cuda_kernel`: 启用CUDA内核加速（GPU加速，检测到GPU时默认启用）
+- `--no-cuda-kernel`: 禁用CUDA内核加速
+- `--workers`: 工作进程数，>=2时可并发处理进度查询
+
+**注意**: 系统会自动检测GPU，并在可用时启用FP16和CUDA内核加速，通常无需手动指定这些参数。
 
 启动后访问:
 - **API文档**: http://localhost:8000/docs
@@ -330,9 +342,12 @@ print(f"生成成功!音频文件: {output_path}")
 
 ```typescript
 export class PodcastConfig {
-  static readonly API_BASE_URL: string = 'http://your-api-server:8000';
+  // 使用Cloud Studio端口转发地址(推荐)
+  static readonly API_BASE_URL: string = 'https://${SPACE_KEY}--8000.${REGION}.cloudstudio.work';
+  // 或使用本地/其他服务器地址
+  // static readonly API_BASE_URL: string = 'http://your-api-server:8000';
   static readonly API_TIMEOUT: number = 600000; // 10分钟超时
-  static readonly USE_CLOUD_FUNCTION: boolean = false;
+  static readonly USE_CLOUD_STORAGE: boolean = true; // 使用云存储
 }
 ```
 
@@ -425,15 +440,17 @@ HUNYUAN_FAST_THINKING = True  # 快思考模式，提升速度
 ```python
 # SoulX-Podcast配置
 SOULX_PODCAST_MODEL_DIR = "SoulX-Podcast/pretrained_models/SoulX-Podcast-1.7B"
-SOULX_PODCAST_LLM_ENGINE = "hf"  # 仅支持 "hf" 引擎
-SOULX_PODCAST_FP16_FLOW = True  # 使用FP16精度(推荐GPU)
+SOULX_PODCAST_LLM_ENGINE = "hf"  # 仅支持 "hf" 引擎（vllm 支持已移除）
+SOULX_PODCAST_FP16_FLOW = True  # 使用FP16精度（GPU加速，默认启用）
 ```
+
+**注意**: 系统仅支持HuggingFace引擎，vllm支持已移除。如果环境变量设置为"vllm"，代码会自动转换为"hf"。
 
 ### 音频配置
 
 ```python
 # 音频合成配置
-AUDIO_SILENCE_INTERVAL = 500  # 角色切换时的静音间隔(毫秒)
+AUDIO_SILENCE_INTERVAL = 800  # 角色切换时的静音间隔(毫秒)，默认800ms以保持对话流畅自然
 AUDIO_SAMPLING_RATE = 22050   # 采样率(Hz)
 ```
 
@@ -499,6 +516,16 @@ AGC_CLOUD_DB_ZONE=cloudDBZone
 - [CLOUDDB_SETUP.md](CLOUDDB_SETUP.md) - 云数据库配置
 
 ## 🎯 技术架构
+
+### 核心设计理念
+
+**工作流程**: 文本/素材 → 混元大模型生成脚本 → 音色/背景 → TTS 合成 → 音频输出
+
+**四大设计原则**:
+1. **用户友好原则**: 降低使用门槛、透明化过程、容错设计
+2. **技术实用原则**: 选用成熟技术栈、平衡质量与速度、资源高效利用
+3. **系统健壮原则**: 分层防御、异步解耦、监控可观测
+4. **扩展开放原则**: 模块化设计、标准化接口、配置驱动
 
 ### 核心组件
 
@@ -572,12 +599,17 @@ AGC_CLOUD_DB_ZONE=cloudDBZone
 ## ⚠️ 注意事项
 
 1. **模型文件**: 确保SoulX-Podcast模型文件已正确下载(约3.5GB)
-2. **API密钥**: 确保混元大模型API密钥有效且有足够的调用额度
-3. **音色文件**: 音色参考音频建议使用清晰、无噪音的音频文件(WAV格式,5-30秒)
-4. **GPU支持**: 推荐使用GPU加速，提高生成速度(自动检测并优化)
+2. **API密钥**: 确保混元大模型API密钥有效且有足够的调用额度（从 https://console.cloud.tencent.com/hunyuan/start 获取）
+3. **音色文件**: 
+   - 格式: WAV格式(推荐)，也支持MP3等常见格式
+   - 时长: 5-30秒（推荐20-30秒）
+   - 大小: 最大50MB（服务器端限制）
+   - 质量: 清晰、无噪音的音频文件效果更好
+   - 上传: 必须先上传到云存储，获取URL后使用
+4. **GPU支持**: 推荐使用GPU加速，提高生成速度（系统会自动检测并启用优化）
 5. **网络连接**: 确保网络连接正常，能够访问API服务和云存储
-6. **文件大小**: 音色文件大小限制为10MB(客户端)或50MB(服务器)
-7. **并发控制**: 批量生成时注意GPU显存，可通过`MAX_CONCURRENT_PODCAST_TASKS`环境变量控制
+6. **conda环境**: 推荐使用conda环境管理依赖，避免环境冲突
+7. **并发控制**: 批量生成时注意GPU显存，可通过`MAX_CONCURRENT_PODCAST_TASKS`环境变量控制（默认最多2个并发任务）
 
 ## 🐛 故障排查
 
@@ -621,6 +653,11 @@ AGC_CLOUD_DB_ZONE=cloudDBZone
 
 ## 🙏 致谢
 
+感谢以下组织和技术支持：
+
+- **开放原子大赛组委会** - 提供比赛平台和指导
+- **腾讯云** - 提供混元大模型API和Cloud Studio平台支持
+- **华为云** - 提供AGC云存储和CloudDB服务支持
 - [混元大模型](https://cloud.tencent.com/product/hunyuan) - 腾讯混元大模型
 - [SoulX-Podcast](https://github.com/Soul-AILab/SoulX-Podcast) - SoulX-Podcast语音合成模型
 - [FastAPI](https://fastapi.tiangolo.com) - FastAPI Web框架
@@ -629,27 +666,30 @@ AGC_CLOUD_DB_ZONE=cloudDBZone
 - [HarmonyOS](https://developer.harmonyos.com) - 华为HarmonyOS开发框架
 - [华为AGC](https://developer.huawei.com/consumer/cn/service/josp/agc/index.html) - 华为应用云服务
 
+
 ## 📮 联系方式
 
 如有问题或建议，请通过以下方式联系:
 
-- **Issues**: [GitHub Issues](https://github.com/your-username/hunyuan-podcast/issues)
-- **Email**: (请填写联系方式)
+- **Email**: gavintao@petalmail.com
 
 ## 🔄 更新日志
 
-### v1.1.0 (2025-01)
+### v1.1.0 (2025-12)
 
 - ✅ 新增React Web应用
 - ✅ 实现批量播客生成功能
 - ✅ 实现文本分析功能
 - ✅ 实现智能背景音乐选择
-- ✅ 支持多种输入格式(文件/网页/公众号)
+- ✅ 支持多种输入格式(文件/网页/公众号/PDF/Word)
 - ✅ 集成华为AGC云存储和云数据库
 - ✅ 完善任务管理和进度跟踪
 - ✅ 优化GPU自动检测和配置
+- ✅ 更新为使用conda环境管理依赖
+- ✅ 优化API配置（腾讯云混元API直接调用）
+- ✅ 更新模型配置（仅支持hf引擎）
 
-### v1.0.0 (2025-01)
+### v1.0.0 (2025-11)
 
 - ✅ 实现多角色互动播客生成功能
 - ✅ 实现自定义角色人设播客生成功能
@@ -662,8 +702,10 @@ AGC_CLOUD_DB_ZONE=cloudDBZone
 
 ---
 
-**项目地址**: https://github.com/your-username/hunyuan-podcast
+**开发团队**: 谁更像AI团队（成都锦城学院开放原子开源社团）
 
-**文档地址**: https://github.com/your-username/hunyuan-podcast/wiki
+**项目背景**: 2025开放原子大赛 - 腾讯混元AI播客创新智造挑战赛
 
-**演示地址**: (请填写演示地址)
+---
+
+**最后更新**: 2025年12月
